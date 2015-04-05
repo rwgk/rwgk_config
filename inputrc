@@ -1,0 +1,8 @@
+set bell-style visible
+set completion-ignore-case on
+set show-all-if-ambiguous on
+set bind-tty-special-chars off
+"\C-u":kill-whole-line
+"\en":history-search-forward
+"\ep":history-search-backward
+"\e/":dabbrev-expand

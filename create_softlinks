@@ -1,0 +1,5 @@
+#! /bin/bash
+set -x
+cd "$HOME"
+ln -s rwgk_config/vimrc .vimrc
+ln -s rwgk_config/inputrc .inputrc
