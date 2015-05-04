@@ -150,7 +150,3 @@ kg_as_pound() {
 gd() {
   cd "$HOME/Google Drive"
 }
-
-function ssht() {
- ssh $* -t 'tmux a || tmux || /bin/bash'
-}
