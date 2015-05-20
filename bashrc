@@ -150,3 +150,7 @@ kg_as_pound() {
 gd() {
   cd "$HOME/Google Drive"
 }
+
+ppjson() {
+  python -m json.tool "$@"
+}
