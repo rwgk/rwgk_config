@@ -154,3 +154,7 @@ gd() {
 ppjson() {
   python -m json.tool "$@"
 }
+
+giturl() {
+  git config --get remote.origin.url
+}
