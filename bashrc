@@ -38,7 +38,9 @@ alias hh='history | cut -c8-'
 
 alias where='type -a'
 
+alias llb='ls -l'
 alias ll='ls -lh'
+alias lllb='ls -aAl'
 alias lll='ls -aAlh'
 lln() {
   ls -aAlt "$@" | head -20
@@ -82,8 +84,10 @@ ffRM() {
     find . -name "$@" -print -delete
   fi
 }
-ffgrep() {
-  find . -type f -print0 | xargs -0 grep "$@"
+
+grr() {
+  # -I ignores binary files
+  grep -I --exclude \*.class --exclude \*.pyc --exclude-dir .git --exclude-dir .svn -r "$@"
 }
 
 cutniq() {
@@ -157,4 +161,8 @@ ppjson() {
 
 giturl() {
   git config --get remote.origin.url
+}
+
+gitstat() {
+  git status -s "$@"
 }
