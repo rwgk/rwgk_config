@@ -166,3 +166,7 @@ giturl() {
 gitstat() {
   git status -s "$@"
 }
+
+gerpush() {
+  git push origin HEAD:refs/for/master
+}
