@@ -167,6 +167,10 @@ gitstat() {
   git status -s "$@"
 }
 
+rebase() {
+  git pull --rebase
+}
+
 gerpush() {
   git push origin HEAD:refs/for/master
 }
