@@ -159,6 +159,10 @@ ppjson() {
   python -m json.tool "$@"
 }
 
+apt_list() {
+  apt --installed list
+}
+
 giturl() {
   git config --get remote.origin.url
 }
