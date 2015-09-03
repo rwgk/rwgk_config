@@ -124,7 +124,7 @@ pid_info() {
   done
 }
 
-alias now='date "+%Y_%m_%d_%H%M"'
+alias now='date "+%Y-%m-%d-%H%M%S"'
 
 alias mir='rsync --archive --delete --force --verbose --stats'
 
