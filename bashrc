@@ -2,6 +2,7 @@
 
 [ -z "$PS1" ] && return
 
+export PATH="$HOME/rwgk_config/bin:$PATH"
 if [ -d "$HOME/bin" ]; then
   export PATH="$HOME/bin:$PATH"
 fi
