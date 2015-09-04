@@ -1,0 +1,2 @@
+#! /bin/bash
+exec $HOME/rwgk_config/bin/save_or_move.sh sve "$@"
