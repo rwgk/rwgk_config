@@ -183,3 +183,7 @@ rebase() {
 gerpush() {
   git push origin HEAD:refs/for/master
 }
+
+pplint() {
+  puppet-lint --no-80chars-check "$@"
+}
