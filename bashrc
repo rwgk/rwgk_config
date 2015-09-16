@@ -178,6 +178,7 @@ rwgk_gitconfig() {
     git config --global user.name "Ralf W. Grosse-Kunstleve"
     git config --global user.email "$@"
     git config --global core.editor vi
+    git config --global push.default matching
   fi
 }
 
