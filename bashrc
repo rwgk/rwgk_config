@@ -20,6 +20,9 @@ if [ -x /usr/bin/python -a -f "$HOME/rwgk_config/path_utility.py" ]; then
   export PYTHONPATH=`/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
 fi
 
+export EDITOR=/usr/bin/vi
+export VISUAL=/usr/bin/vi
+
 export PS1='\h:\w $ '
 
 export IGNOREEOF=9999
@@ -166,6 +169,16 @@ ppjson() {
 
 apt_list() {
   apt --installed list
+}
+
+rwgk_gitconfig() {
+  if [ $# -ne 1 ]; then
+    echo "rwgk_gitconfig: exactly one argument required (email), $# given."
+  else
+    git config --global user.name "Ralf W. Grosse-Kunstleve"
+    git config --global user.email "$@"
+    git config --global core.editor vi
+  fi
 }
 
 giturl() {
