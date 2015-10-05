@@ -23,7 +23,7 @@ fi
 export EDITOR=/usr/bin/vi
 export VISUAL=/usr/bin/vi
 
-export PS1='\h:\w $ '
+export PS1='$(hostname -f | sed 's/.skybox.com$//'):\w $ '
 
 export IGNOREEOF=9999
 
@@ -199,5 +199,5 @@ gerpush() {
 }
 
 pplint() {
-  puppet-lint --no-80chars-check "$@"
+  puppet-lint --no-80chars-check --no-documentation-check "$@"
 }
