@@ -14,7 +14,7 @@ if [ "$mode" != sve -a "$mode" != smv ]; then
   exit 1
 fi
 
-now=`date "+%Y-%m-%d-%H%M%S"`
+now=`date "+%Y-%m-%d+%H%M%S"`
 
 for arg in "$@"; do
   if [ -L "$arg" ]; then
