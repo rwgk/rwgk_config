@@ -27,8 +27,8 @@ export PS1='$(hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.roam\.corp\.goog
 
 export IGNOREEOF=9999
 
-export HISTFILESIZE=10000
-export HISTSIZE=10000
+export HISTFILESIZE=1000000
+export HISTSIZE=1000000
 export HISTCONTROL=ignoredups:ignorespace
 shopt -s histappend
 
