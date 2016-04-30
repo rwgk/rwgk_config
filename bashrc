@@ -29,8 +29,9 @@ export IGNOREEOF=9999
 
 export HISTFILESIZE=1000000
 export HISTSIZE=1000000
-export HISTCONTROL=ignoredups:ignorespace
+export HISTCONTROL=ignoredups
 shopt -s histappend
+export PROMPT_COMMAND='history -a'
 
 export FIGNORE=".o:.so:.a:.pyc"
 
