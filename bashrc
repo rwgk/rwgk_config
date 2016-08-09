@@ -164,10 +164,6 @@ gd() {
   cd "$HOME/Google Drive"
 }
 
-ppjson() {
-  python -m json.tool "$@"
-}
-
 apt_list() {
   apt --installed list
 }
