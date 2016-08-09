@@ -192,7 +192,7 @@ gitstat() {
 }
 
 rebase() {
-  git pull --rebase
+  git pull --rebase "$@"
 }
 
 gerpush() {
