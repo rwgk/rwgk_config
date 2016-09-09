@@ -77,17 +77,17 @@ gtab() {
 }
 ff() {
   if [ $# -ne 1 ]; then
-    echo "ff: exactly one argument required, $# given."
-  else
-    find . -name "$@" -print
+    echo "ff: ERROR: exactly one argument required, $# given."
+    return 1
   fi
+  find . -name "$@" -print
 }
 ffRM() {
   if [ $# -ne 1 ]; then
-    echo "ffRM: exactly one argument required, $# given."
-  else
-    find . -name "$@" -print -delete
+    echo "ffRM: ERROR: exactly one argument required, $# given."
+    return 1
   fi
+  find . -name "$@" -print -delete
 }
 
 xattr_clear_recursive() {
@@ -170,13 +170,13 @@ apt_list() {
 
 rwgk_gitconfig() {
   if [ $# -ne 1 ]; then
-    echo "rwgk_gitconfig: exactly one argument required (email), $# given."
-  else
-    git config --global user.name "Ralf W. Grosse-Kunstleve"
-    git config --global user.email "$@"
-    git config --global core.editor vi
-    git config --global push.default matching
+    echo "rwgk_gitconfig: ERROR: exactly one argument required (email), $# given."
+    return 1
   fi
+  git config --global user.name "Ralf W. Grosse-Kunstleve"
+  git config --global user.email "$@"
+  git config --global core.editor vi
+  git config --global push.default matching
 }
 
 giturl() {
@@ -197,4 +197,21 @@ gerpush() {
 
 pplint() {
   puppet-lint --no-80chars-check --no-documentation-check "$@"
+}
+
+disable() {
+  if [ $# -ne 1 ]; then
+    echo "disable: ERROR: exactly one argument required (service name), $# given."
+    return 1
+  fi
+  local base="/etc/init/$1"
+  local conf="${base}.conf"
+  local over="${base}.override"
+  if [ ! -f $conf ]; then
+    echo "disable: ERROR: $conf does not exist."
+    return 1
+  fi
+  /usr/bin/sudo /bin/true  # Prompt for password before echo -n.
+  echo -n "${conf}: "
+  echo manual | /usr/bin/sudo /usr/bin/tee $over
 }
