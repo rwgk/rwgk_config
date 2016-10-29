@@ -216,3 +216,11 @@ disable() {
   echo -n "${conf}: "
   echo manual | /usr/bin/sudo /usr/bin/tee $over
 }
+
+sum_file_sizes() {
+  find . \! -regex '^\./\.git/.*' -type f -print0 | wc -c --files0-from=- | sort -n | tail
+}
+
+git_clone_linux() {
+  time git clone --depth=1 https://github.com/torvalds/linux.git linux_depth_1
+}
