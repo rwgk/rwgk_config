@@ -23,7 +23,7 @@ fi
 export EDITOR=/usr/bin/vi
 export VISUAL=/usr/bin/vi
 
-export PS1='$(hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.roam\.corp\.google\.com$//'):\w $ '
+export PS1='$(hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.google\.com$//'):\w $ '
 
 export IGNOREEOF=9999
 
