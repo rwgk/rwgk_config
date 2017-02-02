@@ -20,8 +20,14 @@ if [ -x /usr/bin/python -a -f "$HOME/rwgk_config/path_utility.py" ]; then
   export PYTHONPATH=`/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
 fi
 
-export EDITOR=/usr/bin/vi
-export VISUAL=/usr/bin/vi
+if [ -x /usr/bin/vim ]; then
+  export EDITOR=/usr/bin/vim
+elif [ -x /usr/bin/vi ]; then
+  export EDITOR=/usr/bin/vi
+else
+  export EDITOR=
+fi
+export VISUAL="$EDITOR"
 
 export PS1='$(hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.google\.com$//'):\w $ '
 
