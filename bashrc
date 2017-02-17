@@ -29,7 +29,7 @@ else
 fi
 export VISUAL="$EDITOR"
 
-export PS1='$(/bin/hostname -f | /bin/sed 's/\.skybox\.com$//' | /bin/sed 's/\.google\.com$//'):\w $ '
+export PS1='$(/bin/hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.google\.com$//'):\w $ '
 
 export IGNOREEOF=9999
 
