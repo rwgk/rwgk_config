@@ -119,6 +119,8 @@ cpuinfo() {
 alias pyclean='find . -name "*.pyc" -print -delete'
 alias dsclean='find . -name ".DS_Store" -print -delete'
 
+alias grepytb='grep -i -e exception -e traceback'
+
 if [ X`uname` == XDarwin ]; then
   alias psu='env COLUMNS=100000 ps -U $USER'
   alias psfu='env COLUMNS=100000 ps -f -U $USER'
