@@ -4,6 +4,10 @@ import os
 op = os.path
 import time
 
+
+EPOCH_MAX_SECONDS = 2**31 - 1
+
+
 def run(args):
   t_start = time.time()
   def process(arg):
@@ -12,8 +16,11 @@ def run(args):
     except Exception:
       print arg,
     else:
-      if (s < 0): s += t_start
-      print "%d = %s" % (s, time.asctime(time.localtime(s)))
+      if (s < 0):
+        s += t_start
+      elif (s > EPOCH_MAX_SECONDS and arg.strip().isdigit()):
+        s /= 1e9  # Assume nano-seconds.
+      print "%.0f = %s" % (s, time.asctime(time.localtime(s)))
   if (len(args) == 0): args = ["%.0f" % t_start]
   for arg in args:
     if arg == '-':
