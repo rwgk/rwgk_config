@@ -232,3 +232,7 @@ sum_file_sizes() {
 git_clone_linux() {
   time git clone --depth=1 https://github.com/torvalds/linux.git linux_depth_1
 }
+
+oc() {
+  octave -q "$@"
+}
