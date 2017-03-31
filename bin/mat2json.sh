@@ -33,4 +33,4 @@ if [ -e "$3" ]; then
   /bin/rm "$3"
 fi
 set -x
-$CO "data = load('$2'); savejson('', data, 'FileName', '$3', 'FloatFormat', '%.15g', 'SingletArray', 0, 'Compact', 0);$QUIT"
+$CO "data = load('$2'); savejson('', data, 'FileName', '$3', 'FloatFormat', '%.18g', 'SingletArray', 0, 'Compact', 0);$QUIT"
