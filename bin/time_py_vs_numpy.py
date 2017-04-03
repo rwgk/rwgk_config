@@ -13,8 +13,6 @@ def time_py(asize, nloop):
   for i in xrange(nloop):
     c = [a[j] + b[j] for j in xrange(asize)]
   return time.time() - t0
-  print 'py: %.3f s' % elapsed
-  return elapsed
 
 
 def time_np(asize, nloop):
@@ -24,7 +22,6 @@ def time_np(asize, nloop):
   for i in xrange(nloop):
     c = a + b
   return time.time() - t0
-  elapsed = time.time() - t0
 
 
 def show_time(label, elapsed):
