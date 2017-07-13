@@ -44,6 +44,11 @@ export FIGNORE=".o:.so:.a:.pyc"
 
 export COPY_EXTENDED_ATTRIBUTES_DISABLE=true # Mac OS 10.4 or older
 export COPYFILE_DISABLE=true # Mac OS 10.5
+DisableApplePressAndHold() {
+  echo 'Re-enabling auto-repeat for a-z character keys.'
+  defaults write -g ApplePressAndHoldEnabled -bool false
+  echo 'Please restart affected applications.'
+}
 
 alias h='history'
 alias hh='history | cut -c8-'
