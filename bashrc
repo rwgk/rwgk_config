@@ -147,7 +147,9 @@ pid_info() {
   done
 }
 
+alias todate='date "+%Y-%m-%d"'
 alias now='date "+%Y-%m-%d+%H%M%S"'
+alias nowish='date "+%Y-%m-%d+%H%M"'
 
 alias mir='rsync --archive --delete --force --verbose --stats'
 
