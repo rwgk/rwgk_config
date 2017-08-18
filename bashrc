@@ -49,6 +49,15 @@ DisableApplePressAndHold() {
   defaults write -g ApplePressAndHoldEnabled -bool false
   echo 'Please restart affected applications.'
 }
+EnableAppleFastKeyRepeat() {
+  echo 'Old parameter:'
+  defaults read NSGlobalDomain KeyRepeat
+  # 0 caused issues in gmail hangouts subpanel.
+  defaults write NSGlobalDomain KeyRepeat -int 1
+  echo 'New parameter:'
+  defaults read NSGlobalDomain KeyRepeat
+  echo 'Please restart affected applications.'
+}
 
 alias h='history'
 alias hh='history | cut -c8-'
