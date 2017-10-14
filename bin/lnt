@@ -1,0 +1,40 @@
+#! /bin/bash
+
+# Starts COMMAND in background with stdout & stderr sent to LOG, tail -f LOG.
+#
+# LOG is created in $HOME, with timestamped filename.
+# tail command automatically terminates shortly after COMMAND terminates.
+#
+# Ctrl-C will only interrupt the tail command; COMMAND will keep running in
+# background.
+
+if [ $# -lt 2 ]; then
+  echo "log-n-tail usage: $0 LOGID COMMAND [ ARGS ]"
+  exit 1
+fi
+
+LOGID="$1"
+shift
+
+DTS="$(/bin/date "+%Y-%m-%d+%H%M")"  # minutes
+LOG="$HOME/log_${LOGID}_$DTS"
+if [ -e "$LOG" ]; then
+  DTS="$(/bin/date "+%Y-%m-%d+%H%M%S")"  # seconds
+  LOG="$HOME/log_${LOGID}_$DTS"
+  if [ -e "$LOG" ]; then
+    DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-21)"  # millis
+    LOG="$HOME/log_${LOGID}_$DTS"
+    if [ -e "$LOG" ]; then
+      DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-24 | /bin/sed -r 's/(...)$/+\1/')"  # micros
+      LOG="$HOME/log_${LOGID}_$DTS"
+      if [ -e "$LOG" ]; then
+        DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /bin/sed -r 's/(...)(...)$/+\1+\2/')"  # nanos
+        LOG="$HOME/log_${LOGID}_$DTS"
+      fi
+    fi
+  fi
+fi
+
+set -x
+"$@" >& "$LOG" &
+/usr/bin/tail -f --pid=$! "$LOG"

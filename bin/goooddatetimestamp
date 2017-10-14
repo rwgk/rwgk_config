@@ -1,0 +1,32 @@
+#! /bin/bash
+export PATH=
+if [ $# -eq 1 ]; then
+  resolution="$1"
+else
+  resolution=""
+fi
+case "$resolution" in
+date)
+  /bin/date '+%Y-%m-%d'
+  ;;
+minutes)
+  /bin/date '+%Y-%m-%d+%H%M'
+  ;;
+seconds)
+  /bin/date '+%Y-%m-%d+%H%M%S'
+  ;;
+millis)
+  /bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-21
+  ;;
+micros)
+  /bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-24 | /bin/sed -r 's/(...)$/+\1/'
+  ;;
+nanos)
+  /bin/date '+%Y-%m-%d+%H%M%S+%N' | /bin/sed -r 's/(...)(...)$/+\1+\2/'
+  ;;
+*)
+  echo "usage: $0 date|minutes|seconds|millis|micros|nanos"
+  exit 1
+  ;;
+esac
+exit 0
