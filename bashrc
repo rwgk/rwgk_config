@@ -29,7 +29,7 @@ else
 fi
 export VISUAL="$EDITOR"
 
-export PS1='$(/bin/hostname -f | sed 's/\.skybox\.com$//' | sed 's/\.google\.com$//'):\w $ '
+export PS1='$(/bin/hostname -f | /bin/sed 's/\.google\.com$//'):\w $ '
 
 export IGNOREEOF=9999
 
@@ -38,7 +38,13 @@ export HISTFILESIZE=1000000
 export HISTSIZE=1000000
 export HISTCONTROL=ignoredups
 shopt -s histappend
-export PROMPT_COMMAND='history -a'
+export PROMPT_COMMAND='\history -a'
+
+alias h='\history'
+alias hr='\history -r'
+hh() {
+  \history "$@" | /usr/bin/cut -c8-
+}
 
 export FIGNORE=".o:.so:.a:.pyc"
 
@@ -58,9 +64,6 @@ EnableAppleFastKeyRepeat() {
   defaults read NSGlobalDomain KeyRepeat
   echo 'Please restart affected applications.'
 }
-
-alias h='history'
-alias hh='history | cut -c8-'
 
 alias where='type -a'
 
