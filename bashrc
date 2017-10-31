@@ -29,7 +29,18 @@ else
 fi
 export VISUAL="$EDITOR"
 
-export PS1='$(/bin/hostname -f | /bin/sed 's/\.google\.com$//'):\w $ '
+if [ -x /bin/sed ]; then
+  AbsSed=/bin/sed
+elif [ -x /usr/bin/sed ]; then
+  AbsSed=/usr/bin/sed
+else
+  AbsSed=
+fi
+if [ -z "$AbsSed" ]; then
+  export PS1='$(/bin/hostname -f):\w $ '
+else
+  export PS1='$(/bin/hostname -f | '"$AbsSed"' 's/\.google\.com$//'):\w $ '
+fi
 
 export IGNOREEOF=9999
 
