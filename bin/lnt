@@ -37,4 +37,6 @@ fi
 
 set -x
 "$@" >& "$LOG" &
-/usr/bin/tail -f --pid=$! "$LOG"
+CMDPID="$!"
+/bin/sleep 0.1
+/usr/bin/tail -f --pid="$CMDPID" "$LOG"
