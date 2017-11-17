@@ -1,0 +1,8 @@
+#! /bin/bash
+which file_extension_overview_from_find_print0.py > /dev/null
+if [ $? -ne 0 ]; then
+  echo 'FATAL: file_extension_overview_from_find_print0.py not available.'
+  exit 1
+fi
+set -x
+/usr/bin/find "$@" -type f -print0 | file_extension_overview_from_find_print0.py
