@@ -38,13 +38,15 @@ def run(args):
         scale = width / x_delta
       else:
         scale = 1
-      print 's' + str(1 / scale), sum_deltas
+      print 's' + str(1 / scale)
     else:
       if x_delta:
         width = int(round(scale * x_delta))
       else:
         width = 78
-      print 'w' + str(width), sum_deltas
+      print 'w' + str(width)
+    print 'time between first start and last end: %s' % x_delta
+    print 'sum of times: %s' % sum_deltas
     def GetCol(x):
       return min(int(round((x - x_min) * scale)), width - 1)
     for ft in fromtos:
