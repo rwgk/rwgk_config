@@ -1,3 +1,4 @@
+# git clone https://github.com/rwgk/rwgk_config.git
 # [ -f "$HOME/rwgk_config/bashrc" ] && . "$HOME/rwgk_config/bashrc"
 
 [ -z "$PS1" ] && return
