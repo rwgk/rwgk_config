@@ -26,7 +26,7 @@ map ( :set ai
 map ) :set noai
 map I o#ifdef JUNK0dt#
 map E o#endif0dt#
-map M iimport sysdef Run(args):  assert len(args) == 0iif __name__ == '__main__':  Run(args=sys.argv[1:])k0kkk
+map M ifrom __future__ import absolute_importfrom __future__ import divisionfrom __future__ import print_functionimport sysdef Run(args):  assert len(args) == 0iif __name__ == '__main__':  Run(args=sys.argv[1:])k0kkk
 if has("autocmd")
   autocmd BufReadPost *
   \ if line("'\"") > 0 && line ("'\"") <= line("$") |
