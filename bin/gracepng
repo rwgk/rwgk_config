@@ -1,0 +1,5 @@
+#! /bin/bash
+outpng="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+set -x
+gracebat -hdevice PNG -hardcopy -printfile "$outpng" "$@"

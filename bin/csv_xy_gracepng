@@ -1,0 +1,11 @@
+#! /bin/bash
+outpng="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+iy_list="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+ix="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+inpcsv="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+set -x
+csv_xy.py "$inpcsv" "$ix" "$iy_list" | gracepng -pipe "$outpng" "$@"
