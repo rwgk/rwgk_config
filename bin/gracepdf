@@ -1,0 +1,7 @@
+#! /bin/bash
+outpdf="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+set -x
+gracebat -hdevice PostScript -hardcopy -printfile /var/tmp/gracepdf$$.ps "$@"
+ps2pdf /var/tmp/gracepdf$$.ps "$outpdf"
+rm -f /var/tmp/gracepdf$$.ps

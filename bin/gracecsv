@@ -1,0 +1,12 @@
+#! /bin/bash
+iy="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+ix="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+inpcsv="${@: -1}"
+set -- "${@:1:$(($#-1))}"
+tmpxy=/var/tmp/"$inpcsv"_"gracecsv$$".xy
+set -x
+csv_xy.py "$inpcsv" "$ix" "$iy" > "$tmpxy"
+graceview "$@" "$tmpxy"
+rm -f "$tmpxy"
