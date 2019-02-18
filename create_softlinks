@@ -3,3 +3,6 @@ set -x
 cd "$HOME"
 ln -s rwgk_config/vimrc .vimrc
 ln -s rwgk_config/inputrc .inputrc
+mkdir -p "$HOME/.vim/backup"
+mkdir -p "$HOME/.vim/swap"
+mkdir -p "$HOME/.vim/undo"
