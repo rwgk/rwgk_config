@@ -71,6 +71,8 @@ def Run(args):
     print('@ xaxis label "%s"' % set_labels[0])
     for i_set, label in enumerate(set_labels[1:]):
       color = i_set + 2  # Start with red, green, blue.
+      print('@ s%d symbol 1' % i_set)
+      print('@ s%d symbol size 0.20' % i_set)
       print('@ s%d symbol color %d' % (i_set, color))
       print('@ s%d symbol fill color %d' % (i_set, color))
       print('@ s%d line color %d' % (i_set, color))
