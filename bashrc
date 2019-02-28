@@ -1,4 +1,6 @@
 # git clone https://github.com/rwgk/rwgk_config.git
+# [ -f "$HOME/rwgk_config/bashrc_history" ] && . "$HOME/rwgk_config/bashrc_history"
+# ...
 # [ -f "$HOME/rwgk_config/bashrc" ] && . "$HOME/rwgk_config/bashrc"
 
 [ -z "$PS1" ] && return
@@ -45,11 +47,6 @@ fi
 
 export IGNOREEOF=9999
 
-export HISTTIMEFORMAT='%Y-%m-%d+%H%M%S '
-export HISTFILESIZE=1000000
-export HISTSIZE=1000000
-export HISTCONTROL=ignoredups
-shopt -s histappend
 export PROMPT_COMMAND='\history -a'
 
 alias h='\history'
