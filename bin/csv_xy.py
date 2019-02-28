@@ -45,16 +45,33 @@ def AllConvertibleToType(value_type, value_strings):
   return True
 
 
+def ProcessCommandlineIxRangeSpec(ix_with_optional_range_spec):
+  """Converts e.g. 1,5000,10000."""
+  flds = ix_with_optional_range_spec.split(',')
+  assert 1 <= len(flds) <= 3, ix_with_optional_range_spec
+  range_spec_float = [float(s) for s in flds[1:]]
+  first = None
+  last = None
+  if len(range_spec_float) == 1:
+    last = range_spec_float[0]
+  elif len(range_spec_float) == 2:
+    first, last = range_spec_float
+  return int(flds[0]), first, last
+
+
 def Run(args):
   """All processing stages in this function."""
 
-  assert len(args) == 3, 'csv_filepath ix iy1[,iy2...]'
-  csv_filepath, ix, iy_list = args
-  ix = int(ix)
+  assert len(args) == 3, 'csv_filepath ix[,<range-spec>] iy1[,iy2...]'
+  csv_filepath, ix_with_optional_range_spec, iy_list = args
+  ix, x_first, x_last = ProcessCommandlineIxRangeSpec(
+      ix_with_optional_range_spec)
   iy_list = [int(s) for s in iy_list.split(',')]
 
   set_labels = None
   set_data = [list() for _ in iy_list]
+  x_min, x_max = x_first, x_last
+  y_min, y_max = None, None
   for line in open(csv_filepath).read().splitlines():
     all_flds = line.split(',')
     use_flds = [all_flds[i] for i in [ix] + iy_list]
@@ -62,13 +79,35 @@ def Run(args):
       set_labels = use_flds
     else:
       x = all_flds[ix]
+      x_float = float(x)
+      if x_first is not None and x_float < x_first:
+        continue
+      if x_last is not None and x_float > x_last:
+        continue  # Not using break to be most general (x not sorted).
+      if x_min is None or x_min > x_float:
+        x_min = x_float
+      if x_max is None or x_max < x_float:
+        x_max = x_float
       for iy, xy_list in zip(iy_list, set_data):
         y = all_flds[iy]
+        y_float = float(y)
+        if y_min is None or y_min > y_float:
+          y_min = y_float
+        if y_max is None or y_max < y_float:
+          y_max = y_float
         xy_list.append((x, y))
 
+  if x_first is not None or x_last is not None:
+    print('@version 50125')  # Indirect way to turn autoscaling off.
   print(CUSTOM_COLOR_MAP)
   if set_labels is not None:
-    print('@ xaxis label "%s"' % set_labels[0])
+    if x_first is not None or x_last is not None:
+      print('@ world %.15g, %.15g, %.15g, %.15g' % (x_min, y_min, x_max, y_max))
+      print('@ xaxis label "%s"' % set_labels[0])
+      print('@ xaxis tick major 1000')  # TODO(rwgk): dynamic
+      print('@ xaxis tick minor 200')
+      print('@ yaxis tick major 0.2')
+      print('@ yaxis tick minor 0.1')
     for i_set, label in enumerate(set_labels[1:]):
       color = i_set + 2  # Start with red, green, blue.
       print('@ s%d symbol 1' % i_set)
