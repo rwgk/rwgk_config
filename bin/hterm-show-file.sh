@@ -67,11 +67,20 @@ dimensions() {
 show() {
   local name="$1"
   local opts="inline=1;$2"
+  local name_png=""
+  if [ ${name: -4} == ".pdf" ]; then
+    local name_png="$(mktemp -t "$(basename "$name" .pdf)_pdf_XXXXXXXXXX.png")"
+    convert "$name" "$name_png"
+    local name="$name_png"
+  fi
   print_seq "$(printf '\033]1337;File=name=%s;%s%s:%s\a' \
     "$(echo "$(basename "${name}")" | b64enc)" \
     "$(dimensions "${name}")" \
     "${opts}" \
     "$(b64enc <"${name}")")"
+  if [ -n "$name_png" ]; then
+    rm -f "$name_png"
+  fi
 }
 # Write tool usage and exit.
 # Usage: [error message]
