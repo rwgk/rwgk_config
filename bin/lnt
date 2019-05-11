@@ -35,6 +35,7 @@ if [ -e "$LOG" ]; then
   fi
 fi
 
+set -m  # To run background job in a separate process group, protecting it from Ctrl-C.
 set -x
 "$@" >& "$LOG" &
 CMDPID="$!"
