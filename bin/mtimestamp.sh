@@ -2,30 +2,42 @@
 datefmt='+%Y-%m-%d+%H%M%S'
 uname="$(/usr/bin/uname 2>/dev/null)"
 exit_code=0
-for path in $*; do
+for path in "$@"; do
   if [ "X$uname" == XDarwin ]; then
-    mtime="$(/usr/bin/stat -f '%m' "$path")"
+    mtime="$(/usr/bin/stat -f '%m' "${path}")"
   else
-    mtime="$(/usr/bin/stat -c '%Y' "$path")"
+    mtime="$(/usr/bin/stat -c '%Y' "${path}")"
   fi
   if [ $? -ne 0 ]; then
     exit_code=1
   else
-    if [ "X$uname" == XDarwin ]; then
-      mtf="$(/bin/date -j -f '%s' "$mtime" "$datefmt")"
+    if [ "X${uname}" == XDarwin ]; then
+      mtf="$(/bin/date -j -f '%s' "${mtime}" "${datefmt}")"
     else
-      mtf="$(/bin/date --date="@$mtime" "$datefmt")"
+      mtf="$(/bin/date --date="@${mtime}" "${datefmt}")"
     fi
     if [ $? -ne 0 ]; then
       exit_code=1
     else
-      if [ -e "${path}_${mtf}" ]; then
+      dirname="$(dirname "${path}")"
+      filename="$(basename "${path}")"
+      barename="${filename%.*}"
+      if [ X"${barename}" = X -o X"${barename}" = X"${filename}" ]; then
+        newpath="${filename}_${mtf}"
+      else
+        extension="${filename##*.}"
+        newpath="${barename}_${mtf}.${extension}"
+      fi
+      if [ -n "${dirname}" ]; then
+        newpath="${dirname}/${newpath}"
+      fi
+      if [ -e "${newpath}" ]; then
         echo "ERROR: NOT moving \"${path}\"" \
-             "because \"${path}_${mtf}\" exists already."
+             "because \"${newpath}\" exists already."
         exit_code=1
       else
-        echo mv "${path}" "${path}_${mtf}"
-        /bin/mv "${path}" "${path}_${mtf}"
+        echo mv "${path}" "${newpath}"
+        /bin/mv "${path}" "${newpath}"
         if [ $? -ne 0 ]; then
           exit_code=1
         fi
