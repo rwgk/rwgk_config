@@ -23,6 +23,7 @@ set nocindent
 set nosmartindent
 set nohlsearch
 set wildignore=*.pyc,*.pyo
+set colorcolumn=80
 map _ :syntax on
 map - :syntax off
 map ( :set ai
