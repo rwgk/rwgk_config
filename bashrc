@@ -268,3 +268,8 @@ git_clone_linux() {
 oc() {
   octave -q "$@"
 }
+
+setup_nim() {
+  export PATH="$HOME/clone/Nim/bin:$PATH"
+  alias toast="$HOME/clone/nimterop/nimterop/toast"
+}
