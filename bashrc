@@ -198,7 +198,11 @@ kg_as_pound() {
 }
 
 gd() {
-  cd "$HOME/Google Drive"
+  if [ -d "$HOME/gdrive" ]; then
+    cd "$HOME/gdrive/My Drive"
+  else
+    cd "$HOME/Google Drive"
+  fi
 }
 
 apt_list() {
