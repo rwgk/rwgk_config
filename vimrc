@@ -60,3 +60,4 @@ if filereadable('/usr/bin/git5')
 endif
 noremap <C-K> :pyf /usr/lib/clang-format/clang-format.py<CR>
 inoremap <C-K> <C-O>:pyf /usr/lib/clang-format/clang-format.py<CR>
+command! -nargs=1 Ss let @/ = <q-args>
