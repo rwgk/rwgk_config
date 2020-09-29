@@ -1,5 +1,7 @@
 #! /usr/bin/bash
-set -e -x
+set -x
+set -e
 git fetch upstream
 git checkout master
 git merge upstream/master
+git push origin master
