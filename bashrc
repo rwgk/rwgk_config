@@ -273,3 +273,10 @@ setup_nim() {
   export PATH="$HOME/clone/Nim/bin:$PATH"
   alias toast="$HOME/clone/nimterop/nimterop/toast"
 }
+
+ppu() { # pybind11 PR URL
+  echo "https://github.com/pybind/pybind11/pull/$1"
+}
+
+alias cffd='clang-format -style=file --dry-run'
+alias cffi='clang-format -style=file -i'
