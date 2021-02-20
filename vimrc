@@ -1,8 +1,10 @@
 " :help save-screen
 set t_ti= t_te=
-set backupdir=~/.vim/backup//
-set directory=~/.vim/swap//
-set undodir=~/.vim/undo//
+if isdirectory(expand('~/.vim'))
+  set backupdir=~/.vim/backup//
+  set directory=~/.vim/swap//
+  set undodir=~/.vim/undo//
+endif
 set nocompatible
 set nobackup
 set autoindent
