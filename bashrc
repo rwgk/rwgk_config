@@ -282,4 +282,4 @@ ppu() { # pybind11 PR URL
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
 
 alias cffd='clang-format -style=file --dry-run'
-alias cffi='clang-format -style=file -i'
+alias cffI='clang-format -style=file -i'
