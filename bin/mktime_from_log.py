@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2
 
 def run(args):
   from rwgk_utils import mktime_from_log_timestamp

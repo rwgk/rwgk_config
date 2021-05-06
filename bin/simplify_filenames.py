@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2
 
 """Simplifies filenames to avoid special characters. Non-recursive."""
 

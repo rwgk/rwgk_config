@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2
 
 def run(args):
   buf_size = 30 * 1024 * 1024
