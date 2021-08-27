@@ -1,12 +1,11 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 
 import sys
 from fileinput import input, isfirstline, filename, isstdin
-from string import expandtabs, rstrip
 for line in input(inplace=1):
   if (not isstdin() and isfirstline()):
     current_stdout = sys.stdout
     sys.stdout = sys.__stdout__
-    print filename() + ':'
+    print(filename() + ':')
     sys.stdout = current_stdout
-  print rstrip(expandtabs(line))
+  print(line.expandtabs().rstrip())
