@@ -281,5 +281,7 @@ ppu() { # pybind11 PR URL
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
 
+alias cfd='clang-format --dry-run'
+alias cfI='clang-format -i'
 alias cffd='clang-format -style=file --dry-run'
 alias cffI='clang-format -style=file -i'
