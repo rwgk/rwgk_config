@@ -32,6 +32,8 @@ else
 fi
 export VISUAL="$EDITOR"
 
+export MOSH_ESCAPE_KEY=$'\x1f'
+
 if [ -x /bin/sed ]; then
   AbsSed=/bin/sed
 elif [ -x /usr/bin/sed ]; then
