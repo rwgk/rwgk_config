@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 
 import os
 op = os.path
@@ -14,13 +14,13 @@ def run(args):
     try:
       s = eval(arg)
     except Exception:
-      print arg,
+      print(arg, end=None)
     else:
       if (s < 0):
         s += t_start
       elif (s > EPOCH_MAX_SECONDS and arg.strip().isdigit()):
         s /= 1e9  # Assume nano-seconds.
-      print "%.0f = %s" % (s, time.asctime(time.localtime(s)))
+      print("%.0f = %s" % (s, time.asctime(time.localtime(s))))
   if (len(args) == 0): args = ["%.0f" % t_start]
   for arg in args:
     if arg == '-':

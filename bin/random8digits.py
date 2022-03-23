@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 
 import random
 
@@ -19,8 +19,8 @@ def run(args):
     num = 1
   else:
     num = eval(args[0])
-  for unused in xrange(num):
-    print GetDigits()
+  for unused in range(num):
+    print(GetDigits())
 
 if __name__ == '__main__':
   import sys
