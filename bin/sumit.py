@@ -1,6 +1,4 @@
-#! /usr/bin/env python2
-
-from __future__ import division
+#! /usr/bin/env python3
 
 def run(args):
   if not args:
@@ -20,8 +18,8 @@ def run(args):
         except Exception: num_lines_ignored += 1
         else: sum += val
   if num_lines_ignored:
-    print 'lines ignored:', num_lines_ignored
-  print sum
+    print('lines ignored:', num_lines_ignored)
+  print(sum)
 
 if __name__ == '__main__':
   import sys
