@@ -132,7 +132,7 @@ xattr_clear_recursive() {
 
 grr() {
   # -I ignores binary files
-  grep -I --exclude \*.class --exclude \*.pyc --exclude-dir .git --exclude-dir .svn -r "$@"
+  grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
 }
 
 cutniq() {
@@ -288,3 +288,5 @@ alias cfd='clang-format --dry-run'
 alias cfI='clang-format -i'
 alias cffd='clang-format -style=file --dry-run'
 alias cffI='clang-format -style=file -i'
+alias cfpybind11d="clang-format --style=file:$HOME/forked/pybind11/.clang-format --dry-run"
+alias cfpybind11I="clang-format --style=file:$HOME/forked/pybind11/.clang-format -i"
