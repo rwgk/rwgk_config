@@ -126,6 +126,8 @@ ffRM() {
   find . -name "$@" -print -delete
 }
 
+alias dirs_here_xargs='find . -maxdepth 1 -type d \! -name . -print0 | xargs -0'
+
 xattr_clear_recursive() {
   find . \( -type d -o -type f \) -print0 | xargs -0 xattr -c
 }
