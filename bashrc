@@ -203,10 +203,8 @@ kg_as_pound() {
 }
 
 gd() {
-  if [ -d "$HOME/gdrive" ]; then
-    cd "$HOME/gdrive/My Drive"
-  else
-    cd "$HOME/Google Drive"
+  if [ -d "$HOME/Google Drive/My Drive/" ]; then
+    cd "$HOME/Google Drive/My Drive/"
   fi
 }
 
