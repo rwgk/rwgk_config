@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 
 import sys
 
@@ -11,11 +11,11 @@ def run(args):
         if (ord(c) < 32 or ord(c) >= 127):
           n_line += 1
       if (n_line != 0):
-        print "%s(%d): %d unprintable" % (file_name, i_line+1, n_line)
+        print("%s(%d): %d unprintable" % (file_name, i_line+1, n_line))
         n_file += n_line
     if (n_file != 0):
-      print "%s: %d unprintable total" % (file_name, n_file)
-      print
+      print("%s: %d unprintable total" % (file_name, n_file))
+      print()
 
 if (__name__ == "__main__"):
   run(args=sys.argv[1:])
