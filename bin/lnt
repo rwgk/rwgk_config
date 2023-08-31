@@ -17,19 +17,19 @@ LOGID="$1"
 shift
 
 DTS="$(/bin/date "+%Y-%m-%d+%H%M")"  # minutes
-LOG="$HOME/log_${LOGID}_$DTS"
+LOG="$HOME/log_${LOGID}_${DTS}.txt"
 if [ -e "$LOG" ]; then
   DTS="$(/bin/date "+%Y-%m-%d+%H%M%S")"  # seconds
-  LOG="$HOME/log_${LOGID}_$DTS"
+  LOG="$HOME/log_${LOGID}_${DTS}.txt"
   if [ -e "$LOG" ]; then
     DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-21)"  # millis
-    LOG="$HOME/log_${LOGID}_$DTS"
+    LOG="$HOME/log_${LOGID}_${DTS}.txt"
     if [ -e "$LOG" ]; then
       DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /usr/bin/cut -c-24 | /bin/sed -r 's/(...)$/+\1/')"  # micros
-      LOG="$HOME/log_${LOGID}_$DTS"
+      LOG="$HOME/log_${LOGID}_${DTS}.txt"
       if [ -e "$LOG" ]; then
         DTS="$(/bin/date '+%Y-%m-%d+%H%M%S+%N' | /bin/sed -r 's/(...)(...)$/+\1+\2/')"  # nanos
-        LOG="$HOME/log_${LOGID}_$DTS"
+        LOG="$HOME/log_${LOGID}_${DTS}.txt"
       fi
     fi
   fi
