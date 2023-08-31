@@ -1,13 +1,13 @@
 #! /usr/bin/python3
 
-"""Simply replace all dots with slashes."""
+"""Simply replace all slashes with dots."""
 
 import sys
 
 
 def run(args):
   assert args
-  print(" ".join([arg.replace(".", "/") for arg in args]))
+  print(" ".join([arg.replace("/", ".") for arg in args]))
 
 
 if __name__ == "__main__":
