@@ -19,6 +19,8 @@ def run(args):
         if not (c.isalnum() or c in '_=+-@:.'):
           c = '_'
         new_chars.append(c)
+      if new_chars and new_chars[0] == '-':
+        new_chars[0] = '_'
       new_name = ''.join(new_chars)
       if new_name == name:
         continue
