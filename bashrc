@@ -223,6 +223,8 @@ rwgk_gitconfig() {
   git config --global push.default matching
 }
 
+alias gg='git grep'
+
 giturl() {
   git config --get remote.origin.url
 }
