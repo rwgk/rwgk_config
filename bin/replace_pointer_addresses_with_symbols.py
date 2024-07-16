@@ -12,8 +12,12 @@ import sys
 
 
 def run(args):
-  assert len(args) == 1, "filename"
-  blob = open(args[0]).read()
+  """."""
+  assert len(args) == 1, "filename|-"
+  if args[0] == "-":
+    blob = sys.stdin.read()
+  else:
+    blob = open(args[0]).read()
   mappings = {}
   for ptrnum in re.findall(r"PTR=\d+=", blob):
     ptrsym = mappings.get(ptrnum)
