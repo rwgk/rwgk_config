@@ -1,0 +1,2 @@
+https://godbolt.org/z/f4srhPrad  shared_ptr_reset_and_rescue_pointee_model::proof_of_concept();
+https://godbolt.org/z/1znh4Kvv6  weak_from_this_expired_when_in_custom_deleter.cpp

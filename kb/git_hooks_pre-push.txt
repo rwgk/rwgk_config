@@ -1,0 +1,9 @@
+$ cat .git/hooks/pre-push
+#!/bin/sh
+
+files="$(git status --short --no-column)"
+if [ -n "$files" ]; then
+  echo ".git/hooks/pre-push: ERROR: dirty state:"
+  echo "$files"
+  exit 1
+fi

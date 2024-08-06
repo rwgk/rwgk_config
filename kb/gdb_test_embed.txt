@@ -1,0 +1,2 @@
+cd $HOME/forked/pybind11/tests/test_embed
+PYTHONPATH=$HOME/forked/build_clang_py312a3/lib gdb $HOME/forked/build_clang_py312a3/bin/test_embed

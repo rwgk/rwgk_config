@@ -1,0 +1,20 @@
+# 2022-07-08
+# python3, brew, cmake were somehow installed already.
+pip3 install virtualenv --user
+cd
+mkdir forked
+cd forked
+# macos_fresh_venv.sh (rwgk_config/bin):
+# python3 -m venv venv
+# source venv/bin/activate
+# pip install --upgrade pip
+# pip install pytest
+# pip3 install numpy
+git clone https://github.com/rwgk/pybind11.git
+git checkout debugging_against_master
+cmake -S pybind11 -B cmake_build -DCMAKE_VERBOSE_MAKEFILE=ON -DDOWNLOAD_CATCH=ON -DPYTHON_EXECUTABLE=$(which python3) -DCMAKE_CXX_STANDARD=17 -DCMAKE_BUILD_TYPE=Debug
+cd cmake_build
+make check -j 8 -k
+# cd ..
+# deactivate
+# rm -rf venv

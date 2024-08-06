@@ -1,0 +1,7 @@
+run
+# wait for segfault
+set logging on
+set logging file ~/gdb_bt.txt
+show logging
+bt
+quit
