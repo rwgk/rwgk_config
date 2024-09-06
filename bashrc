@@ -5,11 +5,13 @@
 
 [ -z "$PS1" ] && return
 
-export PATH="$HOME/rwgk_config/bin:$PATH"
 if [ -d "$HOME/bin" ]; then
   export PATH="$HOME/bin:$PATH"
 fi
-export PATH=".:$PATH"
+if [ -d "$HOME/.cargo/bin" ]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+export PATH=".:$HOME/rwgk_config/bin:$PATH"
 if [ -x /usr/bin/python -a -f "$HOME/rwgk_config/path_utility.py" ]; then
   export PATH=`/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PATH`
 fi
@@ -224,6 +226,7 @@ rwgk_gitconfig() {
 }
 
 alias gg='git grep'
+alias GitClean='git clean -fdx -e .jj'
 
 giturl() {
   git config --get remote.origin.url
