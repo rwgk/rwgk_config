@@ -1,0 +1,16 @@
+[user]
+	name = Ralf W. Grosse-Kunstleve
+	email = rwgkio@gmail.com
+[core]
+	editor = vi
+	excludesfile = <HOME>/.gitignore_global
+[url "git@github.com:"]
+	pushInsteadOf = https://github.com/
+[color]
+	ui = auto
+[push]
+	default = simple
+[alias]
+	graph = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)%cr%Creset %C(bold blue)<%an>%Creset' --date=relative
+[pull]
+	rebase = false
