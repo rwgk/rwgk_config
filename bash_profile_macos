@@ -1,0 +1,3 @@
+export BASH_SILENCE_DEPRECATION_WARNING=1
+export PATH="/Applications/CMake.app/Contents/bin:$PATH"
+[ -f "$HOME/rwgk_config/bashrc" ] && . "$HOME/rwgk_config/bashrc"
