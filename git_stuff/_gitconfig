@@ -1,6 +1,7 @@
 [user]
 	name = Ralf W. Grosse-Kunstleve
 	email = rwgkio@gmail.com
+	signingkey = /Users/rgrossekunst/.ssh/id_ed25519.pub
 [core]
 	editor = vi
 	excludesfile = <HOME>/.gitignore_global
@@ -14,3 +15,7 @@
 	graph = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)%cr%Creset %C(bold blue)<%an>%Creset' --date=relative
 [pull]
 	rebase = false
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
