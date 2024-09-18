@@ -53,4 +53,4 @@ def run(args):
   return os.pathsep.join(remaining_env_paths)
 
 if (__name__ == "__main__"):
-  print run(sys.argv[1:])
+  sys.stdout.write(run(sys.argv[1:]) + "\n")

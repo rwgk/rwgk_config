@@ -12,8 +12,12 @@ if [ -d "$HOME/.cargo/bin" ]; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
 export PATH=".:$HOME/rwgk_config/bin:$PATH"
-if [ -x /usr/bin/python -a -f "$HOME/rwgk_config/path_utility.py" ]; then
-  export PATH=`/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PATH`
+if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
+  if [ -x /usr/bin/python3 ]; then
+    export PATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PATH`
+  elif [ -x /usr/bin/python ]; then
+    export PATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PATH`
+  fi
 fi
 
 if [ -z "$PYTHONPATH" ]; then
@@ -21,8 +25,12 @@ if [ -z "$PYTHONPATH" ]; then
 else
   export PYTHONPATH="$HOME/rwgk_config/py:$PYTHONPATH"
 fi
-if [ -x /usr/bin/python -a -f "$HOME/rwgk_config/path_utility.py" ]; then
-  export PYTHONPATH=`/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
+if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
+  if [ -x /usr/bin/python3 ]; then
+    export PYTHONPATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
+  elif [ -x /usr/bin/python ]; then
+    export PYTHONPATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
+  fi
 fi
 
 if [ -x /usr/bin/vim ]; then
@@ -181,8 +189,6 @@ alias nowish='date "+%Y-%m-%d+%H%M"'
 
 alias mir='rsync --archive --delete --force --verbose --stats'
 
-alias pyprof='python -m cProfile -s cum'
-
 alias svnup='svn update && svn status'
 alias sst='svn status'
 alias svndiffh='svn diff --diff-cmd=diff -x "-h"' # -h (does nothing)
@@ -190,19 +196,6 @@ alias svndiffh='svn diff --diff-cmd=diff -x "-h"' # -h (does nothing)
 alias svndiffubw='svn diff --diff-cmd=diff -x "-u -b -w"'
 alias svnmime='svn propget svn:mime-type'
 alias svnignore='svn propedit svn:ignore .'
-
-DegFtoC() {
-  python -c 'import sys; print "%.2f" % ((eval(sys.argv[1])-32)*5/9)' "$@"
-}
-DegCtoF() {
-  python -c 'import sys; print "%.2f" % (eval(sys.argv[1])*9/5+32)' "$@"
-}
-pound_as_kg() {
-  python -c 'import sys; print "%.3f" % (eval(sys.argv[1])*0.4536)' "$@"
-}
-kg_as_pound() {
-  python -c 'import sys; print "%.3f" % (eval(sys.argv[1])/0.4536)' "$@"
-}
 
 gd() {
   if [ -d "$HOME/Google Drive/My Drive/" ]; then
