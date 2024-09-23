@@ -1,3 +1,5 @@
 export BASH_SILENCE_DEPRECATION_WARNING=1
 export PATH="/Applications/CMake.app/Contents/bin:$PATH"
+[ -f "$HOME/rwgk_config/bashrc_history" ] && . "$HOME/rwgk_config/bashrc_history"
 [ -f "$HOME/rwgk_config/bashrc" ] && . "$HOME/rwgk_config/bashrc"
+. "$HOME/.cargo/env"
