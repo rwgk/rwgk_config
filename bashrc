@@ -1,37 +1,25 @@
-# git clone https://github.com/rwgk/rwgk_config.git
-# [ -f "$HOME/rwgk_config/bashrc_history" ] && . "$HOME/rwgk_config/bashrc_history"
-# ...
-# [ -f "$HOME/rwgk_config/bashrc" ] && . "$HOME/rwgk_config/bashrc"
+# ~/.bashrc: executed by bash(1) for non-login shells.
 
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
 [ -z "$PS1" ] && return
 
-if [ -d "$HOME/bin" ]; then
-  export PATH="$HOME/bin:$PATH"
-fi
-if [ -d "$HOME/.cargo/bin" ]; then
-  export PATH="$HOME/.cargo/bin:$PATH"
-fi
-export PATH=".:$HOME/rwgk_config/bin:$PATH"
-if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
-  if [ -x /usr/bin/python3 ]; then
-    export PATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PATH`
-  elif [ -x /usr/bin/python ]; then
-    export PATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PATH`
-  fi
-fi
-
-if [ -z "$PYTHONPATH" ]; then
-  export PYTHONPATH="$HOME/rwgk_config/py"
+if ((  ${BASH_VERSINFO[0]} < 4 || \
+      (${BASH_VERSINFO[0]} == 4 && ${BASH_VERSINFO[1]} < 3) )); then
+  export HISTFILESIZE=10000000
+  export HISTSIZE=10000000
 else
-  export PYTHONPATH="$HOME/rwgk_config/py:$PYTHONPATH"
+  export HISTFILESIZE=-1
+  export HISTSIZE=-1
 fi
-if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
-  if [ -x /usr/bin/python3 ]; then
-    export PYTHONPATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
-  elif [ -x /usr/bin/python ]; then
-    export PYTHONPATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
-  fi
-fi
+export HISTTIMEFORMAT='%Y-%m-%d+%H%M%S '
+export HISTCONTROL=ignoredups
+shopt -s histappend
+
+shopt -s checkwinsize
 
 if [ -x /usr/bin/vim ]; then
   export EDITOR=/usr/bin/vim
@@ -163,6 +151,7 @@ alias dsclean='find . -name ".DS_Store" -print -delete'
 alias grepytb='grep -i -e exception -e traceback'
 
 if [ X`uname` == XDarwin ]; then
+  export BASH_SILENCE_DEPRECATION_WARNING=1
   alias psu='env COLUMNS=100000 ps -U $USER'
   alias psfu='env COLUMNS=100000 ps -f -U $USER'
 else
@@ -288,3 +277,8 @@ alias cffd='clang-format -style=file --dry-run'
 alias cffI='clang-format -style=file -i'
 alias cfpybind11d="clang-format --style=file:$HOME/forked/pybind11/.clang-format --dry-run"
 alias cfpybind11I="clang-format --style=file:$HOME/forked/pybind11/.clang-format -i"
+alias cleanup_build_dir='$HOME/clone/pybind11_scons/cleanup_build_dir.sh'
+
+[ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
+[ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
+[ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
