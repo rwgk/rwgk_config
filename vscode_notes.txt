@@ -3,5 +3,6 @@ mkdir -p $HOME/vscode/server
 cd $HOME/vscode/server
 wget https://update.code.visualstudio.com/latest/cli-linux-x64/stable
 tar zxvf stable
-./code tunnel service install
+./code tunnel --no-sleep service install
+sudo loginctl enable-linger $USER
 $HOME/vscode/server/code tunnel status
