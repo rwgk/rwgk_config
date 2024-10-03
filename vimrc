@@ -38,7 +38,7 @@ if has("autocmd")
   \ if line("'\"") > 0 && line ("'\"") <= line("$") |
   \   exe "normal g'\"" |
   \ endif
-  autocmd BufEnter * :syntax off
+  autocmd BufEnter * :syntax on
   autocmd BufRead,BufNewFile *.py setlocal filetype=python
   autocmd BufRead,BufNewFile *.c setlocal filetype=c
   autocmd BufRead,BufNewFile *.cpp setlocal filetype=cpp
