@@ -2,7 +2,7 @@
 set -x
 cd "$HOME"
 for f in .bash_profile .bash_login .bash_logout; do
-  if [ -e "$f" ]; then
+  if [ -f "$f" ]; then
     echo "FATAL: $f exists, please (re)move."
     exit -1
   fi
