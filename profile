@@ -5,6 +5,9 @@
 if [ -d "/Applications/CMake.app/Contents/bin" ]; then
   export PATH="/Applications/CMake.app/Contents/bin:$PATH"
 fi
+if [ -d "/Applications/Visual Studio Code.app/Contents/Resources/app/bin" ]; then
+  export PATH="/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"
+fi
 if [ -d "$HOME/.cargo/bin" ]; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
