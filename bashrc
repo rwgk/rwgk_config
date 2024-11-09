@@ -285,6 +285,9 @@ alias cfpybind11d="clang-format --style=file:$HOME/forked/pybind11/.clang-format
 alias cfpybind11I="clang-format --style=file:$HOME/forked/pybind11/.clang-format -i"
 alias cleanup_build_dir='$HOME/clone/pybind11_scons/cleanup_build_dir.sh'
 
+vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
+alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
+
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
 [ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
 [ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
