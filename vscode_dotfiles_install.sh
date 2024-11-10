@@ -1,7 +1,13 @@
 #! /bin/bash
+
+# Copy this to the top of settings.json (e.g. in "~/Library/Application Support/Code/User/"):
+#   "dotfiles.repository": "rwgk/rwgk_config",
+#   "dotfiles.targetPath": "~/rwgk_config",
+#   "dotfiles.installCommand": "vscode_dotfiles_install.sh",
+
 cd "$HOME"
-ln -s dotfiles/inputrc .inputrc
-ln -s dotfiles/vimrc .vimrc
+ln -s rwgk_config/inputrc .inputrc
+ln -s rwgk_config/vimrc .vimrc
 mkdir -p "$HOME/.vim/backup"
 mkdir -p "$HOME/.vim/swap"
 mkdir -p "$HOME/.vim/undo"
