@@ -6,6 +6,10 @@
 #   "dotfiles.installCommand": "vscode_dotfiles_install.sh",
 
 cd "$HOME"
+mv .bashrc .bashrc_host
+ln -s rwgk_config/bashrc .bashrc
+mv .profile .profile_devcontainer_default
+ln -s rwgk_config/profile .profile
 ln -s rwgk_config/inputrc .inputrc
 ln -s rwgk_config/vimrc .vimrc
 mkdir -p "$HOME/.vim/backup"
