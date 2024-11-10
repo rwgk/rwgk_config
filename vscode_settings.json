@@ -1,0 +1,29 @@
+{
+    "dotfiles.repository": "rwgk/rwgk_config",
+    "dotfiles.targetPath": "~/rwgk_config",
+    "dotfiles.installCommand": "vscode_dotfiles_install.sh",
+    "cmake.showOptionsMovedNotification": false,
+    "cmake.pinnedCommands": [
+        "workbench.action.tasks.configureTaskRunner",
+        "workbench.action.tasks.runTask"
+    ],
+    "cmake.showConfigureWithDebuggerNotification": false,
+    "workbench.startupEditor": "none",
+    "editor.fontSize": 16,
+    "editor.tabSize": 8,
+    "terminal.integrated.copyOnSelection": true,
+    "terminal.integrated.fontSize": 16,
+    "debug.console.fontSize": 16,
+    "scm.inputFontSize": 16,
+    "chat.editor.fontSize": 16,
+    "markdown.preview.fontSize": 16,
+    "terminal.integrated.cursorBlinking": true,
+    "workbench.colorTheme": "Word",
+    "cmake.debugConfig": {
+
+    },
+    "vim.mouseSelectionGoesIntoVisualMode": false,
+    "terminal.integrated.wordSeparators": " ()[]{}',\"`─‘’“”|!@#$%^&*-+=:;<>/?.~",
+    "terminal.integrated.enableMultiLinePasteWarning": false,
+    "remote.autoForwardPortsSource": "hybrid"
+}
