@@ -196,6 +196,10 @@ apt_list() {
   apt --installed list
 }
 
+if [ -f "$HOME/rwgk_config/git_stuff/git-completion.bash" ]; then
+  . "$HOME/rwgk_config/git_stuff/git-completion.bash"
+fi
+
 rwgk_gitconfig() {
   if [ $# -ne 1 ]; then
     echo "rwgk_gitconfig: ERROR: exactly one argument required (email), $# given."
