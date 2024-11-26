@@ -1,0 +1,7 @@
+2024-11-25
+https://github.com/jeffhammond/HPCInfo/blob/85ac1c472f5f93804c085bd3fcf8bb4b3a7a2bdf/docs/Preprocessor-Macros.md
+
+gcc -dM -E - < /dev/null
+g++ -dM -E -x c /dev/null
+
+nvc++ -stdpar -cuda -acc -mp -target=multicore -dM -E /dev/null
