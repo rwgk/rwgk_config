@@ -226,8 +226,12 @@ rebase() {
   git pull --rebase "$@"
 }
 
-mbdiff() {
+mbd() {
   git diff --merge-base "$@"
+}
+
+mbdno() {
+  git diff --merge-base "$@" --name-only
 }
 
 gerpush() {
