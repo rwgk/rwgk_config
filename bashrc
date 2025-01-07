@@ -296,6 +296,9 @@ alias cleanup_build_dir='$HOME/clone/pybind11_scons/cleanup_build_dir.sh'
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
+alias acm='. "$HOME/miniconda3/bin/activate"'
+alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
+
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
