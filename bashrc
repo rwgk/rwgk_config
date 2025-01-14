@@ -304,3 +304,19 @@ export NUMBA_CAPTURED_ERRORS="new_style"
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
 [ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
 [ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
+
+if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
+  if [ -x /usr/bin/python3 ]; then
+    export PATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PATH`
+  elif [ -x /usr/bin/python ]; then
+    export PATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PATH`
+  fi
+fi
+
+if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
+  if [ -x /usr/bin/python3 ]; then
+    export PYTHONPATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
+  elif [ -x /usr/bin/python ]; then
+    export PYTHONPATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
+  fi
+fi
