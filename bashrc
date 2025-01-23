@@ -20,6 +20,7 @@ export HISTCONTROL=ignoredups
 shopt -s histappend
 
 shopt -s checkwinsize
+shopt -s globstar
 
 if [ -x /usr/bin/vim ]; then
   export EDITOR=/usr/bin/vim
