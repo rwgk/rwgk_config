@@ -301,6 +301,8 @@ alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
 alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
+alias mfini='eval "$("$HOME/miniforge3/bin/conda" shell.bash hook)"'
+
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
