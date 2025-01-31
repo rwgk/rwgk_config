@@ -1,0 +1,3 @@
+#! /bin/bash
+exec docker run --rm -v "${HOME}:${HOME}" -it --entrypoint /bin/bash "$@" \
+    -c "groupadd -g $(id -g) $(id -gn) && useradd -u $(id -u) -g $(id -g) -M $(id -un) && exec su - $(id -un) -s /bin/bash"

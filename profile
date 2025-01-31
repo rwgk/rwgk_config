@@ -2,6 +2,11 @@
 # This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login
 # exists.
 
+if [ -f /.dockerenv ]; then
+  if [ -d "/usr/local/cuda/bin" ]; then
+    export PATH="/usr/local/cuda/bin:$PATH"
+  fi
+fi
 if [ -d "/Applications/CMake.app/Contents/bin" ]; then
   export PATH="/Applications/CMake.app/Contents/bin:$PATH"
 fi
