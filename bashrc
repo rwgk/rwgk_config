@@ -214,8 +214,8 @@ rwgk_gitconfig() {
   git config --global push.default matching
 }
 
+alias gb='git branch'
 alias gg='git grep'
-alias GitClean='git clean -fdx -e .jj'
 
 giturl() {
   git config --get remote.origin.url
