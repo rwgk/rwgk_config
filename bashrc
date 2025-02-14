@@ -295,6 +295,7 @@ alias cffI='clang-format -style=file -i'
 alias cfpybind11d="clang-format --style=file:$HOME/forked/pybind11/.clang-format --dry-run"
 alias cfpybind11I="clang-format --style=file:$HOME/forked/pybind11/.clang-format -i"
 alias cleanup_build_dir='$HOME/clone/pybind11_scons/cleanup_build_dir.sh'
+alias sconsh='scons extra_defines=PYBIND11_USE_SMART_HOLDER_AS_DEFAULT'
 
 alias pipup='pip install --upgrade pip'
 
