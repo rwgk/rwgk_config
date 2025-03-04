@@ -1,22 +1,24 @@
+[github]
+        user = rwgk
 [user]
-	name = Ralf W. Grosse-Kunstleve
-	email = rwgkio@gmail.com
-	signingkey = ~/.ssh/id_ed25519.pub
+        name = Ralf W. Grosse-Kunstleve
+        email = rwgkio@gmail.com
+        signingkey = ~/.ssh/id_ed25519.pub
 [core]
-	editor = vi
-	excludesfile = ~/.gitignore_global
+        editor = vi
+        excludesfile = ~/.gitignore_global
 [url "git@github.com:"]
-	pushInsteadOf = https://github.com/
+        pushInsteadOf = https://github.com/
 [color]
-	ui = auto
+        ui = auto
 [push]
-	default = simple
+        default = simple
 [alias]
-	graph = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)%cr%Creset %C(bold blue)<%an>%Creset' --date=relative
+        graph = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)%cr%Creset %C(bold blue)<%an>%Creset' --date=relative
         sw = switch
 [pull]
-	rebase = false
+        rebase = false
 [commit]
-	gpgsign = true
+        gpgsign = true
 [gpg]
-	format = ssh
+        format = ssh
