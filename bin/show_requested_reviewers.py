@@ -6,6 +6,7 @@
 import os
 import requests
 import sys
+import yaml
 
 
 def get_github_username():
@@ -29,9 +30,22 @@ def get_github_username():
     return None
 
 
+def get_github_token():
+    """Look for this in ~/.config/gh/hosts.yml:
+    github.com:
+        oauth_token: <redacted>
+
+    Note: hosts.yml is usually created by running `gh auth login`
+    """
+    with open(os.path.expandvars("$HOME/.config/gh/hosts.yml")) as f:
+        config = yaml.safe_load(f)
+    return config["github.com"]["oauth_token"]
+
+
 GITHUB_USERNAME = get_github_username()
 assert GITHUB_USERNAME is not None
-GITHUB_TOKEN = open(os.path.expandvars("$HOME/.github_api_token")).read().strip()
+GITHUB_TOKEN = get_github_token()
+assert GITHUB_TOKEN is not None
 
 
 def show_requested_reviewers(owner, repo):
