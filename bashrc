@@ -300,6 +300,9 @@ alias sconshnew='scons extra_defines=PYBIND11_RUN_TESTING_WITH_SMART_HOLDER_AS_D
 
 alias pipup='pip install --upgrade pip'
 
+# `gh auth login` creates ~/.config/gh/hosts.yml
+alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/gh/hosts.yml"'
+
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
