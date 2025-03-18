@@ -25,6 +25,6 @@ source "$VENV_PATH/bin/activate"
 
 echo "Installing common packages..."
 pip install --upgrade pip
-pip install pytest pyyaml numpy scipy
+pip install pytest requests pyyaml numpy scipy
 
 echo "New virtual environment ready."
