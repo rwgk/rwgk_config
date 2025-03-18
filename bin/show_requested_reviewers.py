@@ -52,18 +52,34 @@ def show_requested_reviewers(owner, repo):
     """Fetch PRs where the user has been requested for review."""
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    params = {"state": "open"}
+    params = {"state": "open", "per_page": 100, "draft": "false"}  # Exclude drafts
 
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code != 200:
-        print(f"Error: {response.status_code} - {response.json().get('message')}")
-        return
+    prs = []
+    while url:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != 200:
+            print(f"Error: {response.status_code} - {response.json().get('message')}")
+            return
 
-    prs = response.json()
+        prs.extend(response.json())
+
+        # Handle pagination via 'Link' header
+        link_header = response.headers.get("Link")
+        url = None
+        if link_header:
+            links = {}
+            for part in link_header.split(","):
+                section = part.split(";")
+                if len(section) == 2:
+                    link = section[0].strip().strip("<>")
+                    rel = section[1].strip().replace("rel=", "").strip('"')
+                    links[rel] = link
+            url = links.get("next")
 
     for pr in prs:
         pr_number = pr["number"]
         pr_url = pr["html_url"]
+        author = pr["user"]["login"]
         review_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/requested_reviewers"
 
         review_response = requests.get(review_url, headers=headers)
@@ -75,7 +91,7 @@ def show_requested_reviewers(owner, repo):
         logins = [user["login"] for user in reviewers.get("users", [])]
 
         if logins:
-            print(pr_url, ", ".join(logins))
+            print(f"{pr_url} (by {author}) → Requested: {', '.join(logins)}")
 
 
 def run(args):
