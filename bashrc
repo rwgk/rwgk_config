@@ -283,6 +283,36 @@ ppu() { # pybind11 PR URL
   echo "https://github.com/pybind/pybind11/pull/$1"
 }
 
+fresh_venv() {
+  if [ "$#" -ne 1 ]; then
+    echo "fresh_venv: ERROR: exactly one argument required (venv name), $# given." >&2
+    return 1
+  fi
+
+  local venv_dir="$1"
+
+  if [ -d "$venv_dir" ]; then
+    echo "fresh_venv: ERROR: directory '$venv_dir' already exists. Please remove it first." >&2
+    return 1
+  fi
+
+  if ! python -m venv "$venv_dir"; then
+    echo "fresh_venv: ERROR: failed to create virtual environment." >&2
+    return 1
+  fi
+
+  # shellcheck disable=SC1090
+  . "$venv_dir/bin/activate"
+
+  pip install --upgrade pip
+
+  if [ -f requirements.txt ]; then
+    pip install -r requirements.txt
+  else
+    echo "fresh_venv: NOTE: no requirements.txt found, skipping dependency installation."
+  fi
+}
+
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
 
