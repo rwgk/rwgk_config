@@ -1,20 +1,31 @@
 #!/bin/bash
 
-# https://chatgpt.com/share/67d5cb11-50a8-8008-a729-a8a614bf7c76  2025-03-15
+# https://chatgpt.com/share/67e8331b-6700-8008-9a09-31c9f1611a84  2025-03-29
 
 set -euo pipefail
 
+# Show PR URL for a branch name in the current repo context
 show_pr_for_branch() {
     local branch="$1"
-    PR_NUMBER=$(gh pr list --head "$branch" --json number --jq '.[0].number')
 
-    if [[ -n "$PR_NUMBER" ]]; then
-        echo "$branch → https://github.com/pybind/pybind11/pull/$PR_NUMBER"
+    local pr_info
+    pr_info=$(gh pr list \
+        --head "$branch" \
+        --state all \
+        --limit 1000 \
+        --json number,url \
+        --jq '.[0] // empty')
+
+    if [[ -n "$pr_info" ]]; then
+        local pr_url
+        pr_url=$(echo "$pr_info" | jq -r '.url')
+        echo "$branch → $pr_url"
     else
-        echo "$branch → No open PR found"
+        echo "$branch → No PR found"
     fi
 }
 
+# Entry point
 if [[ $# -eq 0 ]]; then
     show_pr_for_branch "$(git branch --show-current)"
 else

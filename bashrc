@@ -237,6 +237,19 @@ mbdno() {
   git diff --merge-base "$@" --name-only
 }
 
+# https://chatgpt.com/share/67e8331b-6700-8008-9a09-31c9f1611a84  2025-03-29
+# Bash completion for show_pr_for_branch.sh
+_show_pr_for_branch_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    # Get local branch names (excluding remotes)
+    local branches
+    branches=$(git for-each-ref --format='%(refname:short)' refs/heads/)
+
+    COMPREPLY=( $(compgen -W "$branches" -- "$cur") )
+}
+# Register completion function
+complete -F _show_pr_for_branch_completions show_pr_for_branch.sh
+
 gerpush() {
   git push origin HEAD:refs/for/master
 }
