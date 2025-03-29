@@ -1,0 +1,105 @@
+#!/bin/bash
+set -euo pipefail
+
+# Parse args
+CI_SKIP=false
+PRNAME=""
+
+for arg in "$@"; do
+    case "$arg" in
+    --ci-skip)
+        CI_SKIP=true
+        ;;
+    -*)
+        echo "Unknown option: $arg"
+        exit 1
+        ;;
+    *)
+        PRNAME="$arg"
+        ;;
+    esac
+done
+
+if [ -z "$PRNAME" ]; then
+    echo "Usage: $0 [--ci-skip] <prname>"
+    exit 1
+fi
+
+MANUSCRIPT="${PRNAME}/manuscript"
+REVIEW="${PRNAME}/review"
+TMP="${PRNAME}/__mrup__"
+BASE="master"
+
+# Ensure clean working directory and index
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "❌ Error: Working directory or index is dirty. Please commit or stash your changes first."
+    exit 1
+fi
+
+echo "🔍 Finding merge-base of $MANUSCRIPT and $BASE..."
+MERGE_BASE=$(git merge-base "$BASE" "$MANUSCRIPT")
+
+echo "🧪 Creating temporary branch $TMP from $MERGE_BASE..."
+git switch -c "$TMP" "$MERGE_BASE" >/dev/null
+
+echo "📦 Applying diff from $MANUSCRIPT..."
+git diff --binary "$MERGE_BASE" "$MANUSCRIPT" | git apply --index
+
+# Prepare metadata for commit message
+MANUSCRIPT_HEAD=$(git rev-parse "$MANUSCRIPT")
+MANUSCRIPT_TIME=$(git show -s --format=%ci "$MANUSCRIPT")
+REPO_SLUG=$(git config --get remote.origin.url | sed -E 's|.*github.com[:/](.*)\.git|\1|')
+
+# Construct commit message
+MSG="Squashed $MANUSCRIPT — ${MANUSCRIPT_HEAD} — ${MANUSCRIPT_TIME}"
+$CI_SKIP && MSG="$MSG [ci skip]"
+
+MSG="$MSG
+
+[Browse $MANUSCRIPT tree](https://github.com/$REPO_SLUG/tree/${MANUSCRIPT_HEAD})
+
+[Browse $MANUSCRIPT commits](https://github.com/$REPO_SLUG/commits/${MANUSCRIPT_HEAD}/)"
+
+# Create squash commit
+git commit -m "$MSG" >/dev/null
+
+# Get new tree and check against existing review branch
+NEW_TREE=$(git rev-parse "$TMP^{tree}")
+REBUILD=false
+
+if git rev-parse --verify -q "$REVIEW" >/dev/null; then
+    OLD_TREE=$(git rev-parse "$REVIEW^{tree}")
+    OLD_MSG=$(git log -1 --pretty=%B "$REVIEW")
+
+    if [ "$NEW_TREE" != "$OLD_TREE" ]; then
+        REBUILD=true
+    elif [ "$MSG" != "$OLD_MSG" ]; then
+        REBUILD=true
+    else
+        echo "✅ $REVIEW is already up to date — no update needed."
+    fi
+else
+    REBUILD=true
+fi
+
+if $REBUILD; then
+    echo "🔁 Updating $REVIEW..."
+    git branch -f "$REVIEW" "$TMP"
+fi
+
+# Cleanup temp branch and return to previous
+git switch - >/dev/null
+git branch -D "$TMP"
+
+echo "🚀 Pushing $MANUSCRIPT to origin (non-force)..."
+if git push origin "$MANUSCRIPT"; then
+    echo "✅ $MANUSCRIPT pushed."
+else
+    echo "❌ Failed to push $MANUSCRIPT — aborting."
+    exit 1
+fi
+
+echo "🚀 Pushing $REVIEW to origin (force)..."
+git push -f origin "$REVIEW"
+
+echo "✅ Done: $REVIEW and $MANUSCRIPT are now up to date on origin."
