@@ -27,7 +27,7 @@ fi
 
 MANUSCRIPT="${PRNAME}/manuscript"
 REVIEW="${PRNAME}/review"
-TMP="${PRNAME}/__mrup__"
+TMP="${PRNAME}/__push4review__"
 BASE="master"
 
 # Ensure clean working directory and index
