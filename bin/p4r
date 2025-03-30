@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Parse args
-CI_SKIP=false
+SKIP_CI=true
 PRNAME=""
 
 for arg in "$@"; do
     case "$arg" in
-    --ci-skip)
-        CI_SKIP=true
+    --no-skip-ci)
+        SKIP_CI=false
         ;;
     -*)
         echo "Unknown option: $arg"
@@ -21,7 +21,7 @@ for arg in "$@"; do
 done
 
 if [ -z "$PRNAME" ]; then
-    echo "Usage: $0 [--ci-skip] <prname>"
+    echo "Usage: $0 [--no-skip-ci] <prname>"
     exit 1
 fi
 
@@ -52,7 +52,7 @@ REPO_SLUG=$(git config --get remote.origin.url | sed -E 's|.*github.com[:/](.*)\
 
 # Construct commit message
 MSG="Squashed $MANUSCRIPT — ${MANUSCRIPT_HEAD} — ${MANUSCRIPT_TIME}"
-$CI_SKIP && MSG="$MSG [ci skip]"
+$SKIP_CI && MSG="$MSG [skip ci]"
 
 MSG="$MSG
 
