@@ -60,6 +60,20 @@ MSG="$MSG
 
 [Browse $MANUSCRIPT commits](https://github.com/$REPO_SLUG/commits/${MANUSCRIPT_HEAD}/)"
 
+# Add co-authors
+CO_AUTHORS=$(
+    git log --format='%aN <%aE>' "${MERGE_BASE}..${MANUSCRIPT}" |
+        sort -u |
+        grep -v -F "$(git config user.name) <$(git config user.email)>"
+)
+
+if [ -n "$CO_AUTHORS" ]; then
+    MSG="$MSG"$'\n' # Add one blank line before the first co-author line
+    while IFS= read -r author; do
+        MSG="$MSG"$'\n'"Co-authored-by: $author"
+    done <<<"$CO_AUTHORS"
+fi
+
 # Create squash commit
 git commit -m "$MSG" >/dev/null
 
