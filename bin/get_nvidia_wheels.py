@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
 
+"""Download and extract NVIDIA cuXX wheels from PyPI
+
+Run this in an empty directory, e.g.
+
+mkdir cu12_wheels
+cd cu12_wheels
+get_nvidia_wheels.py 12
+
+This will create:
+    get_nvidia_wheels_log.txt
+    get_nvidia_wheels_pkgs.json
+    downloads/*.whl
+    unzip_l/*.txt
+
+If interrupted, simply running the same command again will pick up downloading
+in the middle.
+"""
+
 import os
 import sys
 import re
