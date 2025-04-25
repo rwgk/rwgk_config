@@ -221,6 +221,11 @@ giturl() {
   git config --get remote.origin.url
 }
 
+gls() {
+  local num_commits="${1:-10}"
+  git log -n "$num_commits" --format="%H %<(100,trunc)%s"
+}
+
 gitstat() {
   git status -s "$@"
 }
