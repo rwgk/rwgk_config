@@ -2,22 +2,29 @@
 
 set -euo pipefail
 
-# Ensure MY_GITHUB_USERNAME is defined
-if [[ -z "${MY_GITHUB_USERNAME:-}" ]]; then
-    echo "Error: Please set MY_GITHUB_USERNAME in your environment (e.g. in .bashrc)"
-    exit 1
-fi
+SCRIPT_NAME=$(basename "$0")
 
 # Check for input
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $(basename "$0") <upstream-git-url>"
-    echo " E.g.: $(basename "$0") https://github.com/pybind/pybind11.git"
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "Usage: $SCRIPT_NAME <upstream-git-url> [fork-git-url]"
+    echo " E.g.: $SCRIPT_NAME https://github.com/pybind/pybind11.git"
+    echo "   or: $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git"
     exit 1
 fi
 
 UPSTREAM_URL="$1"
 REPO_NAME=$(basename -s .git "$UPSTREAM_URL")
-FORK_URL="https://github.com/${MY_GITHUB_USERNAME}/${REPO_NAME}.git"
+
+# Determine FORK_URL
+if [[ $# -eq 2 ]]; then
+    FORK_URL="$2"
+else
+    if [[ -z "${MY_GITHUB_USERNAME:-}" ]]; then
+        echo "Error: MY_GITHUB_USERNAME must be set in your environment (e.g. in .bashrc) if no fork URL is provided."
+        exit 1
+    fi
+    FORK_URL="https://github.com/${MY_GITHUB_USERNAME}/${REPO_NAME}.git"
+fi
 
 echo "Cloning upstream: $UPSTREAM_URL"
 git clone "$UPSTREAM_URL"
