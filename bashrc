@@ -284,10 +284,6 @@ sum_file_sizes() {
   find . \! -regex '^\./\.git/.*' -type f -print0 | wc -c --files0-from=- | sort -n | tail
 }
 
-git_clone_linux() {
-  time git clone --depth=1 https://github.com/torvalds/linux.git linux_depth_1
-}
-
 oc() {
   octave -q "$@"
 }
@@ -295,10 +291,6 @@ oc() {
 setup_nim() {
   export PATH="$HOME/clone/Nim/bin:$PATH"
   alias toast="$HOME/clone/nimterop/nimterop/toast"
-}
-
-ppu() { # pybind11 PR URL
-  echo "https://github.com/pybind/pybind11/pull/$1"
 }
 
 fresh_venv() {
@@ -347,6 +339,8 @@ alias sconshold='scons extra_defines=PYBIND11_USE_SMART_HOLDER_AS_DEFAULT'
 alias sconshnew='scons extra_defines=PYBIND11_RUN_TESTING_WITH_SMART_HOLDER_AS_DEFAULT_BUT_NEVER_USE_IN_PRODUCTION_PLEASE'
 
 alias pipup='pip install --upgrade pip'
+
+export MY_GITHUB_USERNAME=rwgk
 
 # `gh auth login` creates ~/.config/gh/hosts.yml
 alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/gh/hosts.yml"'
