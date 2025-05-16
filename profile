@@ -48,6 +48,4 @@ prepend_maybe PATH .
 
 prepend_maybe PYTHONPATH "$HOME/rwgk_config/py"
 
-venv_activate_maybe "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base"
-
 [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"

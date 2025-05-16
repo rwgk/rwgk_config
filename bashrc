@@ -323,6 +323,9 @@ fresh_venv() {
   fi
 }
 
+alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
+alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
+
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
 
@@ -347,8 +350,6 @@ alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/
 
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
-
-alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
 alias mfini='source "$HOME/miniforge3/etc/profile.d/conda.sh"'
 
