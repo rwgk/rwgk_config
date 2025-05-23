@@ -1,0 +1,14 @@
+#! /usr/bin/python3
+
+"""Simply replace all slashes with underscores."""
+
+import sys
+
+
+def run(args):
+  assert args
+  print(" ".join([arg.replace("/", "_") for arg in args]))
+
+
+if __name__ == "__main__":
+  run(args=sys.argv[1:])
