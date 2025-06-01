@@ -147,6 +147,16 @@ cutniq() {
   grep -v 'Binary file' | cut -d: -f1 | uniq
 }
 
+mkdirown() {
+  if [ $# -ne 1 ]; then
+    echo "ERROR: exactly one argument required (path), $# given."
+    return 1
+  fi
+  local path="$1"
+  sudo mkdir -p "$path" && sudo chown "$(id -u):$(id -g)" "$path"
+  return $?
+}
+
 cpuinfo() {
   echo -n 'logical cores:  '; cat /proc/cpuinfo | grep '^processor' | wc -l
   echo -n 'hardware cores: '; cat /proc/cpuinfo | egrep '^core id|^physical id' | tr -d "\n" | sed s/physical/\\nphysical/g | grep -v ^$ | sort | uniq | wc -l
