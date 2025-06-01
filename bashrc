@@ -133,6 +133,11 @@ xattr_clear_recursive() {
   find . \( -type d -o -type f \) -print0 | xargs -0 xattr -c
 }
 
+cmdx() {
+    echo "+ $*"
+    "$@"
+}
+
 grr() {
   # -I ignores binary files
   grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
@@ -146,6 +151,13 @@ cpuinfo() {
   echo -n 'logical cores:  '; cat /proc/cpuinfo | grep '^processor' | wc -l
   echo -n 'hardware cores: '; cat /proc/cpuinfo | egrep '^core id|^physical id' | tr -d "\n" | sed s/physical/\\nphysical/g | grep -v ^$ | sort | uniq | wc -l
   echo -n 'cpu sockets:    '; cat /proc/cpuinfo | grep '^physical id' | sort | uniq | wc -l
+}
+
+cpumem() {
+  cmdx lscpu | grep -v -e '^Flags:' -e '^Vulnerability '
+  echo
+  cmdx free -h
+  echo
 }
 
 alias pyclean='find . -name "*.pyc" -print -delete'
