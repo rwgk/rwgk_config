@@ -345,6 +345,15 @@ fresh_venv() {
   fi
 }
 
+which_venv() {
+  if [ "$#" -ne 0 ]; then
+    echo "which_venv: ERROR: no arguments expected, $# given." >&2
+    return 1
+  fi
+
+  python -c "import sys; print(f'{sys.prefix=!r}')"
+}
+
 alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
 alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
