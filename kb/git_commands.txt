@@ -4,3 +4,5 @@ git branch --unset-upstream other-branch
 git push --set-upstream origin local-branch:archive/pr1234_new-name
 
 git commit --allow-empty -m "[skip ci] empty commit"
+
+git rev-parse --short HEAD
