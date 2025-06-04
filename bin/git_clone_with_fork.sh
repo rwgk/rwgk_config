@@ -35,6 +35,13 @@ git remote rename origin upstream
 
 echo "Adding fork as 'origin': $FORK_URL"
 git remote add origin "$FORK_URL"
+git fetch origin
+echo
 
-echo "Done. Your remotes:"
+echo "Your remotes:"
 git remote -v
+echo
+
+echo "Your branches:"
+git branch --all
+echo
