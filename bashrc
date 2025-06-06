@@ -236,6 +236,19 @@ rwgk_gitconfig() {
   git config --global push.default matching
 }
 
+loggrep() (
+  if [ $# -lt 2 ]; then
+    echo "Usage: loggrep PATTERN FILE" >&2
+    return 1
+  fi
+
+  pattern="$1"
+  shift
+
+  # Strip NULs and CR characters, then grep
+  tr -d '\000' < "$@" | sed 's/\r$//' | grep -E "$pattern"
+)
+
 alias gb='git branch'
 alias gg='git grep'
 
