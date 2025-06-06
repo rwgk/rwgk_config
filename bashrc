@@ -217,6 +217,14 @@ gd() {
   fi
 }
 
+cdwin() {
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: cdwin <windows-path>" >&2
+    return 1
+  fi
+  cd "$(wslpath "$1")"
+}
+
 apt_list() {
   apt --installed list
 }
