@@ -217,14 +217,6 @@ gd() {
   fi
 }
 
-cdwin() {
-  if [ "$#" -ne 1 ]; then
-    echo "Usage: cdwin <windows-path>" >&2
-    return 1
-  fi
-  cd "$(wslpath "$1")"
-}
-
 apt_list() {
   apt --installed list
 }
@@ -393,6 +385,10 @@ alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 alias mfini='source "$HOME/miniforge3/etc/profile.d/conda.sh"'
 
 export NUMBA_CAPTURED_ERRORS="new_style"
+
+if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
+  . "$HOME/rwgk_config/bash_wsl_tools"
+fi
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
 [ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
