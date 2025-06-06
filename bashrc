@@ -386,8 +386,10 @@ alias mfini='source "$HOME/miniforge3/etc/profile.d/conda.sh"'
 
 export NUMBA_CAPTURED_ERRORS="new_style"
 
-if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
-  . "$HOME/rwgk_config/bash_wsl_tools"
+if command -v wslpath >/dev/null 2>&1; then
+  if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
+    . "$HOME/rwgk_config/bash_wsl_tools"
+  fi
 fi
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
