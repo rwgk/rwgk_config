@@ -143,7 +143,7 @@ grr() {
   grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
 }
 
-grep-pytest-summary() {
+grep_pytest_summary() {
   grep -a -E "^=+ .*(failed|passed|errors).* in [0-9]+\.[0-9]+s =+\s*$" "$@"
 }
 
