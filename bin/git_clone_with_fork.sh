@@ -12,6 +12,8 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
     exit 1
 fi
 
+export GIT_PAGER=
+
 UPSTREAM_URL="$1"
 REPO_NAME=$(basename -s .git "$UPSTREAM_URL")
 
