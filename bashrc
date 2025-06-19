@@ -377,6 +377,27 @@ which_venv() {
   python -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
+use_tmp_user_caches() {
+  export XDG_CACHE_HOME="/tmp/${USER}-xdg-cache"
+  export PIP_CACHE_DIR="/tmp/${USER}-pip-cache"
+  export TMPDIR="/tmp/${USER}-tmp"
+  export CMAKE_USER_MAKE_RULES_OVERRIDE="/dev/null"
+  export NINJA_STATUS="[%f/%t %o/sec] "
+
+  mkdir -p "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR"
+
+  echo "✅ Using temporary per-user cache directories:"
+  echo "  XDG_CACHE_HOME=$XDG_CACHE_HOME"
+  echo "  PIP_CACHE_DIR=$PIP_CACHE_DIR"
+  echo "  TMPDIR=$TMPDIR"
+}
+
+wipe_tmp_user_caches() {
+  echo "🧹 Removing temporary per-user cache directories..."
+  rm -rf /tmp/${USER}-xdg-cache /tmp/${USER}-pip-cache /tmp/${USER}-tmp
+  echo "✅ All cleaned up."
+}
+
 alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
 alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
