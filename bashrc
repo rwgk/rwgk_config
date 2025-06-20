@@ -172,28 +172,35 @@ wait_watch() {
 
 watch_pybind11_common_h() {
   if [ "$#" -ne 1 ]; then
-    echo "Usage: watch_pybind11_common_h <path/to/file>"
+    echo "Usage: watch_pybind11_common_h_poll <path/to/file>"
     return 1
   fi
 
   local file="$1"
-
-  echo "Waiting for $file to be created..."
-
-  # Wait until the file exists
+  echo "$(date +"%F %T") Waiting for $file to exist..."
   while [ ! -f "$file" ]; do
-    sleep 1
+    sleep 0.5
   done
 
-  echo "File detected. Initial version macros:"
-  grep '#define PYBIND11_VERSION_' "$file" || echo "No version macros found."
+  local prev
+  prev=$(md5sum "$file" | awk '{print $1}')
+  echo "$(date +"%F %T") Detected $file. md5=$prev"
+  echo "$(date +"%F %T") Version macros:"
+  grep '#define PYBIND11_VERSION_' "$file" || echo "none"
 
-  echo "Now watching for changes to $file. Press Ctrl-C to stop."
-
-  # Monitor for modifications and re-grep
-  inotifywait -m -e modify --format '%T MODIFY %w%f' --timefmt '%F %T' "$file" | while read -r timestamp event path; do
-    echo "$timestamp Detected modification to $path"
-    grep '#define PYBIND11_VERSION_' "$file" || echo "No version macros found after modification."
+  echo "$(date +"%F %T") Watching for md5 changes; press Ctrl-C to stop."
+  while true; do
+    sleep 0.5
+    if [ ! -f "$file" ]; then
+      echo "$(date +"%F %T") $file removed"
+      break
+    fi
+    hash=$(md5sum "$file" | awk '{print $1}')
+    if [ "$hash" != "$prev" ]; then
+      echo "$(date +"%F %T") md5 changed: $hash"
+      grep '#define PYBIND11_VERSION_' "$file" || echo "none"
+      prev=$hash
+    fi
   done
 }
 
