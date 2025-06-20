@@ -312,6 +312,7 @@ loggrep() (
 
 alias gb='git branch'
 alias gg='git grep'
+alias gs='git status --ignored'
 
 giturl() {
   git config --get remote.origin.url
@@ -337,6 +338,32 @@ mbd() {
 mbdno() {
   git diff --merge-base "$@" --name-only
 }
+
+myt() (
+    files=()
+    dash_dash_seen=0
+
+    for arg in "$@"; do
+        if [[ "$dash_dash_seen" -eq 0 && "$arg" == "--" ]]; then
+            dash_dash_seen=1
+            continue
+        fi
+        if [[ "$dash_dash_seen" -eq 0 && "$arg" != -* ]]; then
+            files+=("$arg")
+        fi
+    done
+
+    for f in "${files[@]}"; do
+        if [[ -e "$f" ]]; then
+            [[ -w "$f" ]] || { echo "myt: File exists but is not writable: $f" >&2; exit 1; }
+        else
+            parent_dir=$(dirname "$f")
+            [[ -d "$parent_dir" ]] || { echo "myt: Parent directory does not exist: $parent_dir" >&2; exit 1; }
+        fi
+    done
+
+    exec tee "$@"
+)
 
 # https://chatgpt.com/share/67e8331b-6700-8008-9a09-31c9f1611a84  2025-03-29
 # Bash completion for show_pr_for_branch.sh
