@@ -170,6 +170,33 @@ wait_watch() {
     "$target"
 }
 
+watch_pybind11_common_h() {
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: watch_pybind11_common_h <path/to/file>"
+    return 1
+  fi
+
+  local file="$1"
+
+  echo "Waiting for $file to be created..."
+
+  # Wait until the file exists
+  while [ ! -f "$file" ]; do
+    sleep 1
+  done
+
+  echo "File detected. Initial version macros:"
+  grep '#define PYBIND11_VERSION_' "$file" || echo "No version macros found."
+
+  echo "Now watching for changes to $file. Press Ctrl-C to stop."
+
+  # Monitor for modifications and re-grep
+  inotifywait -m -e modify --format '%T MODIFY %w%f' --timefmt '%F %T' "$file" | while read -r timestamp event path; do
+    echo "$timestamp Detected modification to $path"
+    grep '#define PYBIND11_VERSION_' "$file" || echo "No version macros found after modification."
+  done
+}
+
 cutniq() {
   grep -v 'Binary file' | cut -d: -f1 | uniq
 }
