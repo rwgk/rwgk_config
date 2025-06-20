@@ -28,35 +28,45 @@ venv_activate_maybe() {
     fi
 }
 
-# Silent setup: sets cache dirs without echoing
+# Silent setup: only sets cache dirs if not already set
 silent_use_tmp_user_caches() {
-    XDG_CACHE_HOME="/tmp/${USER}-xdg-cache"
-    PIP_CACHE_DIR="/tmp/${USER}-pip-cache"
-    TMPDIR="/tmp/${USER}-tmp"
+    [ -n "$XDG_CACHE_HOME" ] || XDG_CACHE_HOME="/tmp/${USER}-xdg-cache"
+    [ -n "$PIP_CACHE_DIR" ] || PIP_CACHE_DIR="/tmp/${USER}-pip-cache"
+    [ -n "$TMPDIR" ] || TMPDIR="/tmp/${USER}-tmp"
 
     export XDG_CACHE_HOME PIP_CACHE_DIR TMPDIR
 
     mkdir -p "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR"
 }
 
+# Show current values (can be useful even outside setup)
 show_tmp_user_caches() {
     echo "XDG_CACHE_HOME=$XDG_CACHE_HOME"
     echo "PIP_CACHE_DIR=$PIP_CACHE_DIR"
     echo "TMPDIR=$TMPDIR"
 }
 
-# Verbose version: prints what's being set
+# Verbose setup with user feedback
 use_tmp_user_caches() {
     silent_use_tmp_user_caches
     echo "✅ Using temporary per-user cache directories:"
     show_tmp_user_caches
 }
 
-# Cleanup function to delete the temp dirs
+# Safe cleanup: only removes per-user temp dirs under /tmp
 wipe_tmp_user_caches() {
-    echo "🧹 Removing temporary per-user cache directories..."
-    rm -rf "/tmp/${USER}-xdg-cache" "/tmp/${USER}-pip-cache" "/tmp/${USER}-tmp"
-    echo "✅ All cleaned up."
+    for d in "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR"; do
+        case "$d" in
+        /tmp/*)
+            echo "🧹 Removing $d"
+            rm -rf -- "$d"
+            ;;
+        *)
+            echo "⚠️ Skipping non-/tmp path: $d"
+            ;;
+        esac
+    done
+    echo "✅ All cleaned up (safe mode)."
 }
 
 # Automatically use temp caches if $HOME is on NFS
@@ -67,7 +77,7 @@ case "$fs_device" in
     ;;
 esac
 
-# Export functions so they’re available in child shells
+# Export functions for use in child bash shells
 export -f prepend_maybe
 export -f venv_activate_maybe
 export -f silent_use_tmp_user_caches
