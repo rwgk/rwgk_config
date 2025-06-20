@@ -153,6 +153,23 @@ grep_pytest_summary() {
   fi
 }
 
+wait_watch() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    echo "Usage: wait_watch <directory>"
+    return 1
+  fi
+
+  echo "$(date +"%F %T") Waiting for directory to appear: $target"
+  while [ ! -d "$target" ]; do sleep 1; done
+
+  echo "$(date +"%F %T") Directory found. Starting inotifywait on: $target"
+  inotifywait -m -r -e create -e modify \
+    --format '%T %e %w%f' \
+    --timefmt '%F %T' \
+    "$target"
+}
+
 cutniq() {
   grep -v 'Binary file' | cut -d: -f1 | uniq
 }
