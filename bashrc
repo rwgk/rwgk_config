@@ -357,8 +357,13 @@ git_pull_branch() {
     # Extract the remote branch name from the merge ref
     local remote_branch="${merge_ref#refs/heads/}"
 
+    # Check if this is the currently checked out branch
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$current_branch" = "$branch_name" ]; then
+        echo "Branch '$branch_name' is currently checked out - using git pull"
+        git pull || return 1
     # Check if the branch is checked out in any worktree
-    if git worktree list --porcelain | grep -q "branch refs/heads/$branch_name"; then
+    elif git worktree list --porcelain | grep -q "branch refs/heads/$branch_name"; then
         echo "Branch '$branch_name' is checked out in another worktree"
         echo "Fetching $remote/$remote_branch and updating via push"
 
