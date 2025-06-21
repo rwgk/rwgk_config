@@ -286,17 +286,6 @@ if [ -f "$HOME/rwgk_config/git_stuff/git-completion.bash" ]; then
   . "$HOME/rwgk_config/git_stuff/git-completion.bash"
 fi
 
-rwgk_gitconfig() {
-  if [ $# -ne 1 ]; then
-    echo "rwgk_gitconfig: ERROR: exactly one argument required (email), $# given."
-    return 1
-  fi
-  git config --global user.name "Ralf W. Grosse-Kunstleve"
-  git config --global user.email "$@"
-  git config --global core.editor vi
-  git config --global push.default matching
-}
-
 loggrep() (
   if [ $# -lt 2 ]; then
     echo "Usage: loggrep PATTERN FILE" >&2
@@ -337,6 +326,76 @@ mbd() {
 
 mbdno() {
   git diff --merge-base "$@" --name-only
+}
+
+git_pull_branch() {
+    if [ $# -ne 1 ]; then
+        echo "Usage: git_pull_branch <branch-name>"
+        echo "Error: Expected exactly 1 argument, got $#"
+        return 1
+    fi
+
+    local branch_name="$1"
+
+    # Check if the branch exists locally
+    if ! git show-ref --verify --quiet "refs/heads/$branch_name"; then
+        echo "Error: Branch '$branch_name' does not exist locally"
+        return 1
+    fi
+
+    # Get the tracking information for the branch
+    local remote=$(git config "branch.$branch_name.remote")
+    local merge_ref=$(git config "branch.$branch_name.merge")
+
+    if [ -z "$remote" ] || [ -z "$merge_ref" ]; then
+        echo "Error: Branch '$branch_name' has no tracking information"
+        echo "Remote: ${remote:-<not set>}"
+        echo "Merge ref: ${merge_ref:-<not set>}"
+        return 1
+    fi
+
+    # Extract the remote branch name from the merge ref
+    local remote_branch="${merge_ref#refs/heads/}"
+
+    # Check if the branch is checked out in any worktree
+    if git worktree list --porcelain | grep -q "branch refs/heads/$branch_name"; then
+        echo "Branch '$branch_name' is checked out in another worktree"
+        echo "Fetching $remote/$remote_branch and updating via push"
+
+        # Fetch the remote branch
+        git fetch "$remote" "$remote_branch" || return 1
+
+        # Push the fetched changes to the local branch
+        git push . "refs/remotes/$remote/$remote_branch:refs/heads/$branch_name" || return 1
+    else
+        echo "Pulling $remote/$remote_branch into local branch '$branch_name'"
+        git fetch "$remote" "$remote_branch:$branch_name" || return 1
+    fi
+}
+
+git_pull_branches() {
+    if [ $# -eq 0 ]; then
+        echo "Usage: git_pull_branches <branch1> [branch2] [branch3] ..."
+        return 1
+    fi
+
+    local total_branches=$#
+    local current_branch=1
+
+    for branch in "$@"; do
+        echo "[$current_branch/$total_branches] Processing branch: $branch"
+
+        if ! git_pull_branch "$branch"; then
+            echo "Error: Failed to pull branch '$branch'. Stopping."
+            return 1
+        fi
+
+        echo "✓ Successfully pulled branch '$branch'"
+        echo
+        ((current_branch++))
+    done
+
+    echo "All $total_branches branches pulled successfully!"
 }
 
 myt() (
