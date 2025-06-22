@@ -2,6 +2,7 @@ git branch --unset-upstream  # current branch
 git branch --unset-upstream other-branch
 
 git push --set-upstream origin local-branch:archive/pr1234_new-name
+git config --local push.default upstream  # tracking between branches with different names: make git less cautious (local repo only)
 
 git commit --allow-empty -m "[skip ci] empty commit"
 
