@@ -403,6 +403,44 @@ git_pull_branches() {
     echo "All $total_branches branches pulled successfully!"
 }
 
+install_git_pre_push_hook() (
+    # Check if current directory is a git repo
+    if [[ ! -e ".git" ]]; then
+        echo "Error: Current directory is not a git repository (no .git found)"
+        return 1
+    fi
+
+    # Check if pre-push hook already exists
+    if [[ -f ".git/hooks/pre-push" ]]; then
+        echo "Error: pre-push hook already exists at .git/hooks/pre-push"
+        return 1
+    fi
+
+    # Check if source hook file exists
+    HOOK_SOURCE="$HOME/rwgk_config/git_stuff/pre-push"
+    if [[ ! -f "$HOOK_SOURCE" ]]; then
+        echo "Error: Hook source file not found: $HOOK_SOURCE"
+        return 1
+    fi
+
+    # Copy and install the hook
+    if cp -a "$HOOK_SOURCE" ".git/hooks/pre-push"; then
+        chmod +x ".git/hooks/pre-push"
+        echo "✓ Installed pre-push hook from $HOOK_SOURCE"
+    else
+        echo "Error: Failed to copy pre-push hook"
+        return 1
+    fi
+)
+
+# Auto-install pre-push hook for rwgk_config repo itself
+if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push" ]]; then
+    (
+        cd "$HOME/rwgk_config"
+        install_git_pre_push_hook
+    )
+fi
+
 myt() (
     files=()
     dash_dash_seen=0
