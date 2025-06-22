@@ -2,18 +2,18 @@
 
 # If not running interactively, don't do anything
 case $- in
-    *i*) ;;
-      *) return;;
+*i*) ;;
+*) return ;;
 esac
 [ -z "$PS1" ] && return
 
-if ((  ${BASH_VERSINFO[0]} < 4 || \
-      (${BASH_VERSINFO[0]} == 4 && ${BASH_VERSINFO[1]} < 3) )); then
-  export HISTFILESIZE=10000000
-  export HISTSIZE=10000000
+if ((${BASH_VERSINFO[0]} < 4 || (\
+    ${BASH_VERSINFO[0]} == 4 && ${BASH_VERSINFO[1]} < 3))); then
+    export HISTFILESIZE=10000000
+    export HISTSIZE=10000000
 else
-  export HISTFILESIZE=-1
-  export HISTSIZE=-1
+    export HISTFILESIZE=-1
+    export HISTSIZE=-1
 fi
 export HISTTIMEFORMAT='%Y-%m-%d+%H%M%S '
 export HISTCONTROL=ignoredups
@@ -21,15 +21,15 @@ shopt -s histappend
 
 shopt -s checkwinsize
 if [[ ${BASH_VERSINFO[0]} -ge 4 ]]; then
-  shopt -s globstar
+    shopt -s globstar
 fi
 
 if [ -x /usr/bin/vim ]; then
-  export EDITOR=/usr/bin/vim
+    export EDITOR=/usr/bin/vim
 elif [ -x /usr/bin/vi ]; then
-  export EDITOR=/usr/bin/vi
+    export EDITOR=/usr/bin/vi
 else
-  export EDITOR=
+    export EDITOR=
 fi
 export VISUAL="$EDITOR"
 
@@ -37,16 +37,16 @@ export VISUAL="$EDITOR"
 export MOSH_ESCAPE_KEY=$'\x1f'
 
 if [ -x /bin/sed ]; then
-  AbsSed=/bin/sed
+    AbsSed=/bin/sed
 elif [ -x /usr/bin/sed ]; then
-  AbsSed=/usr/bin/sed
+    AbsSed=/usr/bin/sed
 else
-  AbsSed=
+    AbsSed=
 fi
 if [ -z "$AbsSed" ]; then
-  export PS1='$(/bin/hostname -f):\w $ '
+    export PS1='$(/bin/hostname -f):\w $ '
 else
-  export PS1='$(/bin/hostname -f | '"$AbsSed"' 's/\.google\.com$//'):\w $ '
+    export PS1='$(/bin/hostname -f | '"$AbsSed"' 's/\.google\.com$//'):\w $ '
 fi
 
 export IGNOREEOF=9999
@@ -56,26 +56,26 @@ export PROMPT_COMMAND='\history -a'
 alias h='\history'
 alias hr='\history -r'
 hh() {
-  \history "$@" | /usr/bin/cut -c8-
+    \history "$@" | /usr/bin/cut -c8-
 }
 
 export FIGNORE=".o:.so:.a:.pyc"
 
 export COPY_EXTENDED_ATTRIBUTES_DISABLE=true # Mac OS 10.4 or older
-export COPYFILE_DISABLE=true # Mac OS 10.5
+export COPYFILE_DISABLE=true                 # Mac OS 10.5
 DisableApplePressAndHold() {
-  echo 'Re-enabling auto-repeat for a-z character keys.'
-  defaults write -g ApplePressAndHoldEnabled -bool false
-  echo 'Please restart affected applications.'
+    echo 'Re-enabling auto-repeat for a-z character keys.'
+    defaults write -g ApplePressAndHoldEnabled -bool false
+    echo 'Please restart affected applications.'
 }
 EnableAppleFastKeyRepeat() {
-  echo 'Old parameter:'
-  defaults read NSGlobalDomain KeyRepeat
-  # 0 caused issues in gmail hangouts subpanel.
-  defaults write NSGlobalDomain KeyRepeat -int 1
-  echo 'New parameter:'
-  defaults read NSGlobalDomain KeyRepeat
-  echo 'Please restart affected applications.'
+    echo 'Old parameter:'
+    defaults read NSGlobalDomain KeyRepeat
+    # 0 caused issues in gmail hangouts subpanel.
+    defaults write NSGlobalDomain KeyRepeat -int 1
+    echo 'New parameter:'
+    defaults read NSGlobalDomain KeyRepeat
+    echo 'Please restart affected applications.'
 }
 
 alias where='type -a'
@@ -85,52 +85,52 @@ alias ll='ls -lh'
 alias lllb='ls -aAl'
 alias lll='ls -aAlh'
 lln() {
-  ls -aAlt "$@" | head -20
+    ls -aAlt "$@" | head -20
 }
 llf() {
-  ls -l "$@" | grep -v "^d" | grep -v "^total"
+    ls -l "$@" | grep -v "^d" | grep -v "^total"
 }
 lld() {
-  ls -l "$@" | grep "^d" | grep -v "^total"
+    ls -l "$@" | grep "^d" | grep -v "^total"
 }
 llg() {
-  __="$1"
-  shift
-  ls -aAl "$@" | grep -i "$__"
-  __=
+    __="$1"
+    shift
+    ls -aAl "$@" | grep -i "$__"
+    __=
 }
 fullpath() {
-  __="`pwd`"
-  for arg in "$@"; do
-    echo "$__/$arg"
-  done
-  __=
+    __="$(pwd)"
+    for arg in "$@"; do
+        echo "$__/$arg"
+    done
+    __=
 }
 vman() {
-  man "$@" | col -b | vi -R -
+    man "$@" | col -b | vi -R -
 }
 gtab() {
-  egrep -n $'\t| $' "$@"
+    egrep -n $'\t| $' "$@"
 }
 ff() {
-  if [ $# -ne 1 ]; then
-    echo "ff: ERROR: exactly one argument required, $# given."
-    return 1
-  fi
-  find . -name "$@" -print
+    if [ $# -ne 1 ]; then
+        echo "ff: ERROR: exactly one argument required, $# given."
+        return 1
+    fi
+    find . -name "$@" -print
 }
 ffRM() {
-  if [ $# -ne 1 ]; then
-    echo "ffRM: ERROR: exactly one argument required, $# given."
-    return 1
-  fi
-  find . -name "$@" -print -delete
+    if [ $# -ne 1 ]; then
+        echo "ffRM: ERROR: exactly one argument required, $# given."
+        return 1
+    fi
+    find . -name "$@" -print -delete
 }
 
 alias dirs_here_xargs='find . -maxdepth 1 -type d \! -name . -print0 | xargs -0'
 
 xattr_clear_recursive() {
-  find . \( -type d -o -type f \) -print0 | xargs -0 xattr -c
+    find . \( -type d -o -type f \) -print0 | xargs -0 xattr -c
 }
 
 cmdx() {
@@ -139,96 +139,99 @@ cmdx() {
 }
 
 grr() {
-  # -I ignores binary files
-  grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
+    # -I ignores binary files
+    grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
 }
 
 grep_pytest_summary() {
-  local pattern="(^|\s)={4,} .*(failed|passed|errors).* in [0-9]+\.[0-9]+s ={4,}\s*$"
+    local pattern="(^|\s)={4,} .*(failed|passed|errors).* in [0-9]+\.[0-9]+s ={4,}\s*$"
 
-  if command -v rg >/dev/null 2>&1; then
-    rg -a "$pattern" "$@"
-  else
-    grep -a -E "$pattern" "$@"
-  fi
+    if command -v rg >/dev/null 2>&1; then
+        rg -a "$pattern" "$@"
+    else
+        grep -a -E "$pattern" "$@"
+    fi
 }
 
 wait_watch() {
-  local target="$1"
-  if [[ -z "$target" ]]; then
-    echo "Usage: wait_watch <directory>"
-    return 1
-  fi
+    local target="$1"
+    if [[ -z "$target" ]]; then
+        echo "Usage: wait_watch <directory>"
+        return 1
+    fi
 
-  echo "$(date +"%F %T") Waiting for directory to appear: $target"
-  while [ ! -d "$target" ]; do sleep 1; done
+    echo "$(date +"%F %T") Waiting for directory to appear: $target"
+    while [ ! -d "$target" ]; do sleep 1; done
 
-  echo "$(date +"%F %T") Directory found. Starting inotifywait on: $target"
-  inotifywait -m -r -e create -e modify \
-    --format '%T %e %w%f' \
-    --timefmt '%F %T' \
-    "$target"
+    echo "$(date +"%F %T") Directory found. Starting inotifywait on: $target"
+    inotifywait -m -r -e create -e modify \
+        --format '%T %e %w%f' \
+        --timefmt '%F %T' \
+        "$target"
 }
 
 watch_pybind11_common_h() {
-  if [ "$#" -ne 1 ]; then
-    echo "Usage: watch_pybind11_common_h_poll <path/to/file>"
-    return 1
-  fi
-
-  local file="$1"
-  echo "$(date +"%F %T") Waiting for $file to exist..."
-  while [ ! -f "$file" ]; do
-    sleep 0.5
-  done
-
-  local prev
-  prev=$(md5sum "$file" | awk '{print $1}')
-  echo "$(date +"%F %T") Detected $file. md5=$prev"
-  echo "$(date +"%F %T") Version macros:"
-  grep '#define PYBIND11_VERSION_' "$file" || echo "none"
-
-  echo "$(date +"%F %T") Watching for md5 changes; press Ctrl-C to stop."
-  while true; do
-    sleep 0.5
-    if [ ! -f "$file" ]; then
-      echo "$(date +"%F %T") $file removed"
-      break
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: watch_pybind11_common_h_poll <path/to/file>"
+        return 1
     fi
-    hash=$(md5sum "$file" | awk '{print $1}')
-    if [ "$hash" != "$prev" ]; then
-      echo "$(date +"%F %T") md5 changed: $hash"
-      grep '#define PYBIND11_VERSION_' "$file" || echo "none"
-      prev=$hash
-    fi
-  done
+
+    local file="$1"
+    echo "$(date +"%F %T") Waiting for $file to exist..."
+    while [ ! -f "$file" ]; do
+        sleep 0.5
+    done
+
+    local prev
+    prev=$(md5sum "$file" | awk '{print $1}')
+    echo "$(date +"%F %T") Detected $file. md5=$prev"
+    echo "$(date +"%F %T") Version macros:"
+    grep '#define PYBIND11_VERSION_' "$file" || echo "none"
+
+    echo "$(date +"%F %T") Watching for md5 changes; press Ctrl-C to stop."
+    while true; do
+        sleep 0.5
+        if [ ! -f "$file" ]; then
+            echo "$(date +"%F %T") $file removed"
+            break
+        fi
+        hash=$(md5sum "$file" | awk '{print $1}')
+        if [ "$hash" != "$prev" ]; then
+            echo "$(date +"%F %T") md5 changed: $hash"
+            grep '#define PYBIND11_VERSION_' "$file" || echo "none"
+            prev=$hash
+        fi
+    done
 }
 
 cutniq() {
-  grep -v 'Binary file' | cut -d: -f1 | uniq
+    grep -v 'Binary file' | cut -d: -f1 | uniq
 }
 
 mkdirown() {
-  if [ $# -ne 1 ]; then
-    echo "ERROR: exactly one argument required (path), $# given."
-    return 1
-  fi
-  local path="$1"
-  sudo mkdir -p "$path" && sudo chown "$(id -u):$(id -g)" "$path"
-  return $?
+    if [ $# -ne 1 ]; then
+        echo "ERROR: exactly one argument required (path), $# given."
+        return 1
+    fi
+    local path="$1"
+    sudo mkdir -p "$path" && sudo chown "$(id -u):$(id -g)" "$path"
+    return $?
 }
 
 cpuinfo() {
-  echo -n 'logical cores:  '; cat /proc/cpuinfo | grep '^processor' | wc -l
-  echo -n 'hardware cores: '; cat /proc/cpuinfo | egrep '^core id|^physical id' | tr -d "\n" | sed s/physical/\\nphysical/g | grep -v ^$ | sort | uniq | wc -l
-  echo -n 'cpu sockets:    '; cat /proc/cpuinfo | grep '^physical id' | sort | uniq | wc -l
+    echo -n 'logical cores:  '
+    cat /proc/cpuinfo | grep '^processor' | wc -l
+    echo -n 'hardware cores: '
+    cat /proc/cpuinfo | egrep '^core id|^physical id' | tr -d "\n" | sed s/physical/\\nphysical/g | grep -v ^$ | sort | uniq | wc -l
+    echo -n 'cpu sockets:    '
+    cat /proc/cpuinfo | grep '^physical id' | sort | uniq | wc -l
 }
 
 cpumem() {
-  cmdx lscpu | grep -v -e '^Flags:' -e '^Vulnerability '
-  echo
-  cmdx free -h
-  echo
+    cmdx lscpu | grep -v -e '^Flags:' -e '^Vulnerability '
+    echo
+    cmdx free -h
+    echo
 }
 
 alias pyclean='find . -name "*.pyc" -print -delete'
@@ -236,26 +239,26 @@ alias dsclean='find . -name ".DS_Store" -print -delete'
 
 alias grepytb='grep -i -e exception -e traceback'
 
-if [ X`uname` == XDarwin ]; then
-  export BASH_SILENCE_DEPRECATION_WARNING=1
-  alias psu='env COLUMNS=100000 ps -U $USER'
-  alias psfu='env COLUMNS=100000 ps -f -U $USER'
+if [ X$(uname) == XDarwin ]; then
+    export BASH_SILENCE_DEPRECATION_WARNING=1
+    alias psu='env COLUMNS=100000 ps -U $USER'
+    alias psfu='env COLUMNS=100000 ps -f -U $USER'
 else
-  alias psu='env COLUMNS=100000 ps -u $USER'
-  alias psfu='env COLUMNS=100000 ps -f -u $USER'
+    alias psu='env COLUMNS=100000 ps -u $USER'
+    alias psfu='env COLUMNS=100000 ps -f -u $USER'
 fi
 
 alias show_ports_in_use='netstat -tulpn'
 
 pid_info() {
-  for pid in "$@"; do
-    for f in limits status; do
-      fp="/proc/$pid/$f"
-      echo "${fp}:"
-      cat "$fp"
-      echo ""
+    for pid in "$@"; do
+        for f in limits status; do
+            fp="/proc/$pid/$f"
+            echo "${fp}:"
+            cat "$fp"
+            echo ""
+        done
     done
-  done
 }
 
 alias todate='date "+%Y-%m-%d"'
@@ -267,36 +270,36 @@ alias mir='rsync --archive --delete --force --verbose --stats'
 alias svnup='svn update && svn status'
 alias sst='svn status'
 alias svndiffh='svn diff --diff-cmd=diff -x "-h"' # -h (does nothing)
-                                                  # just to override -u
+# just to override -u
 alias svndiffubw='svn diff --diff-cmd=diff -x "-u -b -w"'
 alias svnmime='svn propget svn:mime-type'
 alias svnignore='svn propedit svn:ignore .'
 
 gd() {
-  if [ -d "$HOME/Google Drive/My Drive/" ]; then
-    cd "$HOME/Google Drive/My Drive/"
-  fi
+    if [ -d "$HOME/Google Drive/My Drive/" ]; then
+        cd "$HOME/Google Drive/My Drive/"
+    fi
 }
 
 apt_list() {
-  apt --installed list
+    apt --installed list
 }
 
 if [ -f "$HOME/rwgk_config/git_stuff/git-completion.bash" ]; then
-  . "$HOME/rwgk_config/git_stuff/git-completion.bash"
+    . "$HOME/rwgk_config/git_stuff/git-completion.bash"
 fi
 
 loggrep() (
-  if [ $# -lt 2 ]; then
-    echo "Usage: loggrep PATTERN FILE" >&2
-    return 1
-  fi
+    if [ $# -lt 2 ]; then
+        echo "Usage: loggrep PATTERN FILE" >&2
+        return 1
+    fi
 
-  pattern="$1"
-  shift
+    pattern="$1"
+    shift
 
-  # Strip NULs and CR characters, then grep
-  tr -d '\000' < "$@" | sed 's/\r$//' | grep -E "$pattern"
+    # Strip NULs and CR characters, then grep
+    tr -d '\000' <"$@" | sed 's/\r$//' | grep -E "$pattern"
 )
 
 alias gb='git branch'
@@ -304,28 +307,28 @@ alias gg='git grep'
 alias gs='git status --ignored'
 
 giturl() {
-  git config --get remote.origin.url
+    git config --get remote.origin.url
 }
 
 gls() {
-  local num_commits="${1:-10}"
-  git log -n "$num_commits" --format="%H %<(100,trunc)%s"
+    local num_commits="${1:-10}"
+    git log -n "$num_commits" --format="%H %<(100,trunc)%s"
 }
 
 gitstat() {
-  git status -s "$@"
+    git status -s "$@"
 }
 
 rebase() {
-  git pull --rebase "$@"
+    git pull --rebase "$@"
 }
 
 mbd() {
-  git diff --merge-base "$@"
+    git diff --merge-base "$@"
 }
 
 mbdno() {
-  git diff --merge-base "$@" --name-only
+    git diff --merge-base "$@" --name-only
 }
 
 git_pull_branch() {
@@ -457,10 +460,16 @@ myt() (
 
     for f in "${files[@]}"; do
         if [[ -e "$f" ]]; then
-            [[ -w "$f" ]] || { echo "myt: File exists but is not writable: $f" >&2; exit 1; }
+            [[ -w "$f" ]] || {
+                echo "myt: File exists but is not writable: $f" >&2
+                exit 1
+            }
         else
             parent_dir=$(dirname "$f")
-            [[ -d "$parent_dir" ]] || { echo "myt: Parent directory does not exist: $parent_dir" >&2; exit 1; }
+            [[ -d "$parent_dir" ]] || {
+                echo "myt: Parent directory does not exist: $parent_dir" >&2
+                exit 1
+            }
         fi
     done
 
@@ -475,86 +484,86 @@ _show_pr_for_branch_completions() {
     local branches
     branches=$(git for-each-ref --format='%(refname:short)' refs/heads/)
 
-    COMPREPLY=( $(compgen -W "$branches" -- "$cur") )
+    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
 }
 # Register completion function
 complete -F _show_pr_for_branch_completions show_pr_for_branch.sh
 
 gerpush() {
-  git push origin HEAD:refs/for/master
+    git push origin HEAD:refs/for/master
 }
 
 pplint() {
-  puppet-lint --no-80chars-check --no-documentation-check "$@"
+    puppet-lint --no-80chars-check --no-documentation-check "$@"
 }
 
 disable() {
-  if [ $# -ne 1 ]; then
-    echo "disable: ERROR: exactly one argument required (service name), $# given."
-    return 1
-  fi
-  local base="/etc/init/$1"
-  local conf="${base}.conf"
-  local over="${base}.override"
-  if [ ! -f $conf ]; then
-    echo "disable: ERROR: $conf does not exist."
-    return 1
-  fi
-  /usr/bin/sudo /bin/true  # Prompt for password before echo -n.
-  echo -n "${conf}: "
-  echo manual | /usr/bin/sudo /usr/bin/tee $over
+    if [ $# -ne 1 ]; then
+        echo "disable: ERROR: exactly one argument required (service name), $# given."
+        return 1
+    fi
+    local base="/etc/init/$1"
+    local conf="${base}.conf"
+    local over="${base}.override"
+    if [ ! -f $conf ]; then
+        echo "disable: ERROR: $conf does not exist."
+        return 1
+    fi
+    /usr/bin/sudo /bin/true # Prompt for password before echo -n.
+    echo -n "${conf}: "
+    echo manual | /usr/bin/sudo /usr/bin/tee $over
 }
 
 sum_file_sizes() {
-  find . \! -regex '^\./\.git/.*' -type f -print0 | wc -c --files0-from=- | sort -n | tail
+    find . \! -regex '^\./\.git/.*' -type f -print0 | wc -c --files0-from=- | sort -n | tail
 }
 
 oc() {
-  octave -q "$@"
+    octave -q "$@"
 }
 
 setup_nim() {
-  export PATH="$HOME/clone/Nim/bin:$PATH"
-  alias toast="$HOME/clone/nimterop/nimterop/toast"
+    export PATH="$HOME/clone/Nim/bin:$PATH"
+    alias toast="$HOME/clone/nimterop/nimterop/toast"
 }
 
 fresh_venv() {
-  if [ "$#" -ne 1 ]; then
-    echo "fresh_venv: ERROR: exactly one argument required (venv name), $# given." >&2
-    return 1
-  fi
+    if [ "$#" -ne 1 ]; then
+        echo "fresh_venv: ERROR: exactly one argument required (venv name), $# given." >&2
+        return 1
+    fi
 
-  local venv_dir="$1"
+    local venv_dir="$1"
 
-  if [ -d "$venv_dir" ]; then
-    echo "fresh_venv: ERROR: directory '$venv_dir' already exists. Please remove it first." >&2
-    return 1
-  fi
+    if [ -d "$venv_dir" ]; then
+        echo "fresh_venv: ERROR: directory '$venv_dir' already exists. Please remove it first." >&2
+        return 1
+    fi
 
-  if ! python -m venv "$venv_dir"; then
-    echo "fresh_venv: ERROR: failed to create virtual environment." >&2
-    return 1
-  fi
+    if ! python -m venv "$venv_dir"; then
+        echo "fresh_venv: ERROR: failed to create virtual environment." >&2
+        return 1
+    fi
 
-  # shellcheck disable=SC1090
-  . "$venv_dir/bin/activate"
+    # shellcheck disable=SC1090
+    . "$venv_dir/bin/activate"
 
-  pip install --upgrade pip
+    pip install --upgrade pip
 
-  if [ -f requirements.txt ]; then
-    pip install -r requirements.txt
-  else
-    echo "fresh_venv: NOTE: no requirements.txt found, skipping dependency installation."
-  fi
+    if [ -f requirements.txt ]; then
+        pip install -r requirements.txt
+    else
+        echo "fresh_venv: NOTE: no requirements.txt found, skipping dependency installation."
+    fi
 }
 
 which_venv() {
-  if [ "$#" -ne 0 ]; then
-    echo "which_venv: ERROR: no arguments expected, $# given." >&2
-    return 1
-  fi
+    if [ "$#" -ne 0 ]; then
+        echo "which_venv: ERROR: no arguments expected, $# given." >&2
+        return 1
+    fi
 
-  python -c "import sys; print(f'{sys.prefix=!r}')"
+    python -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
 alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
@@ -590,9 +599,9 @@ alias mfini='source "$HOME/miniforge3/etc/profile.d/conda.sh"'
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 if command -v wslpath >/dev/null 2>&1; then
-  if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
-    . "$HOME/rwgk_config/bash_wsl_tools"
-  fi
+    if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
+        . "$HOME/rwgk_config/bash_wsl_tools"
+    fi
 fi
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
@@ -600,17 +609,17 @@ fi
 [ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
 
 if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
-  if [ -x /usr/bin/python3 ]; then
-    export PATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PATH`
-  elif [ -x /usr/bin/python ]; then
-    export PATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PATH`
-  fi
+    if [ -x /usr/bin/python3 ]; then
+        export PATH=$(/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PATH)
+    elif [ -x /usr/bin/python ]; then
+        export PATH=$(/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PATH)
+    fi
 fi
 
 if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
-  if [ -x /usr/bin/python3 ]; then
-    export PYTHONPATH=`/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
-  elif [ -x /usr/bin/python ]; then
-    export PYTHONPATH=`/usr/bin/python  "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH`
-  fi
+    if [ -x /usr/bin/python3 ]; then
+        export PYTHONPATH=$(/usr/bin/python3 "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH)
+    elif [ -x /usr/bin/python ]; then
+        export PYTHONPATH=$(/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH)
+    fi
 fi
