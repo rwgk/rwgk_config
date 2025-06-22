@@ -47,3 +47,25 @@ echo
 echo "Your branches:"
 git branch --all
 echo
+
+# Add pre-push hook
+SCRIPT_DIR="$(dirname "$(dirname "$(realpath "$0")")")"
+HOOK_SOURCE="${SCRIPT_DIR}/git_stuff/pre-push"
+HOOK_DEST=".git/hooks/pre-push"
+
+if [[ ! -f "$HOOK_SOURCE" ]]; then
+    echo "Warning: Hook source file not found: $HOOK_SOURCE"
+    echo "Skipping pre-push hook installation."
+elif [[ -f "$HOOK_DEST" ]]; then
+    echo "Warning: Hook destination already exists: $HOOK_DEST"
+    echo "Skipping pre-push hook installation to avoid overwriting."
+else
+    if cp -a "$HOOK_SOURCE" "$HOOK_DEST"; then
+        chmod +x "$HOOK_DEST"
+        echo "✓ Installed pre-push hook from $HOOK_SOURCE"
+    else
+        echo "Error: Failed to copy pre-push hook"
+        exit 1
+    fi
+fi
+echo
