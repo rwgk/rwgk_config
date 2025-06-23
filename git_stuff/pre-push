@@ -1,8 +1,11 @@
 #!/bin/sh
 
-files="$(git status --short --no-column)"
-if [ -n "$files" ]; then
-  echo ".git/hooks/pre-push: ERROR: dirty state:"
-  echo "$files"
-  exit 1
+get_filtered_status() {
+    git status --short --no-column | grep -v -E '^\?\? .*Venv/'
+}
+
+if [ "$(get_filtered_status | wc -l)" -gt 0 ]; then
+    echo ".git/hooks/pre-push: ERROR: dirty state:"
+    get_filtered_status
+    exit 1
 fi
