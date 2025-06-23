@@ -407,6 +407,22 @@ git_pull_branches() {
 }
 
 install_git_pre_push_hook() (
+    # Parse options
+    FORCE=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -f)
+                FORCE=true
+                shift
+                ;;
+            *)
+                echo "Error: Unknown option $1"
+                echo "Usage: install_git_pre_push_hook [-f]"
+                return 1
+                ;;
+        esac
+    done
+
     # Check if current directory is a git repo
     if [[ ! -e ".git" ]]; then
         echo "Error: Current directory is not a git repository (no .git found)"
@@ -415,8 +431,17 @@ install_git_pre_push_hook() (
 
     # Check if pre-push hook already exists
     if [[ -f ".git/hooks/pre-push" ]]; then
-        echo "Error: pre-push hook already exists at .git/hooks/pre-push"
-        return 1
+        echo "Existing pre-push hook found:"
+        echo "--- .git/hooks/pre-push ---"
+        cat ".git/hooks/pre-push"
+        echo "--- end ---"
+
+        if [[ "$FORCE" != true ]]; then
+            echo "Error: pre-push hook already exists at .git/hooks/pre-push (use -f to force overwrite)"
+            return 1
+        else
+            echo "Force mode: overwriting existing hook"
+        fi
     fi
 
     # Check if source hook file exists
