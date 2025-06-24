@@ -8,4 +8,7 @@ git commit --allow-empty -m "[skip ci] empty commit"
 
 git rev-parse --short HEAD
 
+# To archive numbered patches (e.g. from debugging work):
+git format-patch --author="Ralf W. Grosse-Kunstleve" upstream/main..HEAD
+
 git checkout --orphan new-branch-name && git rm -rf . && git status
