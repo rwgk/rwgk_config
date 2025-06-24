@@ -565,7 +565,7 @@ fresh_venv() {
         return 1
     fi
 
-    if ! python -m venv "$venv_dir"; then
+    if ! python3 -m venv "$venv_dir"; then
         echo "fresh_venv: ERROR: failed to create virtual environment." >&2
         return 1
     fi
@@ -588,7 +588,7 @@ which_venv() {
         return 1
     fi
 
-    python -c "import sys; print(f'{sys.prefix=!r}')"
+    python3 -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
 alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
