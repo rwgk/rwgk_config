@@ -304,7 +304,8 @@ loggrep() (
 
 alias gb='git branch'
 alias gg='git grep'
-alias gs='git status --ignored'
+alias gs='git status'
+alias gsi='git status --ignored'
 
 giturl() {
     git config --get remote.origin.url
