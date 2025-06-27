@@ -144,7 +144,7 @@ grr() {
 }
 
 grep_pytest_summary() {
-    local pattern="(^|\s)={4,} .*(failed|passed|errors).* in [0-9]+\.[0-9]+s ={4,}\s*$"
+    local pattern='==== .*?(passed|failed|skipped|errors).* ===='
 
     if command -v rg >/dev/null 2>&1; then
         rg -a "$pattern" "$@"
