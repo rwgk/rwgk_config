@@ -406,15 +406,15 @@ install_git_pre_push_hook() (
     FORCE=false
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -f)
-                FORCE=true
-                shift
-                ;;
-            *)
-                echo "Error: Unknown option $1"
-                echo "Usage: install_git_pre_push_hook [-f]"
-                return 1
-                ;;
+        -f)
+            FORCE=true
+            shift
+            ;;
+        *)
+            echo "Error: Unknown option $1"
+            echo "Usage: install_git_pre_push_hook [-f]"
+            return 1
+            ;;
         esac
     done
 
