@@ -36,17 +36,11 @@ export VISUAL="$EDITOR"
 # Ctrl-7 (MacOS)
 export MOSH_ESCAPE_KEY=$'\x1f'
 
-if [ -x /bin/sed ]; then
-    AbsSed=/bin/sed
-elif [ -x /usr/bin/sed ]; then
-    AbsSed=/usr/bin/sed
+if [[ "$OSTYPE" == "msys" ]]; then
+    # Git Bash
+    export PS1='$(hostname):$PWD $ '
 else
-    AbsSed=
-fi
-if [ -z "$AbsSed" ]; then
     export PS1='$(/bin/hostname -f):\w $ '
-else
-    export PS1='$(/bin/hostname -f | '"$AbsSed"' 's/\.google\.com$//'):\w $ '
 fi
 
 export IGNOREEOF=9999
