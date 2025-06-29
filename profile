@@ -77,6 +77,16 @@ case "$fs_device" in
     ;;
 esac
 
+setup_vim_dirs() {
+    mkdir -p "$HOME/.vim/backup" "$HOME/.vim/swap" "$HOME/.vim/undo"
+    echo "✅ Vim directories created"
+}
+
+# One-time vim directory setup
+if [ ! -d "$HOME/.vim/backup" ]; then
+    setup_vim_dirs
+fi
+
 # Export functions for use in child bash shells
 export -f prepend_maybe
 export -f venv_activate_maybe
@@ -84,6 +94,7 @@ export -f silent_use_tmp_user_caches
 export -f show_tmp_user_caches
 export -f use_tmp_user_caches
 export -f wipe_tmp_user_caches
+export -f setup_vim_dirs
 
 if [ -f /.dockerenv ]; then
     prepend_maybe PATH "/usr/local/cuda/bin"
