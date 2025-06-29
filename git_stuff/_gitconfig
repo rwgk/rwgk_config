@@ -7,6 +7,7 @@
 [core]
         editor = vi
         excludesfile = ~/.gitignore_global
+	autocrlf = false
 [url "git@github.com:"]
         pushInsteadOf = https://github.com/
 [color]
