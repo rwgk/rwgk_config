@@ -614,7 +614,9 @@ alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
-alias mfini='source "$HOME/miniforge3/etc/profile.d/conda.sh"'
+mf3path() {
+    source "$HOME/miniforge3/etc/profile.d/conda.sh"
+}
 
 export NUMBA_CAPTURED_ERRORS="new_style"
 
