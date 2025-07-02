@@ -14,7 +14,9 @@ fi
 cp "$SOURCE" "$DEST"
 
 # If user is 'rgrossekunst' or hostname ends with .nvidia.com, update email
-if [[ "$USER" == "rgrossekunst" || "$(hostname -f)" == *.nvidia.com ]]; then
+actual_user="${USER:-${USERNAME:-}}"
+
+if [[ "$actual_user" == "rgrossekunst" || "$(hostname -f 2>/dev/null || hostname)" == *.nvidia.com ]]; then
     sed -i.bak 's/^\(\s*email = \).*$/\1rgrossekunst@nvidia.com/' "$DEST"
 fi
 
