@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 
+; winget install --id AutoHotkey.AutoHotkey --source winget
 ; copy rwgk_hotkeys.ahk "$env:USERPROFILE\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
 
 ; Alt + F7 → EM DASH
