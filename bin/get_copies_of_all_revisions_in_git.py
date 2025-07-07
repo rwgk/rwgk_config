@@ -3,8 +3,26 @@
 import os
 import subprocess
 import sys
-import re
 from datetime import datetime, timezone
+
+
+def current_working_directory_is_top_level_in_git_repo():
+    """Check if we're in a git repository (handles both normal repos and worktrees)"""
+    git_path = ".git"
+
+    if os.path.isdir(git_path):
+        return True  # Normal git repository
+
+    if os.path.isfile(git_path):
+        # Potentially a git worktree
+        try:
+            with open(git_path, "r") as f:
+                first_line = f.readline().strip()
+                return first_line.startswith("gitdir: ")
+        except (IOError, OSError):
+            pass
+
+    return False
 
 
 def get_all_revisions(repo_path, file_path, output_dir):
@@ -42,7 +60,7 @@ def get_all_revisions(repo_path, file_path, output_dir):
 def run(args):
     assert len(args) == 1, "file_path"
 
-    if not os.path.isdir(".git"):
+    if not current_working_directory_is_top_level_in_git_repo():
         raise RuntimeError("Please cd to top-level directory in this repo.")
 
     file_path = sys.argv[1]
