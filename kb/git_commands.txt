@@ -6,9 +6,14 @@ git config --local push.default upstream  # tracking between branches with diffe
 
 git commit --allow-empty -m "[skip ci] empty commit"
 
+# Get short commit hash of HEAD
 git rev-parse --short HEAD
 
 # To archive numbered patches (e.g. from debugging work):
 git format-patch --author="Ralf W. Grosse-Kunstleve" upstream/main..HEAD
 
+# Create __EMPTY__ branch
 git checkout --orphan new-branch-name && git rm -rf . && git status
+
+# All commits not on main, and excluding merge commits
+git log --no-merges main..move_path_finder_to_top
