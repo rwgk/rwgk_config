@@ -5,6 +5,56 @@ $env:Path += ";C:\Program Files\Vim\vim91"
 function gitbash { & "C:\Program Files\Git\bin\bash.exe" -l }
 function mf3path { & "$env:USERPROFILE\AppData\Local\miniforge3\shell\condabin\conda-hook.ps1" }
 
+function fresh_venv {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$VenvName
+    )
+
+    # Check if directory already exists
+    if (Test-Path $VenvName) {
+        Write-Error "fresh_venv: ERROR: directory '$VenvName' already exists. Please remove it first."
+        return
+    }
+
+    # Create virtual environment
+    try {
+        Write-Host "Creating virtual environment: $VenvName"
+        python -m venv $VenvName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python venv creation failed"
+        }
+    }
+    catch {
+        Write-Error "fresh_venv: ERROR: failed to create virtual environment."
+        return
+    }
+
+    # Activate virtual environment
+    $activateScript = Join-Path $VenvName "Scripts\Activate.ps1"
+    if (Test-Path $activateScript) {
+        & $activateScript
+        Write-Host "Virtual environment activated: $VenvName" -ForegroundColor Green
+    }
+    else {
+        Write-Error "fresh_venv: ERROR: activation script not found at $activateScript"
+        return
+    }
+
+    # Upgrade pip
+    Write-Host "Upgrading pip..."
+    python -m pip install --upgrade pip
+
+    # Install requirements if requirements.txt exists
+    if (Test-Path "requirements.txt") {
+        Write-Host "Installing dependencies from requirements.txt..."
+        pip install -r requirements.txt
+    }
+    else {
+        Write-Host "fresh_venv: NOTE: no requirements.txt found, skipping dependency installation." -ForegroundColor Yellow
+    }
+}
+
 function set_cuda_env {
     param(
         [string]$Version
