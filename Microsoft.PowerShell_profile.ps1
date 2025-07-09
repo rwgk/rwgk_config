@@ -5,7 +5,7 @@ $env:Path += ";C:\Program Files\Vim\vim91"
 function gitbash { & "C:\Program Files\Git\bin\bash.exe" -l }
 function mf3path { & "$env:USERPROFILE\AppData\Local\miniforge3\shell\condabin\conda-hook.ps1" }
 
-function Set-CudaEnv {
+function set_cuda_env {
     param(
         [string]$Version
     )

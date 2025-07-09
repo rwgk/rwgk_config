@@ -618,6 +618,12 @@ mf3path() {
     source "$HOME/miniforge3/etc/profile.d/conda.sh"
 }
 
+set_cuda_env() {
+    export CUDA_HOME=/usr/local/cuda
+    export LIBRARY_PATH="$CUDA_HOME/lib64:$LIBRARY_PATH"
+    export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$CUDA_HOME/nvvm/lib64:$LD_LIBRARY_PATH"
+}
+
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 if command -v wslpath >/dev/null 2>&1; then
