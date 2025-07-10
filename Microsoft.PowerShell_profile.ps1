@@ -1,5 +1,7 @@
 # copy Microsoft.PowerShell_profile.ps1 "$PROFILE"
-$uh = "\\wsl$\Ubuntu\home\$env:USERNAME"
+if (-not (Test-Path "U:\")) {
+    cmd /c "subst U: \\wsl$\Ubuntu\home\$env:USERNAME"
+}
 $wintermsettings = "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
 $env:Path += ";C:\Program Files\Vim\vim91"
 function gitbash { & "C:\Program Files\Git\bin\bash.exe" -l }
