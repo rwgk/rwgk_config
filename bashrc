@@ -586,7 +586,7 @@ which_venv() {
     python3 -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
-alias vba='. "$HOME/venvs/$(echo "$HOSTNAME" | cut -d'.' -f1)/base/bin/activate"'
+alias vma='. "$HOME/Venvs/misc/bin/activate"'
 alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
