@@ -13,7 +13,7 @@ cdwin() {
     # Initialize _winhome_wsl once
     if [ -z "$_winhome_wsl" ]; then
         local userprofile
-        userprofile="$(cmd.exe /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+        userprofile="$(/mnt/c/Windows/system32/cmd.exe /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
         if [ -z "$userprofile" ]; then
             echo "Error: Could not determine Windows home directory." >&2
             return 1
@@ -64,5 +64,5 @@ explorerwin() (
         return 1
     fi
 
-    exec nohup explorer.exe "$(wslpath -w "$target")" >/dev/null 2>&1
+    exec nohup /mnt/c/Windows/explorer.exe "$(wslpath -w "$target")" >/dev/null 2>&1
 )
