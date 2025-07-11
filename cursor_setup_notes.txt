@@ -1,0 +1,14 @@
+# copy from rdc:
+$ ls -1 ~/Installed/
+Cursor-1.2.1-x86_64.AppImage
+google-chrome-stable_current_amd64.deb
+
+sudo apt install ~/Installed/google-chrome-stable_current_amd64.deb
+google-chrome  # make default, login, and leave window open for next steps
+
+sudo apt install fuse libfuse2
+
+mkdir -p ~/.local/bin && ln -s ~/Installed/Cursor-1.2.1-x86_64.AppImage ~/.local/bin/cursor
+mkdir -p ~/.config/Cursor/User && scp 'rdc:.config/Cursor/User/*.json' ~/.config/Cursor/User/
+
+lcw .
