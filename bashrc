@@ -614,6 +614,41 @@ alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
+# launch cursor window
+lcw() (
+    # Check if ~/logs exists and is writable
+    if [[ ! -d ~/logs ]]; then
+        echo "Error: ~/logs directory does not exist" >&2
+        return 1
+    fi
+
+    if [[ ! -w ~/logs ]]; then
+        echo "Error: ~/logs directory is not writable" >&2
+        return 1
+    fi
+
+    # Create log filename with current directory and timestamp
+    pwd_safe=$(pwd | sed 's|/|_|g; s|[[:space:]]|_|g')
+    log_file="$HOME/logs/cursor_stdout${pwd_safe}_$(now).txt"
+
+    # Launch the monitoring function in background
+    _lcw_impl "$log_file" "$@" &
+
+    echo "Cursor launched in background, logging to: $log_file"
+)
+
+_lcw_impl() (
+    log_file="$1"
+    shift
+
+    # Run cursor with output redirected to log file
+    cursor "$@" &>"$log_file"
+    exit_code=$?
+
+    # Append exit information to log file
+    echo "cursor EXIT at $(now) with exit code $exit_code" >>"$log_file"
+)
+
 mf3path() {
     source "$HOME/miniforge3/etc/profile.d/conda.sh"
 }
