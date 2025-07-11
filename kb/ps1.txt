@@ -1,0 +1,12 @@
+# sudo reboot
+Restart-Computer -Force
+
+# rm -rf
+Remove-Item -Recurse -Force somedirectory
+
+# which
+(Get-Command cmd.exe).Source
+
+# zip, unzip
+Compress-Archive -LiteralPath file1, file2 -DestinationPath ..\tmp.zip
+Expand-Archive ..\tmp.zip
