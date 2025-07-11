@@ -616,6 +616,11 @@ alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
 # launch cursor window
 lcw() (
+    if ! command -v cursor >/dev/null 2>&1; then
+        echo "Error: cursor command does not exist" >&2
+        return 1
+    fi
+
     # Check if ~/logs exists and is writable
     if [[ ! -d ~/logs ]]; then
         echo "Error: ~/logs directory does not exist" >&2
