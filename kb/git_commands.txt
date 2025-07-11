@@ -17,3 +17,6 @@ git checkout --orphan new-branch-name && git rm -rf . && git status
 
 # All commits not on main, and excluding merge commits
 git log --no-merges main..move_path_finder_to_top
+
+# shows the raw object, which can be interesting to see exactly what Git stores in the object.
+git cat-file -p <hash>
