@@ -2,6 +2,11 @@
 # This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login
 # exists.
 
+# Remove duplicates, empty fields (::), trailing :, preserve order.
+clean_path() {
+    echo "$1" | tr ':' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ':' | sed 's/:$//'
+}
+
 prepend_maybe() {
     if [ "$#" -ne 2 ]; then
         echo "Usage: prepend_maybe <VARNAME> <VALUE>" >&2
@@ -88,6 +93,7 @@ if [ ! -d "$HOME/.vim/backup" ]; then
 fi
 
 # Export functions for use in child bash shells
+export -f clean_path
 export -f prepend_maybe
 export -f venv_activate_maybe
 export -f silent_use_tmp_user_caches
