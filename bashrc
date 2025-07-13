@@ -664,6 +664,11 @@ set_cuda_env() {
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$CUDA_HOME/nvvm/lib64:$LD_LIBRARY_PATH"
 }
 
+set_cuda_env_bld() {
+    set_cuda_env
+    export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
+}
+
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 if command -v wslpath >/dev/null 2>&1; then
