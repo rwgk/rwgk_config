@@ -45,7 +45,36 @@ fi
 
 export IGNOREEOF=9999
 
-export PROMPT_COMMAND='\history -a'
+_smart_prompt_command() {
+    # Always append history
+    \history -a
+
+    # Only update terminal title if running in Windows Terminal under WSL
+    if [[ -n "$WT_SESSION" && -n "$WSL_DISTRO_NAME" ]]; then
+        local pwd_length=26
+        local pwd_display="$PWD"
+
+        # Replace home directory with ~
+        if [[ "$PWD" == "$HOME"* ]]; then
+            pwd_display="~${PWD#$HOME}"
+        fi
+
+        # Get the basename (last part of path)
+        local basename="${pwd_display##*/}"
+
+        # If basename alone is longer than pwd_length, just use basename
+        if [ ${#basename} -gt $pwd_length ]; then
+            pwd_display="$basename"
+        # Otherwise, truncate from the beginning if the full path is too long
+        elif [ ${#pwd_display} -gt $pwd_length ]; then
+            pwd_display="...${pwd_display: -$(($pwd_length - 3))}"
+        fi
+
+        echo -ne "\033]0;${pwd_display}\007"
+    fi
+}
+
+export PROMPT_COMMAND='_smart_prompt_command'
 
 alias h='\history'
 alias hr='\history -r'
