@@ -49,8 +49,8 @@ _smart_prompt_command() {
     # Always append history
     \history -a
 
-    # Only update terminal title if running in Windows Terminal under WSL
-    if [[ -n "$WT_SESSION" && -n "$WSL_DISTRO_NAME" ]]; then
+    # Update terminal title if running in Windows Terminal
+    if [[ -n "$WT_SESSION" ]]; then
         local pwd_length=26
         local pwd_display="$PWD"
 
