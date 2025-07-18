@@ -49,8 +49,8 @@ _smart_prompt_command() {
     # Always append history
     \history -a
 
-    # Update terminal title if running in Windows Terminal
-    if [[ -n "$WT_SESSION" ]]; then
+    # Update terminal title in interactive terminals
+    if [[ $- == *i* ]] && [[ -t 1 ]]; then
         local pwd_length=26
         local pwd_display="$PWD"
 
