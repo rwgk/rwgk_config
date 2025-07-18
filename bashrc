@@ -176,6 +176,8 @@ grep_pytest_summary() {
     fi
 }
 
+alias myshfmt='shfmt -i 4 -w'
+
 wait_watch() {
     local target="$1"
     if [[ -z "$target" ]]; then
