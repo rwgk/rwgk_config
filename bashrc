@@ -694,7 +694,7 @@ nfid() {
         return 1
     fi
 
-    # Use shell globs for pattern matching
+    # Collect matching files
     local matches=()
     while IFS= read -r -d '' file; do
         matches+=("$file")
@@ -707,18 +707,16 @@ nfid() {
 
     local newest=""
     local newest_mtime=0
-    local stat_cmd
-
-    # Detect platform-specific stat
-    if stat -f '%m' "$0" &>/dev/null; then
-        stat_cmd='stat -f %m' # macOS / BSD
-    else
-        stat_cmd='stat -c %Y' # GNU/Linux
-    fi
+    local mtime
 
     for file in "${matches[@]}"; do
-        mtime=$($stat_cmd "$file")
-        if ((mtime > newest_mtime)); then
+        if [[ $(uname) == "Darwin" ]]; then
+            mtime=$(stat -f %m "$file")  # macOS
+        else
+            mtime=$(stat -c %Y "$file")  # Linux / GNU
+        fi
+
+        if (( mtime > newest_mtime )); then
             newest_mtime=$mtime
             newest=$file
         fi
