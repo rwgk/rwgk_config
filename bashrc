@@ -685,6 +685,50 @@ _lcw_impl() (
     echo "cursor EXIT at $(now) with exit code $exit_code" >>"$log_file"
 )
 
+nfid() {
+    local dir=$1
+    local pattern=${2:-*}
+
+    if [[ ! -d $dir ]]; then
+        echo "Error: '$dir' is not a directory" >&2
+        return 1
+    fi
+
+    # Use shell globs for pattern matching
+    local matches=()
+    while IFS= read -r -d '' file; do
+        matches+=("$file")
+    done < <(find "$dir" -maxdepth 1 -type f -name "$pattern" -print0)
+
+    if [[ ${#matches[@]} -eq 0 ]]; then
+        echo "Error: no files matching '$pattern' in '$dir'" >&2
+        return 1
+    fi
+
+    local newest=""
+    local newest_mtime=0
+    local stat_cmd
+
+    # Detect platform-specific stat
+    if stat -f '%m' "$0" &>/dev/null; then
+        stat_cmd='stat -f %m' # macOS / BSD
+    else
+        stat_cmd='stat -c %Y' # GNU/Linux
+    fi
+
+    for file in "${matches[@]}"; do
+        mtime=$($stat_cmd "$file")
+        if ((mtime > newest_mtime)); then
+            newest_mtime=$mtime
+            newest=$file
+        fi
+    done
+
+    echo "$newest"
+}
+
+nlog() { nfid "$HOME/logs" "$@"; }
+
 mf3path() {
     source "$HOME/miniforge3/etc/profile.d/conda.sh"
 }
@@ -698,6 +742,7 @@ set_cuda_env() {
 set_cuda_env_bld() {
     set_cuda_env
     export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
+    export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
 }
 
 export NUMBA_CAPTURED_ERRORS="new_style"
