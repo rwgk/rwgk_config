@@ -9,6 +9,9 @@ git commit --allow-empty -m "[skip ci] empty commit"
 # Get short commit hash of HEAD
 git rev-parse --short HEAD
 
+# Get commit hash that was HEAD right before the merge. This assumes the merge commit is still HEAD.
+git rev-parse HEAD@{1}
+
 # To archive numbered patches (e.g. from debugging work):
 git format-patch --author="Ralf W. Grosse-Kunstleve" upstream/main..HEAD
 
