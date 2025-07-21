@@ -711,12 +711,12 @@ nfid() {
 
     for file in "${matches[@]}"; do
         if [[ $(uname) == "Darwin" ]]; then
-            mtime=$(stat -f %m "$file")  # macOS
+            mtime=$(stat -f %m "$file") # macOS
         else
-            mtime=$(stat -c %Y "$file")  # Linux / GNU
+            mtime=$(stat -c %Y "$file") # Linux / GNU
         fi
 
-        if (( mtime > newest_mtime )); then
+        if ((mtime > newest_mtime)); then
             newest_mtime=$mtime
             newest=$file
         fi
