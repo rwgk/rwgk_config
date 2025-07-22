@@ -495,6 +495,50 @@ if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push
     )
 fi
 
+git_branch_D_track_hash() (
+    set -euo pipefail
+
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: git_branch_D_track_hash <branchname>" >&2
+        return 1
+    fi
+
+    branch="$1"
+
+    # Check MY_GIT_BACKTRACKING_INFO
+    if [[ -z "${MY_GIT_BACKTRACKING_INFO:-}" ]]; then
+        echo "Error: Environment variable MY_GIT_BACKTRACKING_INFO is not set." >&2
+        return 1
+    fi
+
+    if [[ ! -d "$MY_GIT_BACKTRACKING_INFO" ]]; then
+        echo "Error: MY_GIT_BACKTRACKING_INFO='$MY_GIT_BACKTRACKING_INFO' is not a directory." >&2
+        return 1
+    fi
+
+    # Ensure the branch exists
+    if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
+        echo "Error: branch '$branch' not found." >&2
+        return 1
+    fi
+
+    commit=$(git rev-parse "$branch")
+    repo=$(basename "$(git rev-parse --show-toplevel)")
+    timestamp=$(date +%Y-%m-%d+%H%M%S)
+    infofile="$MY_GIT_BACKTRACKING_INFO/${repo}_${branch}_${timestamp}.txt"
+
+    {
+        echo "Current working directory: '$(pwd)'"
+        echo "Repository: '$repo'"
+        echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
+        echo
+        git show --stat --summary "$commit"
+    } >"$infofile"
+
+    echo "Backed up branch tip to: '$infofile'"
+    git branch -D "$branch"
+)
+
 myt() (
     files=()
     dash_dash_seen=0
