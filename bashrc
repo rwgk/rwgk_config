@@ -82,6 +82,14 @@ hh() {
     \history "$@" | /usr/bin/cut -c8-
 }
 
+hostfqdn() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import socket; print(socket.getfqdn())'
+    else
+        hostname -f
+    fi
+}
+
 export FIGNORE=".o:.so:.a:.pyc"
 
 export COPY_EXTENDED_ATTRIBUTES_DISABLE=true # Mac OS 10.4 or older
@@ -528,6 +536,7 @@ git_branch_D_track_hash() (
     infofile="$MY_GIT_BACKTRACKING_INFO/${repo}_${branch}_${timestamp}.txt"
 
     {
+        echo "Current host: '$(hostfqdn)'"
         echo "Current working directory: '$(pwd)'"
         echo "Repository: '$repo'"
         echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
