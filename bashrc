@@ -458,7 +458,9 @@ git_branch_D_track_hash() (
     commit=$(git rev-parse "$branch")
     repo=$(basename "$(git rev-parse --show-toplevel)")
     timestamp=$(date +%Y-%m-%d+%H%M%S)
-    infofile="$MY_GIT_BACKTRACKING_INFO/${repo}_${branch}_${timestamp}.txt"
+    safe_repo="${repo//[^A-Za-z0-9._@-]/_}"
+    safe_branch="${branch//[^A-Za-z0-9._@-]/_}"
+    infofile="$MY_GIT_BACKTRACKING_INFO/${safe_repo}_${safe_branch}_${timestamp}.txt"
 
     {
         echo "Current host: '$(hostfqdn)'"
