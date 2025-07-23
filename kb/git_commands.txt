@@ -6,6 +6,9 @@ git config --local push.default upstream  # tracking between branches with diffe
 
 git commit --allow-empty -m "[skip ci] empty commit"
 
+#             vv JUST A BRANCH NAME vv         vvvvv REMOTE/BRANCH vvvv
+git switch -c other_ghuser/some_branch --track other_ghuser/some_branch
+
 # Get short commit hash of HEAD
 git rev-parse --short HEAD
 
