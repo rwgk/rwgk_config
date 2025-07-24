@@ -708,7 +708,16 @@ nfid() {
 nlog() { nfid "$HOME/logs" "$@"; }
 
 mf3path() {
-    source "$HOME/miniforge3/etc/profile.d/conda.sh"
+    if [ -d /wrk/miniforge3 ]; then
+        echo "Using /wrk/miniforge3"
+        source /wrk/miniforge3/etc/profile.d/conda.sh
+    elif [ -d "$HOME/miniforge3" ]; then
+        echo "Using \$HOME/miniforge3"
+        source "$HOME/miniforge3/etc/profile.d/conda.sh"
+    else
+        echo "Error: Neither /wrk/miniforge3 nor \$HOME/miniforge3 exists." >&2
+        return 1
+    fi
 }
 
 set_cuda_env() {
