@@ -705,7 +705,13 @@ nfid() {
     echo "$newest"
 }
 
-nlog() { nfid "$HOME/logs" "$@"; }
+nlog() {
+    if [ -d /wrk/logs ]; then
+        nfid /wrk/logs "$@"
+    else
+        nfid "$HOME/logs" "$@"
+    fi
+}
 
 mf3path() {
     if [ -d /wrk/miniforge3 ]; then
