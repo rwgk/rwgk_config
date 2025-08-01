@@ -1,0 +1,7 @@
+In bash scripts, needed before `conda activate EnvName`:
+
+source "$(dirname "$(dirname "$(which conda)")")/etc/profile.d/conda.sh"
+
+conda env list
+conda create -y -n EnvName python=3.12
+conda env remove -y -n EnvName
