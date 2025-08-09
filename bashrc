@@ -475,6 +475,28 @@ git_branch_D_track_hash() (
     git branch -D "$branch"
 )
 
+git_log_between() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: git_log_between <from> <to> [path...]" >&2
+        return 1
+    fi
+    local from=$1
+    local to=$2
+    shift 2
+    git log --no-merges --name-status "${from}..${to}" -- "$@"
+}
+
+git_logdiff_between() {
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: git_logdiff_between <from> <to> [path...]" >&2
+        return 1
+    fi
+    local from=$1
+    local to=$2
+    shift 2
+    git log --no-merges --patch "${from}..${to}" -- "$@"
+}
+
 myt() (
     files=()
     dash_dash_seen=0
