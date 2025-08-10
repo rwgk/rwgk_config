@@ -2,6 +2,32 @@
 # This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login
 # exists.
 
+# Export WHOME (Windows home in WSL path form) for all shells, only on WSL.
+# - Safe if cmd.exe isn't on PATH
+# - Won't overwrite if WHOME already set
+if [ -z "${WHOME:-}" ] && command -v wslpath >/dev/null 2>&1; then
+    # Locate cmd.exe explicitly (PATH is not reliable in WSL)
+    CMD_EXE=""
+    for _c in /mnt/c/Windows/System32/cmd.exe /mnt/c/Windows/system32/cmd.exe; do
+        [ -x "$_c" ] && CMD_EXE="$_c" && break
+    done
+
+    if [ -n "$CMD_EXE" ]; then
+        # Prefer %USERPROFILE%, fall back to %HOMEDRIVE%%HOMEPATH%
+        _win_userprofile="$("$CMD_EXE" /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+        if [ -z "$_win_userprofile" ]; then
+            _win_userprofile="$("$CMD_EXE" /C "echo %HOMEDRIVE%%HOMEPATH%" 2>/dev/null | tr -d '\r')"
+        fi
+
+        if [ -n "$_win_userprofile" ]; then
+            export WHOME="$(wslpath "$_win_userprofile")"
+        fi
+
+        unset _win_userprofile
+    fi
+    unset CMD_EXE _c
+fi
+
 # Remove duplicates, empty fields (::), trailing :, preserve order.
 clean_path() {
     echo "$1" | tr ':' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ':' | sed 's/:$//'
