@@ -12,7 +12,6 @@ alias RC='cd "$HOME/rwgk_config"'
 if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
     . "$HOME/rwgk_config/bash_maybe_use_chd_history"
     __maybe_use_chd_history
-    PROMPT_COMMAND='__maybe_use_chd_history; '"$PROMPT_COMMAND"
 fi
 shopt -s histappend
 if ((${BASH_VERSINFO[0]} < 4 || (\
@@ -54,9 +53,7 @@ export IGNOREEOF=9999
 
 _smart_prompt_command() {
     # Always append history
-    \history -a
-    # Also read any new lines from HISTFILE (from other shells / sync)
-    \history -n
+    builtin history -a
 
     # Update terminal title in interactive terminals
     if [[ $- == *i* ]] && [[ -t 1 ]]; then
@@ -85,10 +82,14 @@ _smart_prompt_command() {
 
 export PROMPT_COMMAND='_smart_prompt_command'
 
-alias h='\history'
-alias hr='\history -r'
+alias h='builtin history'
+hr() {
+    builtin history -a
+    builtin history -c
+    builtin history -r
+}
 hh() {
-    \history "$@" | /usr/bin/cut -c8-
+    builtin history "$@" | /usr/bin/cut -c8-
 }
 
 hostfqdn() {

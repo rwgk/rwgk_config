@@ -21,8 +21,6 @@ __maybe_use_chd_history() {
             if [ "${HISTFILE:-$HOME/.bash_history}" != "$target" ]; then
                 export HISTFILE="$target"
                 [ -e "$HISTFILE" ] || : >"$HISTFILE"
-                builtin history -a
-                builtin history -n
             fi
             return 0
         fi
@@ -32,8 +30,6 @@ __maybe_use_chd_history() {
     if [ "${HISTFILE:-}" != "$HOME/.bash_history" ]; then
         export HISTFILE="$HOME/.bash_history"
         [ -e "$HISTFILE" ] || : >"$HISTFILE"
-        builtin history -a
-        builtin history -n
     fi
     return 1
 }
