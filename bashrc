@@ -50,6 +50,8 @@ export IGNOREEOF=9999
 _smart_prompt_command() {
     # Always append history
     \history -a
+    # Also read any new lines from HISTFILE (from other shells / sync)
+    \history -n
 
     # Update terminal title in interactive terminals
     if [[ $- == *i* ]] && [[ -t 1 ]]; then
