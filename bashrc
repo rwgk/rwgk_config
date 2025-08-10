@@ -7,6 +7,8 @@ case $- in
 esac
 [ -z "$PS1" ] && return
 
+alias RC='cd "$HOME/rwgk_config"'
+
 if ((${BASH_VERSINFO[0]} < 4 || (\
     ${BASH_VERSINFO[0]} == 4 && ${BASH_VERSINFO[1]} < 3))); then
     export HISTFILESIZE=10000000
