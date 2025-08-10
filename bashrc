@@ -9,6 +9,12 @@ esac
 
 alias RC='cd "$HOME/rwgk_config"'
 
+if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
+    . "$HOME/rwgk_config/bash_maybe_use_chd_history"
+    __maybe_use_chd_history
+    PROMPT_COMMAND='__maybe_use_chd_history; '"$PROMPT_COMMAND"
+fi
+shopt -s histappend
 if ((${BASH_VERSINFO[0]} < 4 || (\
     ${BASH_VERSINFO[0]} == 4 && ${BASH_VERSINFO[1]} < 3))); then
     export HISTFILESIZE=10000000
@@ -19,7 +25,6 @@ else
 fi
 export HISTTIMEFORMAT='%Y-%m-%d+%H%M%S '
 export HISTCONTROL=ignoredups
-shopt -s histappend
 
 shopt -s checkwinsize
 if [[ ${BASH_VERSINFO[0]} -ge 4 ]]; then

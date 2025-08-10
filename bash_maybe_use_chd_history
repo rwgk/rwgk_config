@@ -1,0 +1,39 @@
+# Detect and (re)set central history when available.
+__maybe_use_chd_history() {
+    # You can override this candidate in your env if needed
+    local candidate="${CENTRAL_HOME_DIRECTORY_CANDIDATE:-/mnt/h}"
+    local marker=".is_central_home_directory"
+
+    # If CENTRAL_HOME_DIRECTORY not set, try to discover it
+    if [ -z "${CENTRAL_HOME_DIRECTORY:-}" ] &&
+        [ -d "$candidate" ] &&
+        [ -f "$candidate/$marker" ] &&
+        [ -w "$candidate" ]; then
+        export CENTRAL_HOME_DIRECTORY="$candidate"
+    fi
+
+    # If set, validate and switch HISTFILE accordingly
+    if [ -n "${CENTRAL_HOME_DIRECTORY:-}" ] &&
+        [ -d "$CENTRAL_HOME_DIRECTORY" ] &&
+        [ -f "$CENTRAL_HOME_DIRECTORY/$marker" ]; then
+        if [ -w "$CENTRAL_HOME_DIRECTORY" ]; then
+            local target="$CENTRAL_HOME_DIRECTORY/.bash_history"
+            if [ "${HISTFILE:-$HOME/.bash_history}" != "$target" ]; then
+                export HISTFILE="$target"
+                [ -e "$HISTFILE" ] || : >"$HISTFILE"
+                builtin history -a
+                builtin history -n
+            fi
+            return 0
+        fi
+    fi
+
+    # Fallback: ensure HISTFILE is local when CHD is not usable
+    if [ "${HISTFILE:-}" != "$HOME/.bash_history" ]; then
+        export HISTFILE="$HOME/.bash_history"
+        [ -e "$HISTFILE" ] || : >"$HISTFILE"
+        builtin history -a
+        builtin history -n
+    fi
+    return 1
+}

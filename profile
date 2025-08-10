@@ -28,6 +28,11 @@ if [ -z "${WHOME:-}" ] && command -v wslpath >/dev/null 2>&1; then
     unset CMD_EXE _c
 fi
 
+if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
+    . "$HOME/rwgk_config/bash_maybe_use_chd_history"
+    __maybe_use_chd_history
+fi
+
 # Remove duplicates, empty fields (::), trailing :, preserve order.
 clean_path() {
     echo "$1" | tr ':' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ':' | sed 's/:$//'
