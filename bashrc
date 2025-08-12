@@ -24,6 +24,7 @@ else
 fi
 export HISTTIMEFORMAT='%Y-%m-%d+%H%M%S '
 export HISTCONTROL=ignoredups
+alias vihf='vim "$HISTFILE"'
 
 shopt -s checkwinsize
 if [[ ${BASH_VERSINFO[0]} -ge 4 ]]; then
