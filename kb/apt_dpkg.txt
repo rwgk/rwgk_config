@@ -1,0 +1,11 @@
+After:
+    sudo apt install libnvshmem3-cuda-13 libnvshmem3-dev-cuda-13
+List the files installed:
+    dpkg -L libnvshmem3-cuda-13
+    dpkg -L libnvshmem3-dev-cuda-13
+Without first installing:
+    sudo apt update
+    sudo apt install apt-file
+    apt-file update
+    apt-file list libnvshmem3-cuda-13
+    apt-file list libnvshmem3-dev-cuda-13
