@@ -26,3 +26,6 @@ git log --no-merges main..move_path_finder_to_top
 
 # shows the raw object, which can be interesting to see exactly what Git stores in the object.
 git cat-file -p <hash>
+
+# print file at given hash
+git show 2642002380:elf/link.h
