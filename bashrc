@@ -630,6 +630,23 @@ which_venv() {
     python3 -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
+pybind11_fresh_venv_for_cmake() {
+    python3 -m venv Pybind11DevVenv
+    . Pybind11DevVenv/bin/activate
+    pip install --upgrade pip
+    pip install cmake ninja uv
+}
+
+pybind11_in_tree_cmake_all() {
+    cmake --workflow venv
+}
+
+pybind11_in_tree_cmake_some() {
+    cmake --preset venv -DPYBIND11_TEST_OVERRIDE="$@"
+    cmake --build --preset venv
+    cmake --build --preset tests
+}
+
 alias vma='. "$HOME/Venvs/misc/bin/activate"'
 alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
 
