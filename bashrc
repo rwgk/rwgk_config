@@ -763,6 +763,12 @@ nlog() {
     fi
 }
 
+dbgcode() {
+    echo 'fflush(stderr); fprintf(stdout, "\nLOOOK %s:%d\n", __FILE__, __LINE__); fflush(stdout);'
+    echo 'print(f"\nLOOOK {val=!r}", flush=True)'
+    echo 'long *BAD = nullptr; *BAD = 101;'
+}
+
 mf3path() {
     if [ -d /wrk/miniforge3 ]; then
         echo "Using /wrk/miniforge3"
