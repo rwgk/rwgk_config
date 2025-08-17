@@ -270,6 +270,83 @@ gov() {
     _gov_print_list "  Conflicted" "$list_conflicted" "$conflicted"
 }
 
+RWGK_CONFIG_REPOS=rwgk_config
+# Extend like this:
+# RWGK_CONFIG_REPOS="$RWGK_CONFIG_REPOS:something_else"
+
+prc() {
+    (
+        # pull rwgk configs only if needed (polite about WIP)
+        if [[ $# -ne 0 ]]; then
+            echo "Usage: prc (no arguments allowed)" 1>&2
+            return 1
+        fi
+
+        # Split colon-separated list into an array (like PATH)
+        local IFS=:
+        local repos=()
+        read -r -a repos <<<"${RWGK_CONFIG_REPOS}"
+
+        for cfg in "${repos[@]}"; do
+            [[ -z "$cfg" ]] && continue # ignore empty entries (::)
+            echo "$cfg"
+            cd "$HOME/$cfg" || {
+                echo "  (cannot cd)"
+                continue
+            }
+
+            # --- your existing logic below ---
+            # refresh, decide, gov, conditional pull, etc.
+            git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+                echo "  (not a git repository)"
+                continue
+            }
+
+            git fetch --prune --quiet || echo "  (fetch failed)"
+
+            local branch upstream ahead=0 behind=0
+            branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+            if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+                upstream='@{u}'
+                ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
+                behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0)
+            else
+                upstream=""
+            fi
+
+            local dirty=0
+            [[ -n "$(git status --porcelain)" ]] && dirty=1
+
+            if [[ -z "$upstream" ]]; then
+                echo "  (no upstream for $branch)"
+                gov
+                continue
+            fi
+
+            if ((behind > 0)); then
+                if ((dirty)); then
+                    echo "  ↓ behind by $behind but worktree not clean — skipping pull"
+                    gov
+                    continue
+                fi
+                gov
+                if git pull --ff-only; then
+                    gov
+                else
+                    echo "  (pull failed)"
+                fi
+                continue
+            fi
+
+            if ((ahead > 0 || dirty)); then
+                gov
+            else
+                echo "  in sync with $(git rev-parse --abbrev-ref "$upstream")"
+            fi
+        done
+    )
+}
+
 grr() {
     # -I ignores binary files
     grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
