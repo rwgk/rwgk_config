@@ -180,6 +180,96 @@ cmdx() {
     "$@"
 }
 
+gov() {
+    # git overview (fetch first; show how the repo is "out of sync" or WIP)
+    # Optional: limit per-category file listing (default 5)
+    local MAX="${GOV_MAX:-5}"
+
+    # Must be in a git work tree
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        echo "(not a git repository)"
+        return 1
+    }
+
+    # Update tracking info
+    git fetch --prune --quiet || echo "(fetch failed)"
+
+    # Branch & upstream
+    local branch upstream ahead=0 behind=0
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        upstream='@{u}'
+        ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
+        behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0)
+    else
+        upstream="(no upstream)"
+    fi
+
+    # Porcelain scan
+    local staged=0 unstaged=0 untracked=0 conflicted=0
+    local list_staged="" list_unstaged="" list_untracked="" list_conflicted=""
+
+    # Read git status --porcelain (v1)
+    while IFS= read -r line; do
+        # Lines look like "XY filename" (or "?? filename" for untracked)
+        # X: index status; Y: worktree status
+        local X="${line:0:1}" Y="${line:1:1}" file="${line:3}"
+        if [[ "$X$Y" == "??" ]]; then
+            ((untracked++))
+            list_untracked+="$file"$'\n'
+        elif [[ "$X" == "U" || "$Y" == "U" || ("$X" == "A" && "$Y" == "A") || ("$X" == "D" && "$Y" == "D") ]]; then
+            ((conflicted++))
+            list_conflicted+="$file"$'\n'
+        else
+            if [[ "$X" != " " ]]; then
+                ((staged++))
+                list_staged+="$file"$'\n'
+            fi
+            if [[ "$Y" != " " ]]; then
+                ((unstaged++))
+                list_unstaged+="$file"$'\n'
+            fi
+        fi
+    done < <(git status --porcelain)
+
+    # Stash count (0 if none)
+    local stash=0
+    if git rev-parse --quiet --verify refs/stash >/dev/null 2>&1; then
+        stash=$(git rev-list --count refs/stash 2>/dev/null || echo 0)
+    fi
+
+    # Summary line
+    printf "%s " "$branch"
+    if [[ "$upstream" == "(no upstream)" ]]; then
+        printf "[no upstream]"
+    else
+        [[ $ahead -gt 0 ]] && printf "↑%d " "$ahead"
+        [[ $behind -gt 0 ]] && printf "↓%d " "$behind"
+        [[ $ahead -eq 0 && $behind -eq 0 ]] && printf "✓ "
+        printf "(vs %s)" "$(git rev-parse --abbrev-ref "$upstream")"
+    fi
+    printf " | staged:%d unstaged:%d untracked:%d conflicted:%d stash:%d\n" \
+        "$staged" "$unstaged" "$untracked" "$conflicted" "$stash"
+
+    # Helper to print up to MAX files from a newline list
+    _gov_print_list() {
+        local header="$1" list="$2" count="$3"
+        [[ $count -eq 0 ]] && return 0
+        echo "$header:"
+        # Print up to MAX lines
+        printf "%s" "$list" | sed -e '/^$/d' | head -n "$MAX" | sed 's/^/  - /'
+        # “N more” note if truncated
+        if ((count > MAX)); then
+            printf "  … (%d more)\n" "$((count - MAX))"
+        fi
+    }
+
+    _gov_print_list "  Staged" "$list_staged" "$staged"
+    _gov_print_list "  Unstaged" "$list_unstaged" "$unstaged"
+    _gov_print_list "  Untracked" "$list_untracked" "$untracked"
+    _gov_print_list "  Conflicted" "$list_conflicted" "$conflicted"
+}
+
 grr() {
     # -I ignores binary files
     grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
