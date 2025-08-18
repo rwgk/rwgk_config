@@ -98,21 +98,21 @@ def abs_path_for_dynamic_library(libname: str, handle: ctypes.CDLL) -> str:
 def main(argv: list[str]) -> int:
     if not argv:
         prog = sys.argv[0] if sys.argv else "try_dlopen.py"
-        print(f"Usage: {prog} <libname> [<libname> ...]", file=sys.stderr)
+        print(f"Usage: {prog} <libpath> [<libpath> ...]", file=sys.stderr)
         return 2
 
     status = 0
-    for libname in argv:
+    for libpath in argv:
         try:
-            handle = ctypes.CDLL(libname)
+            handle = ctypes.CDLL(libpath)
         except OSError as e:
-            print(f"dlopen failed: {libname!r}: {e}")
+            print(f"dlopen failed: {libpath!r}: {e}")
             status = max(status, 1)
             continue
 
-        print(f"dlopen succeeded: {libname!r}")
+        print(f"dlopen succeeded: {libpath!r}")
         try:
-            abs_path = abs_path_for_dynamic_library(libname, handle)
+            abs_path = abs_path_for_dynamic_library(libpath, handle)
             print(f"  resolved path: {abs_path!r}")
         except OSError as e:
             print(f"  could not resolve absolute path via dlinfo: {e}")
