@@ -2,8 +2,12 @@
 # save_or_move.sh — copy or move files into $RWGK_CONFIG_SAVE_TO with a timestamped name.
 #
 # Usage:
-#   save_or_move.sh sve [-n] FILE...
-#   save_or_move.sh smv [-n] FILE...
+#   save_or_move.sh sve [-n] [-D] FILE...
+#   save_or_move.sh smv [-n] [-D] FILE...
+#
+# Flags:
+#   -n   dry-run (print actions only)
+#   -D   allow directories (copy/move them); otherwise directories are skipped with a message
 #
 # Environment:
 #   RWGK_CONFIG_SAVE_TO  Destination directory (required)
@@ -27,12 +31,27 @@ sve | smv) ;;
 *) die "unknown mode: $mode (expected 'sve' or 'smv')" ;;
 esac
 
-# optional -n flag
+# optional flags after mode: -n (dry-run), -D (allow directories)
 DRYRUN=0
-if [[ "${1:-}" == "-n" ]]; then
-    DRYRUN=1
-    shift
-fi
+DIRS_OK=0
+while [[ $# -gt 0 ]]; do
+    case "${1:-}" in
+    -n)
+        DRYRUN=1
+        shift
+        ;;
+    -D)
+        DIRS_OK=1
+        shift
+        ;;
+    --)
+        shift
+        break
+        ;;
+    -*) die "unknown option: $1 (allowed: -n, -D)" ;;
+    *) break ;;
+    esac
+done
 
 [[ $# -ge 1 ]] || die "no FILE arguments given"
 
@@ -66,11 +85,20 @@ for arg in "$@"; do
         continue
     }
 
+    # Safety: directories (including symlinks to directories) are skipped unless -D is provided
+    if [[ -d "$arg" ]]; then
+        if [[ $DIRS_OK -eq 0 ]]; then
+            printf 'Skipping directory (use -D to include): %s\n' "$arg" >&2
+            continue
+        fi
+    fi
+
     filename=$(basename -- "$arg")
     newname=$(timestamped_name "$filename")
     dest="$RWGK_CONFIG_SAVE_TO/$newname"
 
-    if [[ -L "$arg" ]]; then
+    # Symlinks (that are NOT directories at this point) — copy referent; if smv, remove link
+    if [[ -L "$arg" && ! -d "$arg" ]]; then
         run cp -- "$arg" "$dest"
         if [[ "$mode" == "smv" ]]; then
             run rm -- "$arg"
@@ -79,6 +107,7 @@ for arg in "$@"; do
     fi
 
     if [[ "$mode" == "sve" ]]; then
+        # For directories with -D, preserve attributes; for files, same
         run cp -a -- "$arg" "$dest"
     else
         run mv -- "$arg" "$dest"
