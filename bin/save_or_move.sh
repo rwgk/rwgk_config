@@ -14,7 +14,7 @@ if [ "${mode}" != sve -a "${mode}" != smv ]; then
   exit 1
 fi
 
-now=`date "+%Y-%m-%d+%H%M%S"`
+now=$(date "+%Y-%m-%d+%H%M%S")
 
 for arg in "$@"; do
   if [ -L "${arg}" ]; then
@@ -26,6 +26,7 @@ for arg in "$@"; do
       cmd=mv
     fi
   fi
+
   filename=$(basename "${arg}")
   barename="${filename%.*}"
   if [ X"${barename}" = X -o X"${barename}" = X"${filename}" ]; then
@@ -34,9 +35,15 @@ for arg in "$@"; do
     extension="${filename##*.}"
     newname="${barename}_${now}.${extension}"
   fi
+
+  # Replace leading '.' with '_'
+  newname="${newname/#./_}"
+
   echo ${cmd} "${arg}" "$RWGK_CONFIG_SAVE_TO/${newname}"
   ${cmd} "${arg}" "$RWGK_CONFIG_SAVE_TO/${newname}"
-  if [ "${cmd}" == cp -a "${mode}" == smv ]; then
+
+  # If we copied (because of symlink or 'sve') but mode is 'smv', remove original
+  if [ "${cmd}" = "cp" ] && [ "${mode}" = "smv" ]; then
     rm "${arg}"
   fi
 done
