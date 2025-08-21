@@ -4,6 +4,9 @@ git branch --unset-upstream other-branch
 git push --set-upstream origin local-branch:archive/pr1234_new-name
 git config --local push.default upstream  # tracking between branches with different names: make git less cautious (local repo only)
 
+# Delete remote branch
+git push origin --delete some_branch
+
 git commit --allow-empty -m "[skip ci] empty commit"
 
 #             vv JUST A BRANCH NAME vv         vvvvv REMOTE/BRANCH vvvv
