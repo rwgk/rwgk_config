@@ -27,6 +27,9 @@ git checkout --orphan new-branch-name && git rm -rf . && git status
 # All commits not on main, and excluding merge commits
 git log --no-merges main..move_path_finder_to_top
 
+# List of commit messages similar to what a Squash merge in the github web UI would generate.
+git log --reverse --no-merges --format='* %s' main..HEAD
+
 # shows the raw object, which can be interesting to see exactly what Git stores in the object.
 git cat-file -p <hash>
 
