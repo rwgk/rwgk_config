@@ -936,6 +936,16 @@ dbgcode() {
     echo 'long *BAD = nullptr; *BAD = 101;'
 }
 
+mc3dwnld() (
+    set -x
+    wget "https://repo.anaconda.com/miniconda/Miniconda3-latest-$(uname)-$(uname -m).sh"
+)
+
+mf3dwnld() (
+    set -x
+    wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+)
+
 mf3path() {
     if [ -d /wrk/miniforge3 ]; then
         echo "Using /wrk/miniforge3"
