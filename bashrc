@@ -654,6 +654,25 @@ git_branch_D_track_hash() (
     git branch -D "$branch"
 )
 
+_git_branch_D_track_hash_COMPLETE() {
+    # only complete if we're in a git repo
+    git rev-parse --git-dir >/dev/null 2>&1 || {
+        COMPREPLY=()
+        return
+    }
+
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    # Use newline as separator so branch names with slashes (or spaces) work
+    local IFS=$'\n'
+    # List local branches (same as completing for `git branch -D`)
+    local branches
+    mapfile -t branches < <(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+
+    COMPREPLY=($(compgen -W "${branches[*]}" -- "$cur"))
+}
+
+complete -o bashdefault -o default -F _git_branch_D_track_hash_COMPLETE git_branch_D_track_hash
+
 git_log_between() {
     if [ "$#" -lt 2 ]; then
         echo "Usage: git_log_between <from> <to> [path...]" >&2
