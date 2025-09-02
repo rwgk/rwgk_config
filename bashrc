@@ -859,6 +859,42 @@ export MY_GITHUB_USERNAME=rwgk
 # `gh auth login` creates ~/.config/gh/hosts.yml
 alias show_github_token='yq -r '\''."github.com".oauth_token'\'' "$HOME/.config/gh/hosts.yml"'
 
+gh_run_list() {
+    if [[ $# -ne 3 ]]; then
+        echo "Usage: gh_run_list OWNER/REPO workflow.yml limit" >&2
+        return 1
+    fi
+    local repo="$1"
+    local workflow="$2"
+    local limit="$3"
+
+    gh run list \
+        --workflow "$workflow" \
+        --limit "$limit" \
+        --json databaseId,displayTitle,number,status,conclusion \
+        -R "$repo"
+}
+
+gh_download_run_logs() {
+    if [[ $# -ne 2 ]]; then
+        echo "Usage: gh_download_run_logs OWNER/REPO <file-from-gh_run_list>" >&2
+        return 1
+    fi
+
+    local repo="$1"
+    local infile="$2"
+
+    set -euo pipefail
+
+    jq -r '.[] | .databaseId' <"$infile" | while read -r run_id; do
+        echo "Downloading logs for run $run_id"
+        gh api "/repos/${repo}/actions/runs/${run_id}/logs" >"log_${run_id}.zip" || {
+            echo "  ! failed for run $run_id" >&2
+            rm -f "log_${run_id}.zip"
+        }
+    done
+}
+
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
@@ -989,6 +1025,7 @@ set_cuda_env_bld() {
     set_cuda_env
     export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
     export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
+    export CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work
 }
 
 export NUMBA_CAPTURED_ERRORS="new_style"
