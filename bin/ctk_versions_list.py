@@ -5,7 +5,6 @@ import re
 import sys
 from pathlib import Path
 from urllib.request import urlopen
-from collections import defaultdict
 
 REDIST_URL = "https://developer.download.nvidia.com/compute/cuda/redist/"
 
