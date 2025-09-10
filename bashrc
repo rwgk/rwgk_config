@@ -695,6 +695,23 @@ git_logdiff_between() {
     git log --no-merges --patch "${from}..${to}" -- "$@"
 }
 
+git_remote_add() {
+    if [ $# -ne 1 ]; then
+        echo "Usage: git_remote_add OWNER" >&2
+        return 1
+    fi
+    local owner="$1"
+    # Get the repo name (last path component without .git)
+    local repo
+    repo=$(basename -s .git "$(git rev-parse --show-toplevel 2>/dev/null)" || true)
+    if [ -z "$repo" ]; then
+        echo "Error: not inside a git repository" >&2
+        return 1
+    fi
+    echo "git remote add -f \"$owner\" https://github.com/$owner/$repo"
+    git remote add -f "$owner" "https://github.com/$owner/$repo"
+}
+
 myt() (
     files=()
     dash_dash_seen=0
