@@ -1,4 +1,6 @@
-# copy Microsoft.PowerShell_profile.ps1 "$PROFILE"
+﻿# copy Microsoft.PowerShell_profile.ps1 "$PROFILE"
+# also copy PSReadLine-History-Config.ps1 to the same directory
+
 if (-not (Test-Path "U:\")) {
     cmd /c "subst U: \\wsl$\Ubuntu\home\$env:USERNAME"
 }
@@ -7,9 +9,43 @@ $env:Path += ";C:\Program Files\Vim\vim91"
 function gitbash { & "C:\Program Files\Git\bin\bash.exe" -l }
 function mf3path { & "$env:USERPROFILE\AppData\Local\miniforge3\shell\condabin\conda-hook.ps1" }
 
+$profileDir = Split-Path -Path $PROFILE -Parent
+$psrlConfig = Join-Path $profileDir 'PSReadLine-History-Config.ps1'
+if (Test-Path $psrlConfig) { . $psrlConfig }
+
+function ps1fmt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path,
+
+        [switch]$Backup  # save file.ps1.bak before writing
+    )
+
+    if (-not (Get-Command Invoke-Formatter -ErrorAction SilentlyContinue)) {
+        try { Import-Module PSScriptAnalyzer -ErrorAction Stop }
+        catch { throw "Invoke-Formatter not found. Install PSScriptAnalyzer: Install-Module PSScriptAnalyzer -Scope CurrentUser" }
+    }
+
+    $full = Resolve-Path -LiteralPath $Path -ErrorAction Stop | Select-Object -ExpandProperty Path
+    $src = Get-Content -LiteralPath $full -Raw -ErrorAction Stop
+
+    try { $fmt = Invoke-Formatter -ScriptDefinition $src -ErrorAction Stop }
+    catch { throw "Formatting failed for '$full': $($_.Exception.Message)" }
+
+    # No change? Do nothing.
+    if ($src -ceq $fmt) { return }
+
+    if ($Backup) { Copy-Item -LiteralPath $full -Destination ($full + '.bak') -Force }
+
+    # PowerShell 5.1: make encoding explicit
+    Set-Content -LiteralPath $full -Value $fmt -Encoding UTF8
+}
+
 function fresh_venv {
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$VenvName
     )
 
@@ -83,7 +119,8 @@ function set_cuda_env {
         if ($versionDirs.Count -eq 1) {
             $Version = $versionDirs[0].Name
             Write-Host "Auto-detected CUDA version: $Version" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host "Multiple CUDA versions found:" -ForegroundColor Yellow
             $versionDirs | ForEach-Object { Write-Host "  $($_.Name)" }
             Write-Error "Please specify a version using -Version parameter"
@@ -108,3 +145,4 @@ function set_cuda_env {
     Write-Host "  CUDA_HOME = $env:CUDA_HOME"
     Write-Host "  LIB = $env:LIB"
 }
+
