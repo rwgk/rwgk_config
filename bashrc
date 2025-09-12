@@ -83,14 +83,10 @@ _smart_prompt_command() {
 
 export PROMPT_COMMAND='_smart_prompt_command'
 
-alias h='builtin history'
-hr() {
+histsync() {
     builtin history -a
     builtin history -c
     builtin history -r
-}
-hh() {
-    builtin history "$@" | /usr/bin/cut -c8-
 }
 
 hostfqdn() {
