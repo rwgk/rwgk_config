@@ -4,8 +4,18 @@ get_filtered_status() {
     git status --short --no-column | grep -v -E '^\?\? .*Venv/'
 }
 
-if [ "$(get_filtered_status | wc -l)" -gt 0 ]; then
-    echo ".git/hooks/pre-push: ERROR: dirty state:"
-    get_filtered_status
-    exit 1
+dirty_state="$(get_filtered_status)"
+
+if [ -n "$dirty_state" ]; then
+    echo ".git/hooks/pre-push: dirty state detected:"
+    echo "$dirty_state"
+
+    if [ -n "$GIT_PUSH_ALLOW_DIRTY_STATE" ]; then
+        echo ".git/hooks/pre-push: WARNING: continuing anyway because GIT_PUSH_ALLOW_DIRTY_STATE is set."
+        exit 0
+    else
+        echo ".git/hooks/pre-push: ERROR: refusing to push with a dirty state."
+        echo "    (To override this check: GIT_PUSH_ALLOW_DIRTY_STATE=1 git push ...)"
+        exit 1
+    fi
 fi
