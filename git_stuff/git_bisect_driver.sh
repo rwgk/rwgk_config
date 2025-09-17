@@ -2,6 +2,6 @@
 thisdir="$(dirname "$0")"
 set -x
 git bisect start
-git bisect old 38bd71134a428d641d8ca34b3ea94358a387703d  # "Does not have STRING"
-git bisect new 66c3774a6402224b1724329c81c880e76633a92b  # "Does have STRING"
+git bisect good d64120bb6733391989174456daaf18643ea29711  # old "Does not have STRING"
+git bisect bad 365bf079f54d10993c1e036e280c6217a20969cf  # new "Does have STRING"
 git bisect run "$thisdir/git_bisect_runcmd.sh"
