@@ -1,21 +1,78 @@
 #!/bin/sh
 
+# Branches that are locally protected from pushes.
+# Add/remove names separated by spaces.
+PROTECTED_BRANCHES="main master cython-gen"
+
+# Optional: only enforce for a specific remote, e.g. origin
+# ENFORCE_REMOTE="origin"   # uncomment to enable
+
+# Environment overrides:
+# - Set GIT_PUSH_ALLOW_DIRTY_STATE=1 to allow pushing with a dirty tree.
+# - Set GIT_PUSH_ALLOW_PROTECTED_PUSH=1 to allow pushing to protected branches.
+
+remote_name="$1" # e.g. origin
+remote_url="$2"  # e.g. git@github.com:org/repo.git
+
 get_filtered_status() {
     git status --short --no-column | grep -v -E '^\?\? .*Venv/'
 }
 
+# ---- 1) Dirty-state guard ----------------------------------------------------
 dirty_state="$(get_filtered_status)"
 
 if [ -n "$dirty_state" ]; then
     echo ".git/hooks/pre-push: dirty state detected:"
     echo "$dirty_state"
-
     if [ -n "$GIT_PUSH_ALLOW_DIRTY_STATE" ]; then
-        echo ".git/hooks/pre-push: WARNING: continuing anyway because GIT_PUSH_ALLOW_DIRTY_STATE is set."
-        exit 0
+        echo ".git/hooks/pre-push: WARNING: continuing because GIT_PUSH_ALLOW_DIRTY_STATE is set."
     else
         echo ".git/hooks/pre-push: ERROR: refusing to push with a dirty state."
-        echo "    (To override this check: GIT_PUSH_ALLOW_DIRTY_STATE=1 git push ...)"
+        echo "  Tip: set GIT_PUSH_ALLOW_DIRTY_STATE=1 to override (e.g.,"
+        echo "       GIT_PUSH_ALLOW_DIRTY_STATE=1 git push)."
         exit 1
     fi
 fi
+
+# ---- 2) Protected-branch guard ----------------------------------------------
+# Capture the refs being pushed (stdin lines):
+# <local_ref> <local_sha> <remote_ref> <remote_sha>
+stdin_payload="$(cat)"
+
+# Some clients may invoke the hook even if there's nothing to push
+[ -z "$stdin_payload" ] && exit 0
+
+# Optionally scope to a specific remote
+if [ -n "$ENFORCE_REMOTE" ] && [ "$remote_name" != "$ENFORCE_REMOTE" ]; then
+    exit 0
+fi
+
+# Build a regex from the protected branch names (exact matches)
+protected_re=""
+for b in $PROTECTED_BRANCHES; do
+    if [ -n "$protected_re" ]; then
+        protected_re="${protected_re}|${b}"
+    else
+        protected_re="${b}"
+    fi
+done
+
+# If any remote ref equals one of the protected branches, block unless overridden
+if printf '%s\n' "$stdin_payload" |
+    awk '{print $3}' |
+    grep -Eq "^refs/heads/(${protected_re})$"; then
+    if [ -n "$GIT_PUSH_ALLOW_PROTECTED_PUSH" ]; then
+        echo "⚠️  Pushing to protected branch(es) (${PROTECTED_BRANCHES}), continuing because GIT_PUSH_ALLOW_PROTECTED_PUSH is set."
+    else
+        echo "❌ Push to protected branch is disabled locally."
+        echo "   Remote: $remote_name ($remote_url)"
+        echo "   Protected: ${PROTECTED_BRANCHES}"
+        echo "   Refs:"
+        printf '     %s\n' "$stdin_payload"
+        echo "   To override intentionally, run:"
+        echo "     GIT_PUSH_ALLOW_PROTECTED_PUSH=1 git push"
+        exit 1
+    fi
+fi
+
+exit 0
