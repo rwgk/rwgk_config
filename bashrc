@@ -165,6 +165,49 @@ ffRM() {
     find . -name "$@" -print -delete
 }
 
+wipe_pycache() {
+    local dirs=("$@")
+
+    # If no arguments given, default to "."
+    if [ ${#dirs[@]} -eq 0 ]; then
+        dirs=(".")
+    fi
+
+    # Validate arguments first
+    local valid_dirs=()
+    for d in "${dirs[@]}"; do
+        if [ ! -e "$d" ]; then
+            echo "INFO: Not a file or directory: $d"
+        elif [ -d "$d" ]; then
+            valid_dirs+=("$d")
+        else
+            echo "INFO: Not a directory: $d"
+        fi
+    done
+
+    [ ${#valid_dirs[@]} -eq 0 ] && {
+        echo "Nothing to do (no valid directories provided)"
+        return 0
+    }
+
+    # Collect matches
+    local tmp
+    tmp=$(mktemp)
+    find "${valid_dirs[@]}" -type d -name __pycache__ -print0 >"$tmp"
+
+    local count
+    count=$(tr -cd '\0' <"$tmp" | wc -c)
+
+    if [ "$count" -gt 0 ]; then
+        xargs -0 rm -rf <"$tmp"
+        echo "$count __pycache__ director$([ "$count" -eq 1 ] && echo 'y' || echo 'ies') deleted"
+    else
+        echo "Nothing to do (no __pycache__ directories found)"
+    fi
+
+    rm -f "$tmp"
+}
+
 alias dirs_here_xargs='find . -maxdepth 1 -type d \! -name . -print0 | xargs -0'
 
 xattr_clear_recursive() {
