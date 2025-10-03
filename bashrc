@@ -873,6 +873,27 @@ which_venv() {
     python3 -c "import sys; print(f'{sys.prefix=!r}')"
 }
 
+vac() {
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: vac <venv-dir>" >&2
+        return 2
+    fi
+
+    local venv_dir=$1
+
+    if [ ! -d "$venv_dir" ]; then
+        echo "Error: '$venv_dir' is not a directory" >&2
+        return 1
+    fi
+
+    if [ ! -f "$venv_dir/bin/activate" ]; then
+        echo "Error: '$venv_dir/bin/activate' not found" >&2
+        return 1
+    fi
+
+    . "$venv_dir/bin/activate"
+}
+
 pybind11_fresh_venv_for_cmake() {
     python3 -m venv Pybind11DevVenv
     . Pybind11DevVenv/bin/activate
