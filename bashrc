@@ -751,6 +751,35 @@ git_remote_add() {
     git remote add -f "$owner" "https://github.com/$owner/$repo"
 }
 
+git_swrp() {
+    set -euo pipefail
+
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: git_swrp <remote/branch>" >&2
+        return 1
+    fi
+
+    local arg="$1"
+
+    if [[ "$arg" != */* ]]; then
+        echo "Error: argument must contain '/'" >&2
+        return 1
+    fi
+
+    local remote="${arg%%/*}"
+    local branch="${arg#*/}"
+
+    if ! git remote get-url "$remote" &>/dev/null; then
+        echo "Error: '$remote' is not a known remote" >&2
+        return 1
+    fi
+
+    local new_branch="${remote}→${branch}"
+
+    echo "Creating local branch '$new_branch' from '$arg'..."
+    git switch -c "$new_branch" "$arg"
+}
+
 myt() (
     files=()
     dash_dash_seen=0
