@@ -751,7 +751,7 @@ git_remote_add() {
     git remote add -f "$owner" "https://github.com/$owner/$repo"
 }
 
-git_swrp() {
+git_swrp() (
     set -euo pipefail
 
     if [[ $# -ne 1 ]]; then
@@ -778,7 +778,7 @@ git_swrp() {
 
     echo "Creating local branch '$new_branch' from '$arg'..."
     git switch -c "$new_branch" "$arg"
-}
+)
 
 myt() (
     files=()
@@ -981,7 +981,7 @@ gh_run_list() {
         -R "$repo"
 }
 
-gh_download_run_logs() {
+gh_download_run_logs() (
     if [[ $# -ne 2 ]]; then
         echo "Usage: gh_download_run_logs OWNER/REPO <file-from-gh_run_list>" >&2
         return 1
@@ -999,7 +999,7 @@ gh_download_run_logs() {
             rm -f "log_${run_id}.zip"
         }
     done
-}
+)
 
 # Usage:
 #   get_gh_run_logs org/repo RUN_ID [annotation]
