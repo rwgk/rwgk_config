@@ -1179,6 +1179,25 @@ mf3path() {
     fi
 }
 
+pixiinsthere() (
+    set -x
+    curl -fsSL https://pixi.sh/install.sh | PIXI_HOME="$(pwd)/.pixi" PIXI_NO_PATH_UPDATE=1 sh
+)
+
+pixipath() {
+    if [ -d "/wrk/.pixi/bin" ]; then
+        echo "Using /wrk/.pixi/bin"
+        export PATH="/wrk/.pixi/bin:$PATH"
+    elif [ -d "$HOME/.pixi/bin" ]; then
+        echo "Using \$HOME/.pixi/bin"
+        export PATH="$HOME/.pixi/bin:$PATH"
+    else
+        echo "Error: Neither /wrk/.pixi/bin nor \$HOME/.pixi/bin exists." >&2
+        return 1
+    fi
+    export PATH="$(clean_path $PATH)"
+}
+
 set_cuda_env() {
     export CUDA_HOME=/usr/local/cuda
     export LIBRARY_PATH="$CUDA_HOME/lib64:$LIBRARY_PATH"
