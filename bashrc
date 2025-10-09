@@ -1199,16 +1199,26 @@ pixipath() {
 }
 
 set_cuda_env() {
+    set -x
     export CUDA_HOME=/usr/local/cuda
     export LIBRARY_PATH="$CUDA_HOME/lib64:$LIBRARY_PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$CUDA_HOME/nvvm/lib64:$LD_LIBRARY_PATH"
+    set +x
+}
+
+set_all_must_work() {
+    set -x
+    export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
+    export CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work
+    set +x
 }
 
 set_cuda_env_bld() {
     set_cuda_env
+    set_all_must_work
+    set -x
     export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
-    export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
-    export CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work
+    set +x
 }
 
 export NUMBA_CAPTURED_ERRORS="new_style"
