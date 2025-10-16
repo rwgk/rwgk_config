@@ -52,6 +52,8 @@ fi
 
 export IGNOREEOF=9999
 
+alias cd.='cd "$(realpath .)"'
+
 _smart_prompt_command() {
     # Always append history
     builtin history -a
@@ -940,8 +942,7 @@ pybind11_in_tree_cmake_some() {
     cmake --build --preset tests
 }
 
-alias vma='. "$HOME/Venvs/misc/bin/activate"'
-alias acd='. "$HOME/cccl/python/devenv/bin/activate"'
+alias vacmisc='. "$HOME/Venvs/misc/bin/activate"'
 
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
