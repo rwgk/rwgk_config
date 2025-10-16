@@ -35,3 +35,9 @@ git cat-file -p <hash>
 
 # print file at given hash
 git show 2642002380:elf/link.h
+
+# ad-hoc repo to track manual changes
+git init
+git config core.filemode false
+git add -A
+git commit -m "Baseline headers snapshot $(date -Iseconds)"
