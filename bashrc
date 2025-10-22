@@ -393,9 +393,15 @@ grr() {
     grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
 }
 
-grep_pytest_summary() {
-    local pattern='==== .*?(passed|failed|skipped|errors).* ===='
+grep_built_cuda() {
+    echo "$@"
+    grep '^Successfully built cuda-' "$@"
+}
 
+grep_pytest_summary() {
+    local pattern='^rootdir: |==== .*?(passed|failed|skipped|errors).* ===='
+
+    echo "$@"
     if command -v rg >/dev/null 2>&1; then
         rg -a "$pattern" "$@"
     else
@@ -1218,6 +1224,13 @@ set_cuda_env_bld() {
     set_cuda_env
     set_all_must_work
     set -x
+    export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
+    set +x
+}
+
+set_cuda13010() {
+    set -x
+    export CUDA_HOME="/usr/local/cuda-13.1"
     export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
     set +x
 }
