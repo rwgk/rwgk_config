@@ -1170,7 +1170,9 @@ mc3dwnld() (
 
 mf3dwnld() (
     set -x
-    wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+    script="Miniforge3-$(uname)-$(uname -m).sh"
+    wget "https://github.com/conda-forge/miniforge/releases/latest/download/$script"
+    chmod 755 "$script"
 )
 
 mf3path() {
