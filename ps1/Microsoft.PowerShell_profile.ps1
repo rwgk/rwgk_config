@@ -146,3 +146,9 @@ function set_cuda_env {
     Write-Host "  LIB = $env:LIB"
 }
 
+function set_all_must_work {
+    $env:CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS = "all_must_work"
+    Write-Host "  CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work"
+    $env:CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS = "all_must_work"
+    Write-Host "  CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work"
+}
