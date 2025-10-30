@@ -1188,6 +1188,11 @@ mf3path() {
     fi
 }
 
+conda_rm() {
+    conda remove -y --all -n "$@"
+    echo "Done: conda remove -y --all -n" "$@"
+}
+
 pixiinsthere() (
     set -x
     curl -fsSL https://pixi.sh/install.sh | PIXI_HOME="$(pwd)/.pixi" PIXI_NO_PATH_UPDATE=1 sh
