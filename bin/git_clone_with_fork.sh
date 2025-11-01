@@ -4,23 +4,92 @@ set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
 
-# Check for input
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "Usage: $SCRIPT_NAME <upstream-git-url> [fork-git-url]"
-    echo " E.g.: $SCRIPT_NAME https://github.com/pybind/pybind11.git"
-    echo "   or: $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git"
+usage() {
+    cat <<EOF
+Usage:
+  $SCRIPT_NAME <upstream-git-url> [fork-git-url] [--branch <branch-name>]
+
+Examples:
+  $SCRIPT_NAME https://github.com/pybind/pybind11.git
+  $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git
+  $SCRIPT_NAME https://github.com/pybind/pybind11.git --branch specific-upstream-branch
+  $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git --branch specific-upstream-branch
+EOF
+}
+
+# Parse args
+UPSTREAM_URL=""
+FORK_URL=""
+BRANCH_NAME=""
+
+# Collect at most two positionals (upstream, optional fork) and handle flags anywhere.
+positional_count=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    -b | --branch)
+        shift
+        [[ $# -gt 0 ]] || {
+            echo "Error: --branch requires a value"
+            usage
+            exit 1
+        }
+        BRANCH_NAME="$1"
+        shift
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    --) # end of options
+        shift
+        while [[ $# -gt 0 ]]; do
+            if [[ $positional_count -eq 0 ]]; then
+                UPSTREAM_URL="$1"
+            elif [[ $positional_count -eq 1 ]]; then
+                FORK_URL="$1"
+            else
+                echo "Error: too many positional arguments"
+                usage
+                exit 1
+            fi
+            positional_count=$((positional_count + 1))
+            shift
+        done
+        ;;
+    -*)
+        echo "Error: unknown option: $1"
+        usage
+        exit 1
+        ;;
+    *)
+        if [[ $positional_count -eq 0 ]]; then
+            UPSTREAM_URL="$1"
+        elif [[ $positional_count -eq 1 ]]; then
+            FORK_URL="$1"
+        else
+            echo "Error: too many positional arguments"
+            usage
+            exit 1
+        fi
+        positional_count=$((positional_count + 1))
+        shift
+        ;;
+    esac
+done
+
+# Validate required arg
+if [[ -z "$UPSTREAM_URL" ]]; then
+    echo "Error: missing <upstream-git-url>"
+    usage
     exit 1
 fi
 
 export GIT_PAGER=
 
-UPSTREAM_URL="$1"
 REPO_NAME=$(basename -s .git "$UPSTREAM_URL")
 
-# Determine FORK_URL
-if [[ $# -eq 2 ]]; then
-    FORK_URL="$2"
-else
+# Determine FORK_URL (if not explicitly provided)
+if [[ -z "${FORK_URL:-}" ]]; then
     if [[ -z "${MY_GITHUB_USERNAME:-}" ]]; then
         echo "Error: MY_GITHUB_USERNAME must be set in your environment (e.g. in .bashrc) if no fork URL is provided."
         exit 1
@@ -28,9 +97,21 @@ else
     FORK_URL="https://github.com/${MY_GITHUB_USERNAME}/${REPO_NAME}.git"
 fi
 
+# Choose clone directory
+if [[ -n "$BRANCH_NAME" ]]; then
+    CLONE_DIR="$BRANCH_NAME"
+else
+    CLONE_DIR="$REPO_NAME"
+fi
+
 echo "Cloning upstream: $UPSTREAM_URL"
-git clone "$UPSTREAM_URL"
-cd "$REPO_NAME"
+if [[ -n "$BRANCH_NAME" ]]; then
+    echo "Using branch: $BRANCH_NAME"
+    git clone --branch "$BRANCH_NAME" "$UPSTREAM_URL" "$CLONE_DIR"
+else
+    git clone "$UPSTREAM_URL" "$CLONE_DIR"
+fi
+cd "$CLONE_DIR"
 
 echo "Renaming 'origin' to 'upstream'"
 git remote rename origin upstream
