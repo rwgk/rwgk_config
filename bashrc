@@ -742,6 +742,42 @@ git_logdiff_between() {
     git log --no-merges --patch "${from}..${to}" -- "$@"
 }
 
+git_log_search() {
+    git log --all --reverse --date=short --format='%ad %h %an %s' -S "$@"
+}
+
+git_log_grep() {
+    git log --all --reverse --date=short --format='%ad %h %an %s' -G "$@"
+}
+
+_git_log_search_or_grep() {
+    local mode="$1" # either "-S" or "-G"
+    shift
+    local show_patch=
+
+    # Support optional -p for showing patches
+    if [[ "$1" == "-p" ]]; then
+        show_patch="-p"
+        shift
+    fi
+
+    # Require at least one argument (search pattern)
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: ${FUNCNAME[1]} [-p] <pattern>" >&2
+        return 1
+    fi
+
+    git log $show_patch --all --reverse --date=short --format='%ad %h %an %s' "$mode" "$@"
+}
+
+git_log_search() {
+    _git_log_search_or_grep -S "$@"
+}
+
+git_log_grep() {
+    _git_log_search_or_grep -G "$@"
+}
+
 git_remote_add() {
     if [ $# -ne 1 ]; then
         echo "Usage: git_remote_add OWNER" >&2
@@ -1064,6 +1100,47 @@ get_gh_run_logs() {
     fi
 
     return $status
+}
+
+find_pr_for_commit() {
+    local short_sha="$1"
+    if [[ -z "$short_sha" ]]; then
+        echo "Usage: find_pr_for_commit <commit-sha>"
+        return 1
+    fi
+
+    # Determine upstream repo (e.g. pybind/pybind11)
+    local upstream_url
+    upstream_url=$(git remote get-url upstream 2>/dev/null || git remote get-url origin 2>/dev/null)
+    if [[ -z "$upstream_url" ]]; then
+        echo "FATAL: no upstream/origin remote found" >&2
+        return 1
+    fi
+    # Normalize to owner/repo
+    local repo
+    repo=$(basename -s .git "$upstream_url")
+    local owner
+    owner=$(echo "$upstream_url" | sed -E 's#.*[:/](.+)/[^/]+(\.git)?#\1#')
+    local full_repo="${owner}/${repo}"
+
+    # Resolve short SHA to full SHA if necessary
+    local long_sha
+    long_sha=$(git rev-parse "$short_sha^{commit}" 2>/dev/null)
+    if [[ -z "$long_sha" ]]; then
+        echo "FATAL: commit '$short_sha' not found" >&2
+        return 1
+    fi
+
+    echo "Repository: $full_repo"
+    echo "Commit:     $long_sha"
+    echo "Querying GitHub API..."
+
+    # Query GitHub API for associated PRs
+    gh api \
+        "repos/${full_repo}/commits/${long_sha}/pulls" \
+        -H "Accept: application/vnd.github+json" |
+        jq -r '.[] | "\(.number): \(.html_url)"' |
+        { grep . || echo "No associated PR found"; }
 }
 
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
