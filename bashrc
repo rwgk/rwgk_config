@@ -565,6 +565,7 @@ alias gb='git branch'
 alias gg='git grep'
 alias gs='git status'
 alias gsi='git status --ignored'
+alias gcd='cd "$(git rev-parse --show-toplevel)"'
 
 giturl() {
     git config --get remote.origin.url
