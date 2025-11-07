@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# ezgc: easy git clone (and friends) by key
+# - Requires MY_EZGC_PATH (colon-separated list of files).
+# - Each non-empty, non-# line: first token = key, remainder = command.
+# - First occurrence of a key wins (PATH-like across files).
+# - Prints '+ <command>' before running it.
+
+set -euo pipefail
+
+err() { echo "ezgc: $*" >&2; }
+die() {
+    err "$@"
+    exit 1
+}
+
+# --- Config discovery ---
+: "${MY_EZGC_PATH:?MY_EZGC_PATH is not set. Set it to a colon-separated list of files or directories.
+Example:
+  export MY_EZGC_PATH=\"$HOME/rwgk_config/ezgc_repos.txt:$MY_EZGC_PATH\"
+}"
+
+IFS=':' read -r -a EZ_FILES <<<"${MY_EZGC_PATH}"
+
+# Validate: every member must be an existing regular file.
+bad=()
+for f in "${EZ_FILES[@]}"; do
+    if [[ ! -f "$f" ]]; then
+        bad+=("$f")
+    fi
+done
+if ((${#bad[@]} > 0)); then
+    err "All MY_EZGC_PATH entries must be files. These are not files or do not exist:"
+    for b in "${bad[@]}"; do err "  $b"; done
+    exit 1
+fi
+
+# --- Load aliases (first key wins; preserve overall order) ---
+declare -A CMD_BY_KEY=()
+declare -a ORDERED_KEYS=()
+
+load_aliases() {
+    local file line key cmd
+    for file in "${EZ_FILES[@]}"; do
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # trim leading/trailing whitespace
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+            key="${line%%[[:space:]]*}"
+            cmd="${line#"$key"}"
+            cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+            [[ -z "$key" || -z "$cmd" ]] && continue
+            if [[ -z "${CMD_BY_KEY[$key]:-}" ]]; then
+                CMD_BY_KEY["$key"]="$cmd"
+                ORDERED_KEYS+=("$key")
+            fi
+        done <"$file"
+    done
+    ((${#ORDERED_KEYS[@]} > 0)) || die "No aliases found in MY_EZGC_PATH."
+}
+
+list_keys() {
+    local k
+    for k in "${ORDERED_KEYS[@]}"; do
+        printf '%s\n' "$k"
+    done
+}
+
+usage() {
+    cat <<EOF
+Usage:
+  ezgc [--dry-run] <key> [<key> ...]   Run one or more keys in order
+  ezgc [--dry-run] --all               Run all commands (first occurrence wins)
+  ezgc --list                          List available keys
+  ezgc --help                          This help
+
+Environment:
+  MY_EZGC_PATH   Colon-separated list of files. Each line: "<key> <command...>".
+                 Blank lines and lines starting with '#' are ignored.
+
+Notes:
+  - First occurrence of a key across files wins (PATH-like).
+  - '--all' cannot be combined with explicit keys.
+  - '--dry-run' prints the expanded commands (with '+') and does not execute them.
+EOF
+}
+
+run_one() {
+    local key="$1"
+    local cmd="${CMD_BY_KEY[$key]:-}"
+    [[ -n "$cmd" ]] || die "Unknown key: $key"
+    printf '+ %s\n' "$cmd"
+    bash -c "$cmd"
+}
+
+show_one() {
+    local key="$1"
+    local cmd="${CMD_BY_KEY[$key]:-}"
+    [[ -n "$cmd" ]] || die "Unknown key: $key"
+    printf '+ %s\n' "$cmd"
+}
+
+main() {
+    load_aliases
+
+    local dry_run=0 all_flag=0
+    local -a keys=()
+
+    # Parse options (order-agnostic)
+    while (($# > 0)); do
+        case "$1" in
+        --help | -h)
+            usage
+            exit 0
+            ;;
+        --list | -l)
+            list_keys
+            exit 0
+            ;;
+        --dry-run | -n)
+            dry_run=1
+            shift
+            ;;
+        --all)
+            all_flag=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            die "Unknown option: $1"
+            ;;
+        *)
+            keys+=("$1")
+            shift
+            ;;
+        esac
+    done
+    # Any trailing args after '--' are keys
+    while (($# > 0)); do
+        keys+=("$1")
+        shift
+    done
+
+    if ((all_flag)) && ((${#keys[@]} > 0)); then
+        die "Cannot specify keys when using --all."
+    fi
+
+    if ((all_flag)); then
+        keys=("${ORDERED_KEYS[@]}")
+    fi
+
+    ((${#keys[@]} > 0)) || {
+        usage
+        exit 1
+    }
+
+    local k
+    if ((dry_run)); then
+        for k in "${keys[@]}"; do
+            show_one "$k"
+        done
+    else
+        for k in "${keys[@]}"; do
+            run_one "$k"
+        done
+    fi
+}
+
+main "$@"
