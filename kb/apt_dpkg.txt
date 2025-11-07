@@ -9,3 +9,4 @@ Without first installing:
     apt-file update
     apt-file list libnvshmem3-cuda-13
     apt-file list libnvshmem3-dev-cuda-13
+    apt-file search 'libEGL.so.1.1.0'
