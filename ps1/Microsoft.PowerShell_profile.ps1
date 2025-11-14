@@ -43,6 +43,20 @@ function ps1fmt {
     Set-Content -LiteralPath $full -Value $fmt -Encoding UTF8
 }
 
+function Lock-Workstation {
+    <#
+    .SYNOPSIS
+        Locks the current Windows session.
+
+    .DESCRIPTION
+        Invokes the Windows API call `LockWorkStation()` via rundll32.
+        Useful in remote sessions (including RDP from macOS) where
+        standard keyboard shortcuts like Win+L may not be passed through.
+    #>
+
+    rundll32.exe user32.dll, LockWorkStation
+}
+
 function fresh_venv {
     param(
         [Parameter(Mandatory = $true)]
