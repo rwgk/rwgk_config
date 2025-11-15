@@ -1,24 +1,29 @@
-﻿# Copies Microsoft.PowerShell_profile.ps1 and PSReadLine-History-Config.ps1
+﻿# **********************************************
+# REMINDER: Run-Bypass .\copy_to_profile_dir.ps1
+# **********************************************
+
+# Copies Microsoft.PowerShell_profile.ps1 and PSReadLine-History-Config.ps1
 # from this folder into the user's current-host PowerShell profile directory,
-# clobbering existing files. Errors if $PROFILE or its directory don't exist.
-
-# This may be needed to enable running this script:
-#     Set-ExecutionPolicy -Scope Process Bypass -Force
-
-# If this script errors because the profile file doesnâ€™t exist yet,
-# create it once and rerun:
-#     ni -Force -ItemType File $PROFILE
+# clobbering existing files. Automatically creates the profile directory and
+# profile file if they do not exist.
 
 $ErrorActionPreference = 'Stop'
 
-# Destination: must already exist
+# Destination: ensure profile path and directory exist
 $destProfile = $PROFILE
-if (-not (Test-Path -LiteralPath $destProfile -PathType Leaf)) {
-    throw "Profile file does not exist: `"$destProfile`". Create it once (e.g., `ni -Force -ItemType File $PROFILE`) then rerun."
+if (-not $destProfile) {
+    throw "`$PROFILE is not set. Cannot determine destination profile path."
 }
+
 $destDir = Split-Path -Path $destProfile -Parent
 if (-not (Test-Path -LiteralPath $destDir -PathType Container)) {
-    throw "Profile directory does not exist: `"$destDir`"."
+    Write-Host "Creating PowerShell profile directory: $destDir"
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+}
+
+if (-not (Test-Path -LiteralPath $destProfile -PathType Leaf)) {
+    Write-Host "Creating empty profile file: $destProfile"
+    New-Item -ItemType File -Path $destProfile -Force | Out-Null
 }
 
 # Source directory: where this script lives

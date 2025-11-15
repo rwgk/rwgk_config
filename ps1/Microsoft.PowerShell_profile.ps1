@@ -13,6 +13,16 @@ $profileDir = Split-Path -Path $PROFILE -Parent
 $psrlConfig = Join-Path $profileDir 'PSReadLine-History-Config.ps1'
 if (Test-Path $psrlConfig) { . $psrlConfig }
 
+function Run-Bypass {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Script,
+        [string[]]$Args
+    )
+
+    & powershell -ExecutionPolicy Bypass -File $Script @Args
+}
+
 function ps1fmt {
     [CmdletBinding()]
     param(
