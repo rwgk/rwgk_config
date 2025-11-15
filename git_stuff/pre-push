@@ -2,10 +2,7 @@
 
 # Branches that are locally protected from pushes.
 # Add/remove names separated by spaces.
-PROTECTED_BRANCHES="main master cython-gen"
-
-# Optional: only enforce for a specific remote, e.g. origin
-# ENFORCE_REMOTE="origin"   # uncomment to enable
+PROTECTED_BRANCHES="main master ctk-next cython-gen"
 
 # Environment overrides:
 # - Set GIT_PUSH_ALLOW_DIRTY_STATE=1 to allow pushing with a dirty tree.
@@ -35,17 +32,20 @@ if [ -n "$dirty_state" ]; then
 fi
 
 # ---- 2) Protected-branch guard ----------------------------------------------
+# Enable branch protection only when more than one remote is present
+# (using this as a proxy for "fork mode").
+remote_count="$(git remote | wc -l | tr -d ' ')"
+if [ "$remote_count" -le 1 ]; then
+    # Only one remote → no need for local branch protection
+    exit 0
+fi
+
 # Capture the refs being pushed (stdin lines):
 # <local_ref> <local_sha> <remote_ref> <remote_sha>
 stdin_payload="$(cat)"
 
 # Some clients may invoke the hook even if there's nothing to push
 [ -z "$stdin_payload" ] && exit 0
-
-# Optionally scope to a specific remote
-if [ -n "$ENFORCE_REMOTE" ] && [ "$remote_name" != "$ENFORCE_REMOTE" ]; then
-    exit 0
-fi
 
 # Build a regex from the protected branch names (exact matches)
 protected_re=""
