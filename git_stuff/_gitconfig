@@ -9,6 +9,7 @@
         excludesfile = ~/.gitignore_global
         autocrlf = input
         safecrlf = warn
+        whitespace = cr-at-eol
 [url "git@github.com:"]
         pushInsteadOf = https://github.com/
 [color]
@@ -16,9 +17,7 @@
 [push]
         default = simple
 [alias]
-        graph = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)%cr%Creset %C(bold blue)<%an>%Creset' --date=relative
         sw = switch
-        d = diff --word-diff=color
 [pull]
         rebase = false
 [commit]
