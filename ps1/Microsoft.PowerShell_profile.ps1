@@ -107,24 +107,26 @@ function fresh_venv {
     }
 }
 
+if (-not $env:CUDA_LOC) {
+    $env:CUDA_LOC = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+}
+
 function set_cuda_env {
     param(
         [string]$Version
     )
 
-    $cudaBasePath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
-
     # Check if CUDA directory exists
-    if (-not (Test-Path $cudaBasePath)) {
-        Write-Error "CUDA installation not found at: $cudaBasePath"
+    if (-not (Test-Path $env:CUDA_LOC)) {
+        Write-Error "CUDA installation not found at: $env:CUDA_LOC"
         return
     }
 
     # Get all version directories (starting with 'v')
-    $versionDirs = Get-ChildItem -Path $cudaBasePath -Directory | Where-Object { $_.Name -match '^v\d+\.\d+$' }
+    $versionDirs = Get-ChildItem -Path $env:CUDA_LOC -Directory | Where-Object { $_.Name -match '^v\d+\.\d+$' }
 
     if ($versionDirs.Count -eq 0) {
-        Write-Error "No CUDA versions found in: $cudaBasePath"
+        Write-Error "No CUDA versions found in: $env:CUDA_LOC"
         return
     }
 
@@ -143,7 +145,7 @@ function set_cuda_env {
     }
 
     # Validate the specified version exists
-    $targetPath = Join-Path $cudaBasePath $Version
+    $targetPath = Join-Path $env:CUDA_LOC $Version
     if (-not (Test-Path $targetPath)) {
         Write-Host "Available versions:" -ForegroundColor Yellow
         $versionDirs | ForEach-Object { Write-Host "  $($_.Name)" }
