@@ -67,6 +67,46 @@ function Lock-Workstation {
     rundll32.exe user32.dll, LockWorkStation
 }
 
+function Enable-Automatic-Driver-Updates {
+    <#
+    .SYNOPSIS
+        Re-enables Windows automatic driver installation.
+
+    .DESCRIPTION
+        Restores the default Windows behavior for device driver updates by
+        setting:
+            HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching
+                SearchOrderConfig = 1
+
+        This command reverses the setting used to disable automatic driver
+        installation when performing manual NVIDIA driver cleanup.
+        After updating the registry, the function reads back the value and
+        displays it for verification.
+
+    .EXAMPLE
+        Enable-Automatic-Driver-Updates
+
+        Re-enables automatic driver updates immediately.
+    #>
+
+    $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
+    $name = "SearchOrderConfig"
+    $value = 1
+
+    try {
+        Set-ItemProperty -Path $regPath -Name $name -Value $value -Force
+        Write-Host "Automatic driver updates have been re-enabled." -ForegroundColor Green
+
+        # Read back the current value
+        $current = Get-ItemProperty -Path $regPath -Name $name | Select-Object -ExpandProperty $name
+        Write-Host "Current value of SearchOrderConfig: $current" -ForegroundColor Cyan
+    }
+    catch {
+        Write-Host "Failed to update driver search configuration:" -ForegroundColor Red
+        Write-Host $_.Exception.Message
+    }
+}
+
 function fresh_venv {
     param(
         [Parameter(Mandatory = $true)]
