@@ -205,11 +205,11 @@ function set_cuda_env {
 
     # Set environment variables
     $env:CUDA_HOME = $targetPath
-    $env:LIB = "$env:CUDA_HOME\lib\x64;$env:LIB"
+    $env:CUDA_PATH = $env:CUDA_HOME
 
     Write-Host "CUDA environment set:" -ForegroundColor Green
     Write-Host "  CUDA_HOME = $env:CUDA_HOME"
-    Write-Host "  LIB = $env:LIB"
+    Write-Host "  CUDA_PATH = $env:CUDA_PATH"
 }
 
 function set_all_must_work {

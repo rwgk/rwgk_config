@@ -1291,10 +1291,25 @@ pixipath() {
 }
 
 set_cuda_env() {
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: set_cuda_env <cuda-major-minor>" >&2
+        return 1
+    fi
+    local ver="$1"
     set -x
-    export CUDA_HOME=/usr/local/cuda
-    export LIBRARY_PATH="$CUDA_HOME/lib64:$LIBRARY_PATH"
-    export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$CUDA_HOME/nvvm/lib64:$LD_LIBRARY_PATH"
+    export CUDA_HOME="/usr/local/cuda-$ver"
+    set +x
+}
+
+set_cuda_env_bld() {
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: set_cuda_env_bld <cuda-major-minor>" >&2
+        return 1
+    fi
+    local ver="$1"
+    set_cuda_env "$ver"
+    set -x
+    export CUDA_PYTHON_PARALLEL_LEVEL="$(nproc)"
     set +x
 }
 
@@ -1302,21 +1317,6 @@ set_all_must_work() {
     set -x
     export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
     export CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work
-    set +x
-}
-
-set_cuda_env_bld() {
-    set_cuda_env
-    set_all_must_work
-    set -x
-    export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
-    set +x
-}
-
-set_cuda13010() {
-    set -x
-    export CUDA_HOME="/usr/local/cuda-13.1"
-    export CUDA_PYTHON_PARALLEL_LEVEL=$(nproc)
     set +x
 }
 
