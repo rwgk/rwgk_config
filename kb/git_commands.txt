@@ -9,6 +9,9 @@ git push origin --delete some_branch
 
 git commit --allow-empty -m "[skip ci] empty commit"
 
+# Hard reset to exact state of remote tracking branch
+git reset --hard @{u}
+
 #             vv JUST A BRANCH NAME vv         vvvvv REMOTE/BRANCH vvvv
 git switch -c other_ghuser/some_branch --track other_ghuser/some_branch
 
