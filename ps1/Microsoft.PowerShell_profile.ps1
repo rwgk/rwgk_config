@@ -1,4 +1,4 @@
-﻿# copy Microsoft.PowerShell_profile.ps1 "$PROFILE"
+# copy Microsoft.PowerShell_profile.ps1 "$PROFILE"
 # also copy PSReadLine-History-Config.ps1 to the same directory
 
 if (-not (Test-Path "U:\")) {
@@ -49,8 +49,9 @@ function ps1fmt {
 
     if ($Backup) { Copy-Item -LiteralPath $full -Destination ($full + '.bak') -Force }
 
-    # PowerShell 5.1: make encoding explicit
-    Set-Content -LiteralPath $full -Value $fmt -Encoding UTF8
+    # Normalize to UTF-8 without BOM for cross-platform consistency
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($full, $fmt, $encoding)
 }
 
 function Lock-Workstation {
@@ -176,36 +177,49 @@ function set_cuda_env {
         return
     }
 
-    # Get all version directories (starting with 'v')
-    $versionDirs = Get-ChildItem -Path $env:CUDA_LOC -Directory | Where-Object { $_.Name -match '^v\d+\.\d+$' }
+    # Discover CUDA version directories and parse numeric versions (e.g. 'v13.0' -> '13.0')
+    $versionEntries = Get-ChildItem -Path $env:CUDA_LOC -Directory |
+        ForEach-Object {
+            $match = [regex]::Match($_.Name, '\d+\.\d+')
+            if ($match.Success) {
+                [PSCustomObject]@{
+                    Name         = $_.Name
+                    FullName     = $_.FullName
+                    VersionLabel = $match.Value
+                }
+            }
+        }
 
-    if ($versionDirs.Count -eq 0) {
+    if (-not $versionEntries -or $versionEntries.Count -eq 0) {
         Write-Error "No CUDA versions found in: $env:CUDA_LOC"
         return
     }
 
-    # If version not specified, try to auto-detect
+    # If version not specified, try to auto-detect based on parsed numeric versions
     if (-not $Version) {
-        if ($versionDirs.Count -eq 1) {
-            $Version = $versionDirs[0].Name
+        $uniqueVersions = $versionEntries.VersionLabel | Sort-Object -Unique
+        if ($uniqueVersions.Count -eq 1) {
+            $Version = $uniqueVersions[0]
             Write-Host "Auto-detected CUDA version: $Version" -ForegroundColor Green
         }
         else {
             Write-Host "Multiple CUDA versions found:" -ForegroundColor Yellow
-            $versionDirs | ForEach-Object { Write-Host "  $($_.Name)" }
-            Write-Error "Please specify a version using -Version parameter"
+            $uniqueVersions | ForEach-Object { Write-Host "  $($_)" }
+            Write-Error "Please specify a version (e.g. 13.0)"
             return
         }
     }
 
-    # Validate the specified version exists
-    $targetPath = Join-Path $env:CUDA_LOC $Version
-    if (-not (Test-Path $targetPath)) {
+    # Validate the specified version exists (exact numeric match, e.g. '13.0')
+    $targetEntry = $versionEntries | Where-Object { $_.VersionLabel -eq $Version } | Select-Object -First 1
+    if (-not $targetEntry) {
         Write-Host "Available versions:" -ForegroundColor Yellow
-        $versionDirs | ForEach-Object { Write-Host "  $($_.Name)" }
+        ($versionEntries.VersionLabel | Sort-Object -Unique) | ForEach-Object { Write-Host "  $($_)" }
         Write-Error "CUDA version '$Version' not found"
         return
     }
+
+    $targetPath = $targetEntry.FullName
 
     # Set environment variables
     $env:CUDA_HOME = $targetPath
