@@ -107,6 +107,10 @@ function Enable-Automatic-Driver-Updates {
     }
 }
 
+function todate { Get-Date -Format 'yyyy-MM-dd' }
+function now { Get-Date -Format 'yyyy-MM-dd+HHmmss' }
+function nowish { Get-Date -Format 'yyyy-MM-dd+HHmm' }
+
 function fresh_venv {
     param(
         [Parameter(Mandatory = $true)]
