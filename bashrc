@@ -1228,6 +1228,8 @@ nfid() {
 nlog() {
     if [ -d /wrk/logs ]; then
         nfid /wrk/logs "$@"
+    elif [ -d "$HOME/wrk/logs" ]; then
+        nfid "$HOME/wrk/logs" "$@"
     else
         nfid "$HOME/logs" "$@"
     fi
