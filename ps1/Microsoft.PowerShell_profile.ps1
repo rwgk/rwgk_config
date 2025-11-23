@@ -68,6 +68,106 @@ function Lock-Workstation {
     rundll32.exe user32.dll, LockWorkStation
 }
 
+function pbcopy {
+    <#
+    .SYNOPSIS
+        Copy stdin / piped input to the Windows clipboard (macOS pbcopy emulation).
+
+    .DESCRIPTION
+        Intended usage, mirroring macOS:
+            somecommand | pbcopy
+            pbcopy < file.txt
+
+        Does NOT take filename arguments.
+        For file-based operations, use pbff (PasteBoard From File).
+    #>
+    if ($args.Count -gt 0) {
+        throw "pbcopy does not accept arguments. Use 'pbff <file>' to copy a file to the clipboard."
+    }
+
+    # Collect all piped / redirected input
+    $lines = @()
+    foreach ($item in $input) {
+        # Force to string in case upstream commands emit non-strings
+        $lines += [string]$item
+    }
+
+    if ($lines.Count -eq 0) {
+        throw "pbcopy: no input received (use pipeline or redirection, e.g. 'cmd | pbcopy' or 'pbcopy < file')."
+    }
+
+    # Join with newlines, similar to how Out-String would, but without the extra trailing newline
+    $text = [string]::Join("`r`n", $lines)
+
+    Set-Clipboard -Value $text
+}
+
+function pbpaste {
+    <#
+    .SYNOPSIS
+        Write clipboard text to stdout (macOS pbpaste emulation).
+
+    .DESCRIPTION
+        Intended usage:
+            pbpaste
+            pbpaste > file.txt
+            pbpaste | somecommand
+
+        Does NOT take filename arguments.
+        For file-based operations, use pbtf (PasteBoard To File).
+    #>
+    if ($args.Count -gt 0) {
+        throw "pbpaste does not accept arguments. Use 'pbtf <file>' to write clipboard contents to a file."
+    }
+
+    $text = Get-Clipboard -Raw
+    $text
+}
+
+function pbff {
+    <#
+    .SYNOPSIS
+        PasteBoard From File: copy the contents of a file into the clipboard.
+
+    .DESCRIPTION
+        Convenience wrapper so you don't need redirection:
+            pbff file.txt
+
+        Requires exactly one filename.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string] $Path
+    )
+
+    # Read the whole file as a single string
+    $content = Get-Content -LiteralPath $Path -Raw
+    Set-Clipboard -Value $content
+}
+
+function pbtf {
+    <#
+    .SYNOPSIS
+        PasteBoard To File: write clipboard contents to a file.
+
+    .DESCRIPTION
+        Convenience wrapper, roughly like:
+            pbpaste > file.txt
+
+        Requires exactly one filename.
+        Overwrites the file if it exists.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string] $Path
+    )
+
+    $text = Get-Clipboard -Raw
+    Set-Content -LiteralPath $Path -Value $text -NoNewline
+}
+
 function Enable-Automatic-Driver-Updates {
     <#
     .SYNOPSIS
