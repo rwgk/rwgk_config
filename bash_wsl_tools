@@ -99,3 +99,99 @@ explorerwin() (
     # Convert to Windows path only at the call site
     exec nohup "$exe" "$(wslpath -w "$target")" >/dev/null 2>&1
 )
+
+# --- clipboard (WSL2 <-> Windows) ----------------------------------------
+
+# Internal: verify we're on WSL2 Ubuntu.
+_wsl2_ubuntu_clipboard_ok() {
+    # Basic WSL check (matches your existing pattern)
+    if ! command -v wslpath >/dev/null 2>&1; then
+        echo "pbcopy/pbpaste WSL helper: wslpath not found (not in WSL?)." >&2
+        return 1
+    fi
+
+    # Kernel string should mention Microsoft and WSL2
+    if ! grep -qi "microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
+        echo "pbcopy/pbpaste WSL helper: kernel does not look like WSL (no 'Microsoft' in osrelease)." >&2
+        return 1
+    fi
+    if ! grep -qi "wsl2" /proc/sys/kernel/osrelease 2>/dev/null; then
+        echo "pbcopy/pbpaste WSL helper: kernel does not look like WSL2 (no 'WSL2' in osrelease)." >&2
+        return 1
+    fi
+
+    # Require Ubuntu
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        if [ "${ID:-}" != "ubuntu" ]; then
+            echo "pbcopy/pbpaste WSL helper: /etc/os-release ID='${ID:-}' (expected 'ubuntu')." >&2
+            return 1
+        fi
+    else
+        echo "pbcopy/pbpaste WSL helper: /etc/os-release not readable; cannot verify Ubuntu." >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Internal: find a usable PowerShell executable on the Windows side.
+_wsl_find_powershell_exe() {
+    local PWSH_EXE=""
+
+    # Prefer explicit paths; PATH inside WSL isn't always trustworthy.
+    for _p in \
+        /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
+        /mnt/c/Windows/system32/WindowsPowerShell/v1.0/powershell.exe \
+        powershell.exe; do
+        if command -v "$_p" >/dev/null 2>&1 || [ -x "$_p" ]; then
+            if [ -x "$_p" ]; then
+                PWSH_EXE="$_p"
+            else
+                # Found via PATH
+                PWSH_EXE="$(command -v "$_p")"
+            fi
+            break
+        fi
+    done
+
+    if [ -z "$PWSH_EXE" ]; then
+        echo "pbcopy/pbpaste WSL helper: powershell.exe not found; cannot access Windows clipboard." >&2
+        return 1
+    fi
+
+    printf '%s\n' "$PWSH_EXE"
+}
+
+# pbcopy — like macOS: stdin -> Windows clipboard, no arguments.
+pbcopy() {
+    if ! _wsl2_ubuntu_clipboard_ok; then
+        return 1
+    fi
+
+    # Require some stdin (pipe or redirection)
+    if [ -t 0 ]; then
+        echo "pbcopy: no input on stdin (use a pipe or redirection, e.g. 'cmd | pbcopy' or 'pbcopy < file')." >&2
+        return 1
+    fi
+
+    local ps_exe
+    ps_exe="$(_wsl_find_powershell_exe)" || return 1
+
+    # Read all stdin and feed it into PowerShell's stdin; Set-Clipboard reads from Console.In
+    "$ps_exe" -NoProfile -Command "Set-Clipboard -Value ([Console]::In.ReadToEnd())" >/dev/null
+}
+
+# pbpaste — like macOS: Windows clipboard -> stdout, no arguments.
+pbpaste() {
+    if ! _wsl2_ubuntu_clipboard_ok; then
+        return 1
+    fi
+
+    local ps_exe
+    ps_exe="$(_wsl_find_powershell_exe)" || return 1
+
+    # Get-Clipboard returns Windows-style CRLF; strip CR to get Unix newlines.
+    "$ps_exe" -NoProfile -Command "Get-Clipboard" | tr -d '\r'
+}
