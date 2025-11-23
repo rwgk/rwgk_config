@@ -118,6 +118,67 @@ EnableAppleFastKeyRepeat() {
     echo 'Please restart affected applications.'
 }
 
+# pbff: PasteBoard From File
+# Copy the contents of a file into the pasteboard (clipboard).
+pbff() {
+    if [ "$#" -ne 1 ]; then
+        echo "pbff: exactly one filename argument required" >&2
+        echo "usage: pbff <file>" >&2
+        return 1
+    fi
+
+    local file=$1
+
+    if [ ! -e "$file" ]; then
+        echo "pbff: file not found: $file" >&2
+        return 1
+    fi
+
+    if [ ! -r "$file" ]; then
+        echo "pbff: file not readable: $file" >&2
+        return 1
+    fi
+
+    # Use the system pbcopy, reading from the file
+    pbcopy <"$file"
+}
+
+# pbtf: PasteBoard To File
+# Write the contents of the pasteboard (clipboard) into a file.
+# Overwrites the file if it exists (like `> file`).
+pbtf() {
+    if [ "$#" -ne 1 ]; then
+        echo "pbtf: exactly one filename argument required" >&2
+        echo "usage: pbtf <file>" >&2
+        return 1
+    fi
+
+    local file=$1
+    local dir
+
+    dir=$(dirname -- "$file")
+
+    # Ensure directory exists and is writable
+    if [ ! -d "$dir" ]; then
+        echo "pbtf: directory does not exist: $dir" >&2
+        return 1
+    fi
+
+    if [ ! -w "$dir" ]; then
+        echo "pbtf: directory not writable: $dir" >&2
+        return 1
+    fi
+
+    # If file exists but is a directory, fail
+    if [ -d "$file" ]; then
+        echo "pbtf: path is a directory, not a file: $file" >&2
+        return 1
+    fi
+
+    # Write clipboard contents to the file (overwrite)
+    pbpaste >"$file"
+}
+
 alias where='type -a'
 
 alias llb='ls -l'
