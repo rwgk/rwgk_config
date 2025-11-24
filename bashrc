@@ -1,11 +1,21 @@
 # ~/.bashrc: executed by bash(1) for non-login shells.
 
-# If not running interactively, don't do anything
-case $- in
-*i*) ;;
-*) return ;;
-esac
-[ -z "$PS1" ] && return
+# --- Early return guard ------------------------------------------------------
+# Load full shell environment if:
+#   1. PRETEND_INTERACTIVE_SHELL is set (forced for special cases, e.g. pbpush/pbpull), OR
+#   2. PS1 is set (normal interactive prompt), OR
+#   3. Shell options string ($-) contains 'i' (interactive shell)
+#
+if [[ -z "$PRETEND_INTERACTIVE_SHELL" ]]; then
+    # If PS1 is empty, we *might* be non-interactive
+    if [[ -z "$PS1" ]]; then
+        case "$-" in
+        *i*) : ;;    # interactive → continue
+        *) return ;; # truly non-interactive → bail out early
+        esac
+    fi
+fi
+# --- end early return guard --------------------------------------------------
 
 alias RC='cd "$HOME/rwgk_config"'
 
