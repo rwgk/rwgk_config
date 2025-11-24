@@ -1067,7 +1067,7 @@ alias cffd='clang-format -style=file --dry-run'
 alias cffI='clang-format -style=file -i'
 alias cfpybind11d="clang-format --style=file:$HOME/forked/pybind11/.clang-format --dry-run"
 alias cfpybind11I="clang-format --style=file:$HOME/forked/pybind11/.clang-format -i"
-alias cleanup_build_dir='$HOME/clone/pybind11_scons/cleanup_build_dir.sh'
+alias cleanup_build_dir='$W/clone/pybind11_scons/cleanup_build_dir.sh'
 alias sconshold='scons extra_defines=PYBIND11_USE_SMART_HOLDER_AS_DEFAULT'
 alias sconshnew='scons extra_defines=PYBIND11_RUN_TESTING_WITH_SMART_HOLDER_AS_DEFAULT_BUT_NEVER_USE_IN_PRODUCTION_PLEASE'
 
