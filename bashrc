@@ -189,6 +189,61 @@ pbtf() {
     pbpaste >"$file"
 }
 
+# pbpush: push local (e.g. macOS) clipboard to remote (e.g. WSL2) clipboard
+pbpush() {
+    if [ "$#" -ne 1 ]; then
+        echo "pbpush: exactly one hostname argument required" >&2
+        echo "usage: pbpush <ssh-target>" >&2
+        return 1
+    fi
+
+    local host=$1
+
+    if ! command -v pbpaste >/dev/null 2>&1; then
+        echo "pbpush: pbpaste not found on this system (expected macOS)." >&2
+        return 1
+    fi
+
+    if ! command -v ssh >/dev/null 2>&1; then
+        echo "pbpush: ssh not found in PATH." >&2
+        return 1
+    fi
+
+    # Read macOS clipboard, send via ssh to remote bash login shell, which runs pbcopy.
+    # -T: no pty, better for pure stdin/stdout data
+    if ! pbpaste | ssh -T "$host" 'PRETEND_INTERACTIVE_SHELL=1 . ~/.profile; pbcopy'; then
+        echo "pbpush: failed to push clipboard to '$host'." >&2
+        return 1
+    fi
+}
+
+# pbpull: pull remote clipboard (e.g. WSL2) into local (e.g. macOS) clipboard
+pbpull() {
+    if [ "$#" -ne 1 ]; then
+        echo "pbpull: exactly one hostname argument required" >&2
+        echo "usage: pbpull <ssh-target>" >&2
+        return 1
+    fi
+
+    local host=$1
+
+    if ! command -v pbcopy >/dev/null 2>&1; then
+        echo "pbpull: pbcopy not found on this system (expected macOS)." >&2
+        return 1
+    fi
+
+    if ! command -v ssh >/dev/null 2>&1; then
+        echo "pbpull: ssh not found in PATH." >&2
+        return 1
+    fi
+
+    # Run remote pbpaste inside a bash login shell, then feed its output to local pbcopy.
+    if ! ssh -T "$host" 'PRETEND_INTERACTIVE_SHELL=1 . ~/.profile; pbpaste' | pbcopy; then
+        echo "pbpull: failed to pull clipboard from '$host'." >&2
+        return 1
+    fi
+}
+
 alias where='type -a'
 
 alias llb='ls -l'
