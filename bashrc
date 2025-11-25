@@ -1169,29 +1169,86 @@ gh_download_run_logs() (
     done
 )
 
-# Usage:
-#   get_gh_run_logs org/repo RUN_ID [annotation]
-#
-# Examples:
-#   get_gh_run_logs NVIDIA/cuda-python 17475795472
-#   get_gh_run_logs pybind/pybind11 18144031622
-#   get_gh_run_logs pybind/pybind11 18144031622 ci
-#
+_get_gh_run_logs_usage() {
+    cat >&2 <<'EOF'
+Usage:
+  get_gh_run_logs org/repo RUN_ID [annotation]
+  get_gh_run_logs https://github.com/org/repo/actions/runs/RUN_ID[/...] [annotation]
+
+Examples:
+  get_gh_run_logs NVIDIA/cuda-python 17475795472
+  get_gh_run_logs pybind/pybind11 18144031622
+  get_gh_run_logs pybind/pybind11 18144031622 ci
+  get_gh_run_logs https://github.com/NVIDIA/cuda-python/actions/runs/19652804989/job/56283268350?pr=1284
+EOF
+}
+
 get_gh_run_logs() {
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' (GitHub CLI) is not installed or not on PATH." >&2
         return 127
     fi
 
-    if [[ $# -lt 2 || $# -gt 3 ]]; then
-        echo "Usage: get_gh_run_logs org/repo RUN_ID [annotation]" >&2
-        echo "Example: get_gh_run_logs pybind/pybind11 18144031622 ci" >&2
-        return 2
-    fi
+    local repo run_id annotation url_mode=false
 
-    local repo="$1"
-    local run_id="$2"
-    local annotation="${3:-}"
+    if [[ $# -ge 1 && "$1" == http* ]]; then
+        # URL mode: get_gh_run_logs URL [annotation]
+        if [[ $# -lt 1 || $# -gt 2 ]]; then
+            _get_gh_run_logs_usage
+            return 2
+        fi
+        url_mode=true
+        local url="$1"
+        annotation="${2:-}"
+
+        # Parse: scheme://host/path
+        local host_and_path host path
+        host_and_path="${url#*://}"
+        host="${host_and_path%%/*}"
+        path="${host_and_path#*/}"
+
+        if [[ "$host" != "github.com" ]]; then
+            echo "Error: URL host must be github.com (got: '$host')." >&2
+            return 2
+        fi
+
+        # path is: org/repo/actions/runs/RUN_ID[/...]
+        local org repo_name rest after_runs
+        org="${path%%/*}"
+        rest="${path#*/}"
+        repo_name="${rest%%/*}"
+        rest="${rest#*/}" # now starts with actions/...
+
+        if [[ -z "$org" || -z "$repo_name" || "$rest" != actions/* ]]; then
+            echo "Error: could not parse org/repo/actions/... from URL path '$path'." >&2
+            return 2
+        fi
+
+        # Extract run_id from ".../actions/runs/RUN_ID[/...]"
+        after_runs="${path#*/actions/runs/}"
+        if [[ "$after_runs" == "$path" ]]; then
+            echo "Error: URL does not contain '/actions/runs/RUN_ID'." >&2
+            return 2
+        fi
+        if [[ "$after_runs" =~ ^([0-9]+) ]]; then
+            run_id="${BASH_REMATCH[1]}"
+        else
+            echo "Error: could not extract numeric RUN_ID from URL '$url'." >&2
+            return 2
+        fi
+
+        repo="${org}/${repo_name}"
+    else
+        # Isolated args mode: get_gh_run_logs org/repo RUN_ID [annotation]
+        if [[ $# -lt 2 || $# -gt 3 ]]; then
+            _get_gh_run_logs_usage
+            return 2
+        fi
+
+        repo="$1"
+        run_id="$2"
+        annotation="${3:-}"
+    fi
 
     if [[ "$repo" != */* ]]; then
         echo "Error: repo must be in 'org/repo' form (got: '$repo')." >&2
