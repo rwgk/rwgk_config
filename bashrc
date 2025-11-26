@@ -1437,14 +1437,18 @@ mf3dwnld() (
 )
 
 mf3path() {
-    if [ -d /wrk/miniforge3 ]; then
-        echo "Using /wrk/miniforge3"
-        source /wrk/miniforge3/etc/profile.d/conda.sh
-    elif [ -d "$HOME/miniforge3" ]; then
-        echo "Using \$HOME/miniforge3"
+    if [[ -n "$W" && -d "$W/miniforge3" ]]; then
+        echo "Using $W/miniforge3"
+        source "$W/miniforge3/etc/profile.d/conda.sh"
+    elif [[ -d "$HOME/miniforge3" ]]; then
+        echo "Using $HOME/miniforge3"
         source "$HOME/miniforge3/etc/profile.d/conda.sh"
     else
-        echo "Error: Neither /wrk/miniforge3 nor \$HOME/miniforge3 exists." >&2
+        if [[ -z "$W" ]]; then
+            echo "Error: \$W is not defined and '$HOME/miniforge3' does not exist." >&2
+        else
+            echo "Error: Neither '$W/miniforge3' nor '$HOME/miniforge3' exists." >&2
+        fi
         return 1
     fi
 }
