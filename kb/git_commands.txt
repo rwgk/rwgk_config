@@ -18,6 +18,9 @@ git switch -c other_ghuser/some_branch --track other_ghuser/some_branch
 # Get short commit hash of HEAD
 git rev-parse --short HEAD
 
+# Get the commit hash of merge-base
+git merge-base main
+
 # Get commit hash that was HEAD right before the merge. This assumes the merge commit is still HEAD.
 git rev-parse HEAD@{1}
 
