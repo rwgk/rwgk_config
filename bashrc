@@ -951,6 +951,35 @@ git_swrp() (
     git switch -c "$new_branch" "$arg"
 )
 
+git_show_merge_commits() {
+    # Require exactly one argument
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: git_show_merge_commits <count>" >&2
+        return 1
+    fi
+
+    local n="$1"
+
+    # Argument must be a positive integer
+    if ! [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: <count> must be a positive integer." >&2
+        return 1
+    fi
+
+    # Ensure we're inside a repo
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Error: not inside a Git repository." >&2
+        return 1
+    fi
+
+    # Loop over first-parent commits
+    git rev-list --first-parent -n "$n" HEAD | while read -r commit; do
+        echo "================================================================================"
+        git show --no-patch --pretty=fuller "$commit"
+        echo
+    done
+}
+
 myt() (
     files=()
     dash_dash_seen=0
