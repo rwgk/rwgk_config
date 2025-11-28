@@ -30,6 +30,9 @@ git format-patch --author="Ralf W. Grosse-Kunstleve" upstream/main..HEAD
 # Create __EMPTY__ branch
 git checkout --orphan new-branch-name && git rm -rf . && git status
 
+# Revert file from another remote/branch
+git checkout other_remote/other_branch -- filename
+
 # All commits not on main, and excluding merge commits
 git log --no-merges main..move_path_finder_to_top
 
