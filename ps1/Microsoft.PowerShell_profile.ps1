@@ -12,6 +12,8 @@ function mf3path { & "$env:USERPROFILE\AppData\Local\miniforge3\shell\condabin\c
 $profileDir = Split-Path -Path $PROFILE -Parent
 $psrlConfig = Join-Path $profileDir 'PSReadLine-History-Config.ps1'
 if (Test-Path $psrlConfig) { . $psrlConfig }
+$orgConfig = Join-Path $profileDir 'Org.PowerShell_profile.ps1'
+if (Test-Path $orgConfig) { . $orgConfig }
 
 function Run-Bypass {
     param(
@@ -66,6 +68,20 @@ function Lock-Workstation {
     #>
 
     rundll32.exe user32.dll, LockWorkStation
+}
+
+function df {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        $ArgsFromUser
+    )
+
+    if ($ArgsFromUser.Count -ne 0) {
+        Write-Error "df takes no arguments."
+        return 1
+    }
+
+    Get-PSDrive -PSProvider FileSystem
 }
 
 function pbcopy {
