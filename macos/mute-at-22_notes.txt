@@ -1,0 +1,24 @@
+Initially:
+
+launchctl load "$HOME/Library/LaunchAgents/com.rwgk.mute-at-22.plist"
+
+
+You can check that it’s loaded:
+
+launchctl list | grep mute-at-22
+
+
+If you later change the plist, run:
+
+launchctl unload "$HOME/Library/LaunchAgents/com.rwgk.mute-at-22.plist"
+launchctl load   "$HOME/Library/LaunchAgents/com.rwgk.mute-at-22.plist"
+
+
+You can trigger it manually via launchctl to be sure it works end-to-end:
+
+launchctl start com.rwgk.mute-at-22
+
+Your Mac should mute; if anything’s off, check:
+
+cat "$HOME/Library/Logs/mute-at-22.log"
+cat "$HOME/Library/Logs/mute-at-22.err"
