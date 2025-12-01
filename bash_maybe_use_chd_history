@@ -1,5 +1,11 @@
 # Detect and (re)set central history when available.
 __maybe_use_chd_history() {
+    # Cursor-agent sessions: use a dedicated history file in /tmp
+    if [ -n "${CURSOR_AGENT:-}" ]; then
+        export HISTFILE="/tmp/rwgk_cursor_agent_bash_history.txt"
+        return 0
+    fi
+
     # You can override this candidate in your env if needed
     local candidate="${CENTRAL_HOME_DIRECTORY_CANDIDATE:-/mnt/h}"
     local marker=".is_central_home_directory"
