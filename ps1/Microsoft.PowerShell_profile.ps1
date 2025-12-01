@@ -278,6 +278,34 @@ function fresh_venv {
     }
 }
 
+function vac {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        $ArgsFromUser
+    )
+
+    if ($ArgsFromUser.Count -ne 1) {
+        Write-Error "Usage: vac <venv-dir>"
+        return
+    }
+
+    $venv = $ArgsFromUser[0]
+
+    if (-not (Test-Path -Path $venv -PathType Container)) {
+        Write-Error "Error: '$venv' is not a directory"
+        return
+    }
+
+    $activate = Join-Path $venv "Scripts\Activate.ps1"
+
+    if (-not (Test-Path -Path $activate -PathType Leaf)) {
+        Write-Error "Error: '$activate' not found"
+        return
+    }
+
+    . $activate
+}
+
 if (-not $env:CUDA_LOC) {
     $env:CUDA_LOC = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
 }
