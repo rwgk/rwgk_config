@@ -53,6 +53,11 @@ export VISUAL="$EDITOR"
 # Ctrl-7 (MacOS)
 export MOSH_ESCAPE_KEY=$'\x1f'
 
+mosh_ls() {
+    pgrep -a mosh-server
+    sudo ss -lunp | grep mosh-server
+}
+
 if [[ "$OSTYPE" == "msys" ]]; then
     # Git Bash
     export PS1='$(hostname):$PWD $ '
