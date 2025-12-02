@@ -133,6 +133,10 @@ export -f use_tmp_user_caches
 export -f wipe_tmp_user_caches
 export -f setup_vim_dirs
 
+if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
 if [ -f /.dockerenv ]; then
     prepend_maybe PATH "/usr/local/cuda/bin"
 fi

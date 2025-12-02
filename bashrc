@@ -1453,6 +1453,11 @@ dbgcode() {
     echo 'long *BAD = nullptr; *BAD = 101;'
 }
 
+macos_brew_install() (
+    set -x
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+)
+
 mc3dwnld() (
     set -x
     wget "https://repo.anaconda.com/miniconda/Miniconda3-latest-$(uname)-$(uname -m).sh"
