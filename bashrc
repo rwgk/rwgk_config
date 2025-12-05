@@ -6,7 +6,9 @@
 #   2. PS1 is set (normal interactive prompt), OR
 #   3. Shell options string ($-) contains 'i' (interactive shell)
 #
-if [[ -z "$PRETEND_INTERACTIVE_SHELL" ]]; then
+if [[ -n "$PRETEND_INTERACTIVE_SHELL" ]]; then
+    shopt -s expand_aliases
+else
     # If PS1 is empty, we *might* be non-interactive
     if [[ -z "$PS1" ]]; then
         case "$-" in
