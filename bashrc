@@ -216,9 +216,26 @@ pbpush() {
         return 1
     fi
 
-    # Read macOS clipboard, send via ssh to remote bash login shell, which runs pbcopy.
+    # Read local clipboard, send it to the remote as a temporary file,
+    # then let the remote pbcopy read from that file. This avoids any
+    # stdin being consumed by shell startup (e.g. .profile).
     # -T: no pty, better for pure stdin/stdout data
-    if ! pbpaste | ssh -T "$host" 'PRETEND_INTERACTIVE_SHELL=1 . ~/.profile; pbcopy'; then
+    if ! pbpaste | ssh -T "$host" '
+        set -e
+        tmp=$(mktemp /tmp/pbpush.XXXXXX)
+        # First, store all incoming data into a temp file
+        cat >"$tmp"
+        # Now load the normal shell environment (which may read stdin),
+        # then feed the temp file into pbcopy so PowerShell sees real stdin.
+        PRETEND_INTERACTIVE_SHELL=1 . ~/.profile
+        if ! command -v pbcopy >/dev/null 2>&1; then
+            echo "pbpush(remote): pbcopy not found on remote host." >&2
+            rm -f "$tmp"
+            exit 1
+        fi
+        pbcopy <"$tmp"
+        rm -f "$tmp"
+    '; then
         echo "pbpush: failed to push clipboard to '$host'." >&2
         return 1
     fi
