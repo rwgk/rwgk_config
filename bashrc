@@ -1222,21 +1222,21 @@ gh_download_run_logs() (
     done
 )
 
-_get_gh_run_logs_usage() {
+_get_gha_logs_usage() {
     cat >&2 <<'EOF'
 Usage:
-  get_gh_run_logs org/repo RUN_ID [annotation]
-  get_gh_run_logs https://github.com/org/repo/actions/runs/RUN_ID[/...] [annotation]
+  get_gha_logs org/repo RUN_ID [annotation]
+  get_gha_logs https://github.com/org/repo/actions/runs/RUN_ID[/...] [annotation]
 
 Examples:
-  get_gh_run_logs NVIDIA/cuda-python 17475795472
-  get_gh_run_logs pybind/pybind11 18144031622
-  get_gh_run_logs pybind/pybind11 18144031622 ci
-  get_gh_run_logs https://github.com/NVIDIA/cuda-python/actions/runs/19652804989/job/56283268350?pr=1284
+  get_gha_logs NVIDIA/cuda-python 17475795472
+  get_gha_logs pybind/pybind11 18144031622
+  get_gha_logs pybind/pybind11 18144031622 ci
+  get_gha_logs https://github.com/NVIDIA/cuda-python/actions/runs/19652804989/job/56283268350?pr=1284
 EOF
 }
 
-get_gh_run_logs() {
+get_gha_logs() {
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' (GitHub CLI) is not installed or not on PATH." >&2
         return 127
@@ -1245,9 +1245,9 @@ get_gh_run_logs() {
     local repo run_id annotation url_mode=false
 
     if [[ $# -ge 1 && "$1" == http* ]]; then
-        # URL mode: get_gh_run_logs URL [annotation]
+        # URL mode: get_gha_logs URL [annotation]
         if [[ $# -lt 1 || $# -gt 2 ]]; then
-            _get_gh_run_logs_usage
+            _get_gha_logs_usage
             return 2
         fi
         url_mode=true
@@ -1292,9 +1292,9 @@ get_gh_run_logs() {
 
         repo="${org}/${repo_name}"
     else
-        # Isolated args mode: get_gh_run_logs org/repo RUN_ID [annotation]
+        # Isolated args mode: get_gha_logs org/repo RUN_ID [annotation]
         if [[ $# -lt 2 || $# -gt 3 ]]; then
-            _get_gh_run_logs_usage
+            _get_gha_logs_usage
             return 2
         fi
 
@@ -1335,6 +1335,97 @@ get_gh_run_logs() {
     fi
 
     return $status
+}
+
+gha_logs_here() {
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: gha_logs_here <URL-or-zipfile>" >&2
+        return 2
+    fi
+
+    local arg="$1"
+    local zip_path dir_name
+
+    if [[ "$arg" == http* ]]; then
+        # URL mode: download logs first via get_gha_logs
+        local url="$arg"
+        local host_and_path host path after_runs run_id
+
+        host_and_path="${url#*://}"
+        host="${host_and_path%%/*}"
+        path="${host_and_path#*/}"
+
+        if [[ "$host" != "github.com" ]]; then
+            echo "Error: URL host must be github.com (got: '$host')." >&2
+            return 2
+        fi
+
+        # Extract run_id from .../actions/runs/RUN_ID[/...]
+        after_runs="${path#*/actions/runs/}"
+        if [[ "$after_runs" == "$path" ]]; then
+            echo "Error: URL does not contain '/actions/runs/RUN_ID'." >&2
+            return 2
+        fi
+        if [[ "$after_runs" =~ ^([0-9]+) ]]; then
+            run_id="${BASH_REMATCH[1]}"
+        else
+            echo "Error: could not extract numeric RUN_ID from URL '$url'." >&2
+            return 2
+        fi
+
+        # Determine zip and target directory names based on run_id
+        zip_path="logs_${run_id}.zip"
+        local target_dir="logs_${run_id}"
+
+        # Fail early if target directory already exists
+        if [[ -e "$target_dir" ]]; then
+            echo "Error: target directory '$target_dir' already exists in '$(pwd)'." >&2
+            echo "       Remove/rename it or use that directory directly." >&2
+            return 1
+        fi
+
+        if [[ -e "$zip_path" ]]; then
+            echo "Error: zip file '$zip_path' already exists in '$(pwd)'." >&2
+            echo "       Use: gha_logs_here \"$zip_path\"   or remove/rename it and retry." >&2
+            return 1
+        fi
+
+        if ! get_gha_logs "$url"; then
+            echo "Error: get_gha_logs failed for '$url'." >&2
+            return 1
+        fi
+    else
+        # Existing .zip file
+        zip_path="$arg"
+        if [[ ! -f "$zip_path" ]]; then
+            echo "Error: zip file not found: '$zip_path'" >&2
+            return 1
+        fi
+    fi
+
+    if [[ "$zip_path" != *.zip ]]; then
+        echo "Error: expected a .zip file (got '$zip_path')." >&2
+        return 2
+    fi
+
+    local zip_abs base
+    if ! zip_abs=$(realpath "$zip_path"); then
+        echo "Error: could not resolve path '$zip_path'." >&2
+        return 1
+    fi
+
+    base=$(basename "$zip_path")
+    dir_name="${base%.zip}"
+
+    if [[ -e "$dir_name" ]]; then
+        echo "Error: target directory '$dir_name' already exists." >&2
+        return 1
+    fi
+
+    mkdir "$dir_name" || return 1
+    cd "$dir_name" || return 1
+
+    unpack_gha_logs.sh "$zip_abs"
 }
 
 find_pr_for_commit() {
