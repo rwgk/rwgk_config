@@ -1688,6 +1688,110 @@ set_all_must_work() {
     set +x
 }
 
+cpython_install() {
+    local action="$1"
+    shift || true
+
+    case "$action" in
+    activate | a)
+        local name="$1"
+
+        if [ -z "$name" ]; then
+            echo "Usage: cpython_install activate|a <install_name>" >&2
+            return 1
+        fi
+
+        if [ -z "$W" ]; then
+            echo "cpython_install: environment variable W is not set" >&2
+            return 1
+        fi
+
+        if [ -n "${CPYTHON_INSTALL_ACTIVE:-}" ]; then
+            echo "cpython_install: already active for '${CPYTHON_INSTALL_NAME:-?}'. Run 'cpython_install deactivate|d' first." >&2
+            return 1
+        fi
+
+        local install_dir="$W/cpython_installs/$name"
+        local bin_dir="$install_dir/bin"
+        local lib_dir="$install_dir/lib"
+
+        if [ ! -d "$install_dir" ]; then
+            echo "cpython_install: install directory '$install_dir' does not exist" >&2
+            return 1
+        fi
+        if [ ! -d "$bin_dir" ]; then
+            echo "cpython_install: bin directory '$bin_dir' does not exist" >&2
+            return 1
+        fi
+        if [ ! -d "$lib_dir" ]; then
+            echo "cpython_install: lib directory '$lib_dir' does not exist" >&2
+            return 1
+        fi
+
+        # Ensure a 'python' symlink exists pointing to 'python3'
+        if [ ! -e "$bin_dir/python" ]; then
+            (cd "$bin_dir" && ln -s python3 python)
+            echo "cpython_install: created symlink '$bin_dir/python' -> 'python3'"
+        fi
+
+        export CPYTHON_INSTALL_ACTIVE=1
+        export CPYTHON_INSTALL_NAME="$name"
+        export CPYTHON_INSTALL_OLD_PATH="$PATH"
+        export CPYTHON_INSTALL_OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+
+        export PATH="$bin_dir${PATH:+:$PATH}"
+        if [ -n "${LD_LIBRARY_PATH-}" ]; then
+            export LD_LIBRARY_PATH="$lib_dir:$LD_LIBRARY_PATH"
+        else
+            export LD_LIBRARY_PATH="$lib_dir"
+        fi
+        ;;
+
+    deactivate | d)
+        if [ -z "${CPYTHON_INSTALL_ACTIVE:-}" ]; then
+            echo "cpython_install: no active installation to deactivate" >&2
+            return 1
+        fi
+
+        export PATH="$CPYTHON_INSTALL_OLD_PATH"
+        export LD_LIBRARY_PATH="${CPYTHON_INSTALL_OLD_LD_LIBRARY_PATH-}"
+
+        unset CPYTHON_INSTALL_ACTIVE \
+            CPYTHON_INSTALL_NAME \
+            CPYTHON_INSTALL_OLD_PATH \
+            CPYTHON_INSTALL_OLD_LD_LIBRARY_PATH
+        ;;
+
+    list)
+        if [ -z "$W" ]; then
+            echo "cpython_install: environment variable W is not set" >&2
+            return 1
+        fi
+
+        local base_dir="$W/cpython_installs"
+
+        if [ ! -d "$base_dir" ]; then
+            echo "cpython_install: base directory '$base_dir' does not exist" >&2
+            return 1
+        fi
+
+        # List installs
+        ls -1 "$base_dir"
+
+        # Optionally show sha_info.txt if present
+        if [ -f "$base_dir/sha_info.txt" ]; then
+            echo
+            cat "$base_dir/sha_info.txt"
+        fi
+        ;;
+
+    *)
+        echo "Usage: cpython_install {activate|a <install_name>|deactivate|d|list}" >&2
+        return 1
+        ;;
+    esac
+}
+
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 if command -v wslpath >/dev/null 2>&1; then
