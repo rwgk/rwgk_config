@@ -216,29 +216,51 @@ pbpush() {
         return 1
     fi
 
-    # Read local clipboard, send it to the remote as a temporary file,
-    # then let the remote pbcopy read from that file. This avoids any
-    # stdin being consumed by shell startup (e.g. .profile).
-    # -T: no pty, better for pure stdin/stdout data
-    if ! pbpaste | ssh -T "$host" '
-        set -e
-        tmp=$(mktemp /tmp/pbpush.XXXXXX)
-        # First, store all incoming data into a temp file
-        cat >"$tmp"
-        # Now load the normal shell environment (which may read stdin),
-        # then feed the temp file into pbcopy so PowerShell sees real stdin.
-        PRETEND_INTERACTIVE_SHELL=1 . ~/.profile
-        if ! command -v pbcopy >/dev/null 2>&1; then
-            echo "pbpush(remote): pbcopy not found on remote host." >&2
-            rm -f "$tmp"
-            exit 1
-        fi
-        pbcopy <"$tmp"
-        rm -f "$tmp"
-    '; then
-        echo "pbpush: failed to push clipboard to '$host'." >&2
+    if ! command -v scp >/dev/null 2>&1; then
+        echo "pbpush: scp not found in PATH." >&2
         return 1
     fi
+
+    # Write local clipboard to a temporary file, copy that file to the remote,
+    # and then let the remote pbcopy read from it. This avoids streaming data
+    # over ssh stdin, which has proven unreliable in some setups.
+    local tmp_local
+    tmp_local=$(mktemp /tmp/pbpush_local.XXXXXX) || {
+        echo "pbpush: failed to create local temporary file" >&2
+        return 1
+    }
+
+    if ! pbpaste >"$tmp_local"; then
+        echo "pbpush: failed to read local clipboard" >&2
+        rm -f "$tmp_local"
+        return 1
+    fi
+
+    # Unique-ish remote temp file path; best-effort cleanup on remote side
+    local tmp_remote="/tmp/pbpush_remote.$$.$RANDOM"
+
+    if ! scp "$tmp_local" "$host:$tmp_remote" >/dev/null 2>&1; then
+        echo "pbpush: failed to copy temporary file to remote host '$host'." >&2
+        rm -f "$tmp_local"
+        return 1
+    fi
+
+    if ! ssh -T "$host" "
+        PRETEND_INTERACTIVE_SHELL=1 . ~/.profile
+        if ! command -v pbcopy >/dev/null 2>&1; then
+            echo \"pbpush(remote): pbcopy not found on remote host.\" >&2
+            rm -f '$tmp_remote'
+            exit 1
+        fi
+        pbcopy <'$tmp_remote'
+        rm -f '$tmp_remote'
+    "; then
+        echo "pbpush: failed to push clipboard to '$host'." >&2
+        rm -f "$tmp_local"
+        return 1
+    fi
+
+    rm -f "$tmp_local"
 }
 
 # pbpull: pull remote clipboard (e.g. WSL2) into local (e.g. macOS) clipboard
