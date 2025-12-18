@@ -268,6 +268,22 @@ pbpull() {
     fi
 }
 
+smv() {
+    "$HOME"/rwgk_config/bin/save_or_move.sh smv "$@"
+}
+
+sve() {
+    "$HOME"/rwgk_config/bin/save_or_move.sh sve "$@"
+}
+
+mts() {
+    "$HOME"/rwgk_config/bin/mtimestamp.sh move "$@"
+}
+
+mdup() {
+    "$HOME"/rwgk_config/bin/mtimestamp.sh dup "$@"
+}
+
 alias where='type -a'
 
 alias llb='ls -l'
