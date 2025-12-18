@@ -20,7 +20,7 @@ fi
 # --- end early return guard --------------------------------------------------
 
 # Silence Ubuntu MOTD by default
-[[ -f ~/.hushlogin ]] || touch ~/.hushlogin
+[[ -d /etc/update-motd.d && ! -f ~/.hushlogin ]] && touch ~/.hushlogin
 
 show_motd() {
     # Ubuntu/Debian MOTD (matches pam_motd behavior)
