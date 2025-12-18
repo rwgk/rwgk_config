@@ -19,6 +19,14 @@ else
 fi
 # --- end early return guard --------------------------------------------------
 
+# Silence Ubuntu MOTD by default
+[[ -f ~/.hushlogin ]] || touch ~/.hushlogin
+
+show_motd() {
+    # Ubuntu/Debian MOTD (matches pam_motd behavior)
+    run-parts /etc/update-motd.d/
+}
+
 alias RC='cd "$HOME/rwgk_config"'
 
 if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
