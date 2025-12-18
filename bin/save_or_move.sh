@@ -102,6 +102,7 @@ timestamped_name() {
 
 declare -a SRC_PATHS=()
 declare -a DEST_PATHS=()
+declare -a SKIP_ACTION=()
 
 for arg in "$@"; do
     [[ -e "$arg" || -L "$arg" ]] || {
@@ -126,6 +127,7 @@ for arg in "$@"; do
 
     SRC_PATHS+=("$arg")
     DEST_PATHS+=("$dest")
+    SKIP_ACTION+=(0)
 done
 
 if [[ ${#SRC_PATHS[@]} -eq 0 ]]; then
@@ -133,14 +135,30 @@ if [[ ${#SRC_PATHS[@]} -eq 0 ]]; then
 fi
 
 collision_count=0
+identical_existing_count=0
 
 # Check collisions with existing paths in target directory
 for i in "${!DEST_PATHS[@]}"; do
     dest=${DEST_PATHS[$i]}
     if [[ -e "$dest" || -L "$dest" ]]; then
-        printf 'Collision with existing path: %s (source: %s)\n' \
-            "$dest" "${SRC_PATHS[$i]}" >&2
-        collision_count=$((collision_count + 1))
+        src=${SRC_PATHS[$i]}
+        if [[ -f "$src" && -f "$dest" ]]; then
+            # Both regular files: treat as identical if contents match
+            if cmp -s -- "$src" "$dest"; then
+                printf '   Existing & identical path: %s (source: %s)\n' \
+                    "$dest" "$src" >&2
+                identical_existing_count=$((identical_existing_count + 1))
+                SKIP_ACTION[$i]=1
+            else
+                printf 'Collision with existing path: %s (source: %s)\n' \
+                    "$dest" "$src" >&2
+                collision_count=$((collision_count + 1))
+            fi
+        else
+            printf 'Collision with existing path: %s (source: %s)\n' \
+                "$dest" "$src" >&2
+            collision_count=$((collision_count + 1))
+        fi
     fi
 done
 
@@ -159,20 +177,37 @@ for i in "${!DEST_PATHS[@]}"; do
     done
 done
 
+if ((identical_existing_count > 0)); then
+    printf 'INFO: %d existing & identical target(s) skipped\n' "$identical_existing_count" >&2
+fi
+
 if ((collision_count > 0)); then
     printf 'ABORT: %d collisions detected → NO ACTIONS TAKEN\n' "$collision_count" >&2
     exit 1
 fi
 
+files_saved=0
+dirs_saved=0
+files_moved=0
+dirs_moved=0
+
 for i in "${!SRC_PATHS[@]}"; do
     src=${SRC_PATHS[$i]}
     dest=${DEST_PATHS[$i]}
+
+    # Skip planned actions where an identical existing target was found
+    if [[ "${SKIP_ACTION[$i]:-0}" -eq 1 ]]; then
+        continue
+    fi
 
     # Symlinks (that are NOT directories at this point) — copy referent; if smv, remove link
     if [[ -L "$src" && ! -d "$src" ]]; then
         run cp -- "$src" "$dest"
         if [[ "$mode" == "smv" ]]; then
             run rm -- "$src"
+            files_moved=$((files_moved + 1))
+        else
+            files_saved=$((files_saved + 1))
         fi
         continue
     fi
@@ -180,7 +215,37 @@ for i in "${!SRC_PATHS[@]}"; do
     if [[ "$mode" == "sve" ]]; then
         # For directories with -D, preserve attributes; for files, same
         run cp -a -- "$src" "$dest"
+        if [[ -d "$src" ]]; then
+            dirs_saved=$((dirs_saved + 1))
+        else
+            files_saved=$((files_saved + 1))
+        fi
     else
         run mv -- "$src" "$dest"
+        if [[ -d "$src" ]]; then
+            dirs_moved=$((dirs_moved + 1))
+        else
+            files_moved=$((files_moved + 1))
+        fi
     fi
 done
+
+if [[ "$mode" == "sve" ]]; then
+    if ((files_saved > 0)); then
+        printf 'INFO: %d file(s) saved\n' "$files_saved" >&2
+    fi
+    if ((dirs_saved > 1)); then
+        printf 'INFO: %d directories saved\n' "$dirs_saved" >&2
+    elif ((dirs_saved > 0)); then
+        printf 'INFO: 1 directory saved\n' >&2
+    fi
+else
+    if ((files_moved > 0)); then
+        printf 'INFO: %d file(s) moved\n' "$files_moved" >&2
+    fi
+    if ((dirs_moved > 1)); then
+        printf 'INFO: %d directories moved\n' "$dirs_moved" >&2
+    elif ((dirs_moved > 0)); then
+        printf 'INFO: 1 directory moved\n' >&2
+    fi
+fi
