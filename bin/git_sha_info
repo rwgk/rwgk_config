@@ -1,0 +1,32 @@
+#!/bin/bash
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: git_sha_info <sha> [sha...]" >&2
+    exit 1
+fi
+
+for sha in "$@"; do
+    # Ensure it's a valid commit-ish and resolve to full commit hash
+    commit_hash=$(git rev-parse "${sha}^{commit}" 2>/dev/null)
+    if [ -z "$commit_hash" ]; then
+        echo "$sha <not a commit>"
+        continue
+    fi
+
+    # Commit time in UTC (ISO 8601 with Z)
+    ts=$(
+        TZ=UTC git show -s \
+            --date='format-local:%Y-%m-%dT%H:%M:%SZ' \
+            --format='%cd' \
+            "$commit_hash"
+    )
+
+    # Tags pointing at this commit, space-separated
+    tags=$(git tag --points-at "$commit_hash" | tr '\n' ' ' | sed 's/ $//')
+
+    if [ -n "$tags" ]; then
+        echo "$ts $commit_hash $tags"
+    else
+        echo "$ts $commit_hash"
+    fi
+done

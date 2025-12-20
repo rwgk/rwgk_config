@@ -1074,38 +1074,6 @@ git_show_merge_commits() {
     done
 }
 
-git_sha_info() {
-    if [ "$#" -eq 0 ]; then
-        echo "Usage: git_sha_info <sha> [sha...]" >&2
-        return 1
-    fi
-
-    for sha in "$@"; do
-        # Ensure it's a valid commit-ish
-        if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
-            echo "$sha <not a commit>"
-            continue
-        fi
-
-        # Commit time in UTC (ISO 8601 with Z)
-        ts=$(
-            TZ=UTC git show -s \
-                --date='format-local:%Y-%m-%dT%Y-%m-%dT%H:%M:%SZ' \
-                --format='%cd' \
-                "$sha"
-        )
-
-        # Tags pointing at this commit, space-separated
-        tags=$(git tag --points-at "$sha" | tr '\n' ' ' | sed 's/ $//')
-
-        if [ -n "$tags" ]; then
-            echo "$ts $sha $tags"
-        else
-            echo "$ts $sha"
-        fi
-    done
-}
-
 myt() (
     files=()
     dash_dash_seen=0
