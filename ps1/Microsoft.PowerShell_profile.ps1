@@ -25,6 +25,25 @@ function Run-Bypass {
     & powershell -ExecutionPolicy Bypass -File $Script @Args
 }
 
+function uptime {
+    $os = Get-CimInstance Win32_OperatingSystem
+    $boot = $os.LastBootUpTime
+    $span = New-TimeSpan -Start $boot
+
+    $bootStr = $boot.ToString("MM/dd/yyyy HH:mm:ss")
+    $uptimeStr = "{0:00}:{1:00} ({2} days {3} hours {4} minutes)" -f `
+    ([int]$span.TotalHours), `
+        $span.Minutes, `
+        $span.Days, `
+        $span.Hours, `
+        $span.Minutes
+
+    [pscustomobject]@{
+        "System Boot Time" = $bootStr
+        "Uptime"           = $uptimeStr
+    } | Format-Table -AutoSize
+}
+
 function ps1fmt {
     [CmdletBinding()]
     param(
