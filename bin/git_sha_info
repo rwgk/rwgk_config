@@ -13,6 +13,9 @@ for sha in "$@"; do
         continue
     fi
 
+    # Short SHA (first 7 characters)
+    short_sha=$(git rev-parse --short "$commit_hash")
+
     # Commit time in UTC (ISO 8601 with Z)
     ts=$(
         TZ=UTC git show -s \
@@ -25,8 +28,8 @@ for sha in "$@"; do
     tags=$(git tag --points-at "$commit_hash" | tr '\n' ' ' | sed 's/ $//')
 
     if [ -n "$tags" ]; then
-        echo "$ts $commit_hash $tags"
+        echo "$ts $short_sha $tags"
     else
-        echo "$ts $commit_hash"
+        echo "$ts $short_sha"
     fi
 done
