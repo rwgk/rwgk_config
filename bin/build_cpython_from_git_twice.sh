@@ -2,6 +2,33 @@
 set -euo pipefail
 set -x
 
+if [ "$#" -ne 1 ]; then
+    echo "Usage: build_cpython_from_git_twice.sh <install-dirname-prefix>" >&2
+    exit 1
+fi
+
+INSTALL_DIRNAME_PREFIX="$1"
+
+# Verify $W environment variable is defined
+if [ -z "${W:-}" ]; then
+    echo "Error: Environment variable W is not defined" >&2
+    exit 1
+fi
+
+# Verify $W exists as a directory
+if [ ! -d "$W" ]; then
+    echo "Error: W=$W does not exist as a directory" >&2
+    exit 1
+fi
+
+BASE_DIR="$W/cpython_installs"
+
+# Verify $BASE_DIR exists as a directory
+if [ ! -d "$BASE_DIR" ]; then
+    echo "Error: BASE_DIR=$BASE_DIR does not exist as a directory" >&2
+    exit 1
+fi
+
 # Verify patchelf is available (needed to set RUNPATH on installed python)
 if ! command -v patchelf &>/dev/null; then
     echo "Error: patchelf is not installed or not in PATH" >&2
@@ -29,7 +56,6 @@ fi
 
 # Determine current short git SHA for per-commit install prefixes.
 short_sha="$(git rev-parse --short HEAD)"
-base_dir="$HOME/wrk/cpython_installs"
 
 # Helper function to build and install CPython.
 # Usage: build_cpython <suffix> [extra_configure_flags...]
@@ -38,7 +64,7 @@ build_cpython() {
     shift
     local extra_flags=("$@")
 
-    local install_dir="${base_dir}/v3.14_${short_sha}_${suffix}"
+    local install_dir="${BASE_DIR}/${INSTALL_DIRNAME_PREFIX}_${short_sha}_${suffix}"
 
     mkdir -p "$install_dir"
 
@@ -63,6 +89,6 @@ build_cpython "default"
 build_cpython "freethreaded" --disable-gil
 
 # Update sha_info.txt with the current commit info
-sha_info_file="$base_dir/sha_info.txt"
+sha_info_file="$BASE_DIR/sha_info.txt"
 git_sha_info $short_sha >>"$sha_info_file"
 sort -u "$sha_info_file" -o "$sha_info_file"
