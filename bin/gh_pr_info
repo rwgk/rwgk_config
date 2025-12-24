@@ -1,0 +1,514 @@
+#!/usr/bin/env python3
+
+"""
+Fetch all PR comments and timeline events, sorted by timestamp.
+
+Usage:
+    gh_pr_info 1234                     # Uses repo from current directory
+    gh_pr_info 1234 owner/repo          # Explicit repo
+    gh_pr_info 1234 --repo owner/repo   # Alternative syntax
+
+Output: Markdown with timestamps, URLs, and thread IDs for easy navigation.
+
+Environment:
+    L   If set, also writes output to $L/gh_pr_info_<owner>_<repo>_<pr>_<timestamp>.md
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# Module-level timezone setting (Pacific Time handles PST/PDT automatically)
+DISPLAY_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def run_gh(args, check=True):
+    """Run gh CLI command and return parsed JSON output."""
+    cmd = ["gh"] + args
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        print(f"Error running: {' '.join(cmd)}", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        sys.exit(1)
+    if not result.stdout.strip():
+        return None
+    return json.loads(result.stdout)
+
+
+def get_repo_from_gh():
+    """Get owner/repo from current directory using gh."""
+    result = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    data = json.loads(result.stdout)
+    return data.get("nameWithOwner")
+
+
+def parse_timestamp(ts):
+    """Parse ISO timestamp to datetime (always returns UTC-aware datetime)."""
+    if not ts:
+        return None
+    # Handle various GitHub timestamp formats
+    # GitHub uses "Z" suffix for UTC
+    if ts.endswith("Z"):
+        ts_clean = ts[:-1]
+        # Handle fractional seconds
+        if "." in ts_clean:
+            ts_clean = ts_clean.split(".")[0]
+        try:
+            dt = datetime.strptime(ts_clean, "%Y-%m-%dT%H:%M:%S")
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    # Try with timezone offset
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError:
+        pass
+    return None
+
+
+def format_timestamp(ts):
+    """Format timestamp for display in DISPLAY_TIMEZONE."""
+    dt = parse_timestamp(ts)
+    if dt:
+        local_dt = dt.astimezone(DISPLAY_TIMEZONE)
+        # Show timezone abbreviation (PST or PDT)
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    return ts or "unknown"
+
+
+def escape_md(text):
+    """Escape text for markdown (minimal, preserve formatting)."""
+    if not text:
+        return ""
+    return text
+
+
+def fetch_pr_info(pr_number, repo):
+    """Fetch basic PR information."""
+    args = [
+        "pr",
+        "view",
+        str(pr_number),
+        "--json",
+        "title,author,createdAt,body,url,state,number",
+    ]
+    if repo:
+        args.extend(["--repo", repo])
+    return run_gh(args)
+
+
+def fetch_issue_comments(pr_number, repo):
+    """Fetch top-level issue comments using gh api."""
+    # gh pr view --comments doesn't give us JSON with URLs easily,
+    # so use the API directly
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/issues/{pr_number}/comments", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def fetch_review_comments(pr_number, repo):
+    """Fetch inline review comments (diff comments)."""
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/pulls/{pr_number}/comments", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def fetch_reviews(pr_number, repo):
+    """Fetch review submissions (approve, request changes, comment)."""
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/pulls/{pr_number}/reviews", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def fetch_commits(pr_number, repo):
+    """Fetch commits in the PR."""
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/pulls/{pr_number}/commits", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def collect_events(pr_info, issue_comments, review_comments, reviews, commits):
+    """Collect all events into a unified list with timestamps."""
+    events = []
+
+    # PR creation
+    events.append(
+        {
+            "type": "pr_created",
+            "timestamp": pr_info["createdAt"],
+            "author": pr_info["author"]["login"],
+            "url": pr_info["url"],
+            "title": pr_info["title"],
+            "body": pr_info.get("body", ""),
+            "thread_id": None,  # Will be assigned later
+        }
+    )
+
+    # Issue comments (top-level)
+    for c in issue_comments:
+        events.append(
+            {
+                "type": "issue_comment",
+                "timestamp": c["created_at"],
+                "author": c["user"]["login"],
+                "url": c["html_url"],
+                "body": c.get("body", ""),
+                "thread_id": None,
+            }
+        )
+
+    # Review submissions
+    for r in reviews:
+        # Only include if it has a body or is not just "COMMENTED" without body
+        state = r.get("state", "")
+        body = r.get("body", "")
+        if body or state in ["APPROVED", "CHANGES_REQUESTED"]:
+            events.append(
+                {
+                    "type": "review",
+                    "timestamp": r["submitted_at"],
+                    "author": r["user"]["login"],
+                    "url": r["html_url"],
+                    "body": body,
+                    "state": state,
+                    "thread_id": None,
+                }
+            )
+
+    # Review comments (inline/diff comments)
+    # Group by in_reply_to_id to identify threads
+    thread_roots = {}  # root_id -> list of comments
+    for c in review_comments:
+        reply_to = c.get("in_reply_to_id")
+        comment_id = c["id"]
+
+        if reply_to:
+            # This is a reply, find or create thread
+            root_id = reply_to
+            # Check if reply_to itself is a reply (find true root)
+            for other in review_comments:
+                if other["id"] == reply_to and other.get("in_reply_to_id"):
+                    root_id = other.get("in_reply_to_id")
+                    break
+        else:
+            root_id = comment_id
+
+        if root_id not in thread_roots:
+            thread_roots[root_id] = []
+        thread_roots[root_id].append(c)
+
+    # Add review comments with thread info
+    for c in review_comments:
+        reply_to = c.get("in_reply_to_id")
+        comment_id = c["id"]
+
+        # Determine thread root
+        if reply_to:
+            root_id = reply_to
+            for other in review_comments:
+                if other["id"] == reply_to and other.get("in_reply_to_id"):
+                    root_id = other.get("in_reply_to_id")
+                    break
+        else:
+            root_id = comment_id
+
+        events.append(
+            {
+                "type": "review_comment",
+                "timestamp": c["created_at"],
+                "author": c["user"]["login"],
+                "url": c["html_url"],
+                "body": c.get("body", ""),
+                "path": c.get("path", ""),
+                "line": c.get("line") or c.get("original_line"),
+                "diff_hunk": c.get("diff_hunk", ""),
+                "thread_root_id": root_id,
+                "is_reply": reply_to is not None,
+                "thread_id": None,  # Will be assigned
+            }
+        )
+
+    # Commits
+    for c in commits:
+        commit = c.get("commit", {})
+        author_info = commit.get("author", {})
+        message = commit.get("message", "")
+        # First line of commit message
+        first_line = message.split("\n")[0] if message else ""
+
+        events.append(
+            {
+                "type": "commit",
+                "timestamp": author_info.get("date"),
+                "author": author_info.get("name", "unknown"),
+                "url": c.get("html_url", ""),
+                "sha": c.get("sha", "")[:7],  # Short hash
+                "sha_full": c.get("sha", ""),
+                "message_first_line": first_line,
+                "message_full": message,
+                "thread_id": None,
+            }
+        )
+
+    # Sort by timestamp
+    events.sort(key=lambda e: e["timestamp"] or "")
+
+    # Assign thread IDs
+    thread_id_map = {}  # root_id -> thread_id string
+    thread_counter = 1
+
+    for e in events:
+        if e["type"] == "review_comment":
+            root_id = e["thread_root_id"]
+            if root_id not in thread_id_map:
+                thread_id_map[root_id] = f"T{thread_counter:03d}"
+                thread_counter += 1
+            e["thread_id"] = thread_id_map[root_id]
+
+    return events
+
+
+def format_event_md(event, show_diff_hunk=True):
+    """Format a single event as Markdown."""
+    lines = []
+
+    ts = format_timestamp(event["timestamp"])
+    author = event["author"]
+    url = event["url"]
+    thread_id = event.get("thread_id")
+    thread_tag = f" `[{thread_id}]`" if thread_id else ""
+
+    if event["type"] == "pr_created":
+        lines.append("## PR Created")
+        lines.append(f"**{ts}** by **@{author}**{thread_tag}")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "issue_comment":
+        lines.append("---")
+        lines.append(f"### Comment{thread_tag}")
+        lines.append(f"**{ts}** by **@{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "review":
+        state = event.get("state", "")
+        state_display = {
+            "APPROVED": "✅ Approved",
+            "CHANGES_REQUESTED": "❌ Changes Requested",
+            "COMMENTED": "💬 Review Comment",
+            "DISMISSED": "🚫 Dismissed",
+        }.get(state, state)
+
+        lines.append("---")
+        lines.append(f"### Review: {state_display}{thread_tag}")
+        lines.append(f"**{ts}** by **@{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "review_comment":
+        path = event.get("path", "")
+        line = event.get("line", "")
+        location = f"`{path}`" + (f" line {line}" if line else "")
+
+        reply_indicator = " (reply)" if event.get("is_reply") else ""
+
+        lines.append("---")
+        lines.append(f"### Inline Comment{reply_indicator}{thread_tag}")
+        lines.append(f"**{ts}** by **@{author}** on {location}")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+
+        # Show diff hunk for context (only for thread starters)
+        if show_diff_hunk and not event.get("is_reply") and event.get("diff_hunk"):
+            lines.append("<details><summary>Diff context</summary>")
+            lines.append("")
+            lines.append("```diff")
+            lines.append(event["diff_hunk"])
+            lines.append("```")
+            lines.append("</details>")
+            lines.append("")
+
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "commit":
+        sha = event.get("sha", "")
+        message_first_line = event.get("message_first_line", "")
+
+        lines.append("---")
+        lines.append(f"### Commit `{sha}`")
+        lines.append(f"**{ts}** by **{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        lines.append(f"**{message_first_line}**")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fetch all PR comments and events, sorted by timestamp."
+    )
+    parser.add_argument("pr_number", type=int, help="PR number")
+    parser.add_argument(
+        "repo",
+        nargs="?",
+        default=None,
+        help="Repository (owner/repo). Defaults to current directory's repo.",
+    )
+    parser.add_argument(
+        "--repo",
+        "-R",
+        dest="repo_flag",
+        default=None,
+        help="Repository (owner/repo). Alternative to positional argument.",
+    )
+    parser.add_argument(
+        "--no-diff-hunk",
+        action="store_true",
+        help="Don't show diff hunks for inline comments",
+    )
+
+    args = parser.parse_args()
+
+    repo = args.repo_flag or args.repo
+
+    pr_number = args.pr_number
+
+    # Determine repo
+    if not repo:
+        repo = get_repo_from_gh()
+        if not repo:
+            print("Error: Could not determine repository.", file=sys.stderr)
+            print("Run from a git repo or specify owner/repo.", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"Fetching PR #{pr_number} from {repo}...", file=sys.stderr)
+
+    # Fetch all data
+    pr_info = fetch_pr_info(pr_number, repo)
+    if not pr_info:
+        print(f"Error: Could not fetch PR #{pr_number}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  - PR info: {pr_info['title']}", file=sys.stderr)
+
+    issue_comments = fetch_issue_comments(pr_number, repo)
+    print(f"  - Issue comments: {len(issue_comments)}", file=sys.stderr)
+
+    review_comments = fetch_review_comments(pr_number, repo)
+    print(f"  - Review comments: {len(review_comments)}", file=sys.stderr)
+
+    reviews = fetch_reviews(pr_number, repo)
+    print(f"  - Reviews: {len(reviews)}", file=sys.stderr)
+
+    commits = fetch_commits(pr_number, repo)
+    print(f"  - Commits: {len(commits)}", file=sys.stderr)
+
+    # Collect and sort events
+    events = collect_events(pr_info, issue_comments, review_comments, reviews, commits)
+    print(f"  - Total events: {len(events)}", file=sys.stderr)
+
+    # Generate markdown
+    output_lines = []
+    output_lines.append(f"# PR #{pr_number}: {pr_info['title']}")
+    output_lines.append("")
+    output_lines.append(f"**Repository:** {repo}")
+    output_lines.append(f"**State:** {pr_info['state']}")
+    output_lines.append(f"**URL:** {pr_info['url']}")
+    output_lines.append("")
+
+    # Thread index
+    thread_ids = sorted(set(e.get("thread_id") for e in events if e.get("thread_id")))
+    if thread_ids:
+        output_lines.append("## Thread Index")
+        output_lines.append("")
+        output_lines.append("Search for these IDs to jump between thread comments:")
+        output_lines.append("")
+        for tid in thread_ids:
+            # Find first comment in this thread
+            for e in events:
+                if e.get("thread_id") == tid:
+                    path = e.get("path", "")
+                    output_lines.append(f"- `[{tid}]` - {path}")
+                    break
+        output_lines.append("")
+
+    output_lines.append("## Timeline")
+    output_lines.append("")
+
+    for event in events:
+        output_lines.append(
+            format_event_md(event, show_diff_hunk=not args.no_diff_hunk)
+        )
+
+    # Join and strip carriage returns (^M) that may come from GitHub API
+    output = "\n".join(output_lines).replace("\r", "")
+
+    # Write to stdout
+    print(output)
+
+    # If $L is defined, also write to a file there
+    log_dir = os.environ.get("L")
+    if log_dir:
+        # Generate timestamp for filename
+        now = datetime.now(DISPLAY_TIMEZONE)
+        timestamp = now.strftime("%Y-%m-%d+%H%M%S")
+
+        # Sanitize repo name for filename (owner/repo -> owner_repo)
+        repo_safe = repo.replace("/", "_")
+
+        filename = f"gh_pr_info_{repo_safe}_{pr_number}_{timestamp}.md"
+        filepath = os.path.join(log_dir, filename)
+
+        with open(filepath, "w") as f:
+            f.write(output)
+            f.write("\n")
+
+        print(f"\nOutput written to: {filepath}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
