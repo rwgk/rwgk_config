@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+
+"""
+Fetch all issue comments and events, sorted by timestamp.
+
+Usage:
+    gh_issue_info 1234                     # Uses repo from current directory
+    gh_issue_info 1234 owner/repo          # Explicit repo
+    gh_issue_info 1234 --repo owner/repo   # Alternative syntax
+
+Output: Markdown with timestamps and URLs for easy navigation.
+
+Environment:
+    L   If set, also writes output to $L/gh_issue_info_<owner>_<repo>_<issue>_<timestamp>.md
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# Module-level timezone setting (Pacific Time handles PST/PDT automatically)
+DISPLAY_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def run_gh(args, check=True):
+    """Run gh CLI command and return parsed JSON output."""
+    cmd = ["gh"] + args
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        print(f"Error running: {' '.join(cmd)}", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        sys.exit(1)
+    if not result.stdout.strip():
+        return None
+    return json.loads(result.stdout)
+
+
+def get_repo_from_gh():
+    """Get owner/repo from current directory using gh."""
+    result = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    data = json.loads(result.stdout)
+    return data.get("nameWithOwner")
+
+
+def parse_timestamp(ts):
+    """Parse ISO timestamp to datetime (always returns UTC-aware datetime)."""
+    if not ts:
+        return None
+    # Handle various GitHub timestamp formats
+    # GitHub uses "Z" suffix for UTC
+    if ts.endswith("Z"):
+        ts_clean = ts[:-1]
+        # Handle fractional seconds
+        if "." in ts_clean:
+            ts_clean = ts_clean.split(".")[0]
+        try:
+            dt = datetime.strptime(ts_clean, "%Y-%m-%dT%H:%M:%S")
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    # Try with timezone offset
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError:
+        pass
+    return None
+
+
+def format_timestamp(ts):
+    """Format timestamp for display in DISPLAY_TIMEZONE."""
+    dt = parse_timestamp(ts)
+    if dt:
+        local_dt = dt.astimezone(DISPLAY_TIMEZONE)
+        # Show timezone abbreviation (PST or PDT)
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    return ts or "unknown"
+
+
+def fetch_issue_info(issue_number, repo):
+    """Fetch basic issue information."""
+    args = [
+        "issue",
+        "view",
+        str(issue_number),
+        "--json",
+        "title,author,createdAt,body,url,state,number,labels,assignees,milestone,closedAt",
+    ]
+    if repo:
+        args.extend(["--repo", repo])
+    return run_gh(args)
+
+
+def fetch_issue_comments(issue_number, repo):
+    """Fetch issue comments using gh api."""
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/issues/{issue_number}/comments", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def fetch_issue_events(issue_number, repo):
+    """Fetch issue events (label changes, assignments, etc.)."""
+    repo_path = repo or get_repo_from_gh()
+    if not repo_path:
+        print("Error: Could not determine repository", file=sys.stderr)
+        sys.exit(1)
+
+    args = ["api", f"repos/{repo_path}/issues/{issue_number}/events", "--paginate"]
+    data = run_gh(args, check=False)
+    return data if data else []
+
+
+def collect_events(issue_info, issue_comments, issue_events):
+    """Collect all events into a unified list with timestamps."""
+    events = []
+
+    # Issue creation
+    events.append(
+        {
+            "type": "issue_created",
+            "timestamp": issue_info["createdAt"],
+            "author": issue_info["author"]["login"],
+            "url": issue_info["url"],
+            "title": issue_info["title"],
+            "body": issue_info.get("body", ""),
+        }
+    )
+
+    # Issue comments
+    for c in issue_comments:
+        events.append(
+            {
+                "type": "issue_comment",
+                "timestamp": c["created_at"],
+                "author": c["user"]["login"],
+                "url": c["html_url"],
+                "body": c.get("body", ""),
+            }
+        )
+
+    # Issue events (labels, assignments, milestones, etc.)
+    for e in issue_events:
+        event_type = e.get("event", "")
+        actor = e.get("actor", {})
+        actor_login = actor.get("login", "unknown") if actor else "unknown"
+        timestamp = e.get("created_at", "")
+
+        # Skip some events that are less useful
+        if event_type in ["commented", "subscribed", "unsubscribed"]:
+            continue
+
+        event_data = {
+            "type": "issue_event",
+            "event_type": event_type,
+            "timestamp": timestamp,
+            "author": actor_login,
+            "url": issue_info["url"],  # Events don't have their own URLs
+        }
+
+        # Add event-specific data
+        if event_type == "labeled":
+            event_data["label"] = e.get("label", {}).get("name", "")
+        elif event_type == "unlabeled":
+            event_data["label"] = e.get("label", {}).get("name", "")
+        elif event_type == "assigned":
+            assignee = e.get("assignee", {})
+            event_data["assignee"] = assignee.get("login", "") if assignee else ""
+        elif event_type == "unassigned":
+            assignee = e.get("assignee", {})
+            event_data["assignee"] = assignee.get("login", "") if assignee else ""
+        elif event_type == "milestoned":
+            milestone = e.get("milestone", {})
+            event_data["milestone"] = milestone.get("title", "") if milestone else ""
+        elif event_type == "demilestoned":
+            milestone = e.get("milestone", {})
+            event_data["milestone"] = milestone.get("title", "") if milestone else ""
+        elif event_type == "closed":
+            event_data["state_reason"] = e.get("state_reason", "")
+        elif event_type == "reopened":
+            pass  # No additional data
+        elif event_type == "locked":
+            event_data["lock_reason"] = e.get("lock_reason", "")
+        elif event_type == "unlocked":
+            pass  # No additional data
+        elif event_type == "referenced":
+            commit_id = e.get("commit_id", "")
+            event_data["commit_id"] = commit_id
+        elif event_type == "moved":
+            from_issue = e.get("from_issue", {})
+            to_issue = e.get("to_issue", {})
+            event_data["from_issue"] = from_issue.get("number", "") if from_issue else ""
+            event_data["to_issue"] = to_issue.get("number", "") if to_issue else ""
+        elif event_type == "cross-referenced":
+            source = e.get("source", {})
+            event_data["source_type"] = source.get("type", "")
+            event_data["source_number"] = source.get("issue", {}).get("number", "") if source.get("issue") else ""
+            event_data["source_pr_number"] = source.get("pull_request", {}).get("number", "") if source.get("pull_request") else ""
+
+        events.append(event_data)
+
+    # Sort by timestamp
+    events.sort(key=lambda e: e["timestamp"] or "")
+
+    return events
+
+
+def format_event_md(event):
+    """Format a single event as Markdown."""
+    lines = []
+
+    ts = format_timestamp(event["timestamp"])
+    author = event["author"]
+    url = event["url"]
+
+    if event["type"] == "issue_created":
+        lines.append("## Issue Created")
+        lines.append(f"**{ts}** by **@{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "issue_comment":
+        lines.append("---")
+        lines.append("### Comment")
+        lines.append(f"**{ts}** by **@{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+        if event.get("body"):
+            lines.append(event["body"])
+        lines.append("")
+
+    elif event["type"] == "issue_event":
+        event_type = event.get("event_type", "")
+        event_display = {
+            "labeled": "🏷️ Labeled",
+            "unlabeled": "🏷️ Unlabeled",
+            "assigned": "👤 Assigned",
+            "unassigned": "👤 Unassigned",
+            "milestoned": "🎯 Milestoned",
+            "demilestoned": "🎯 Demilestoned",
+            "closed": "✅ Closed",
+            "reopened": "🔄 Reopened",
+            "locked": "🔒 Locked",
+            "unlocked": "🔓 Unlocked",
+            "referenced": "🔗 Referenced",
+            "moved": "📦 Moved",
+            "cross-referenced": "🔗 Cross-referenced",
+        }.get(event_type, event_type)
+
+        lines.append("---")
+        lines.append(f"### {event_display}")
+        lines.append(f"**{ts}** by **@{author}**")
+        lines.append(f"[View on GitHub]({url})")
+        lines.append("")
+
+        # Add event-specific details
+        if event_type == "labeled":
+            label = event.get("label", "")
+            if label:
+                lines.append(f"Label: **{label}**")
+                lines.append("")
+        elif event_type == "unlabeled":
+            label = event.get("label", "")
+            if label:
+                lines.append(f"Label: **{label}**")
+                lines.append("")
+        elif event_type == "assigned":
+            assignee = event.get("assignee", "")
+            if assignee:
+                lines.append(f"Assigned to: **@{assignee}**")
+                lines.append("")
+        elif event_type == "unassigned":
+            assignee = event.get("assignee", "")
+            if assignee:
+                lines.append(f"Unassigned: **@{assignee}**")
+                lines.append("")
+        elif event_type == "milestoned":
+            milestone = event.get("milestone", "")
+            if milestone:
+                lines.append(f"Milestone: **{milestone}**")
+                lines.append("")
+        elif event_type == "demilestoned":
+            milestone = event.get("milestone", "")
+            if milestone:
+                lines.append(f"Milestone removed: **{milestone}**")
+                lines.append("")
+        elif event_type == "closed":
+            state_reason = event.get("state_reason", "")
+            if state_reason:
+                reason_display = {
+                    "completed": "Completed",
+                    "not_planned": "Not planned",
+                    "duplicate": "Duplicate",
+                }.get(state_reason, state_reason)
+                lines.append(f"Reason: **{reason_display}**")
+                lines.append("")
+        elif event_type == "locked":
+            lock_reason = event.get("lock_reason", "")
+            if lock_reason:
+                reason_display = {
+                    "off-topic": "Off-topic",
+                    "too_heated": "Too heated",
+                    "resolved": "Resolved",
+                    "spam": "Spam",
+                }.get(lock_reason, lock_reason)
+                lines.append(f"Reason: **{reason_display}**")
+                lines.append("")
+        elif event_type == "referenced":
+            commit_id = event.get("commit_id", "")
+            if commit_id:
+                lines.append(f"Commit: `{commit_id[:7]}`")
+                lines.append("")
+        elif event_type == "moved":
+            from_issue = event.get("from_issue", "")
+            to_issue = event.get("to_issue", "")
+            if from_issue and to_issue:
+                lines.append(f"Moved from issue #{from_issue} to issue #{to_issue}")
+                lines.append("")
+        elif event_type == "cross-referenced":
+            source_type = event.get("source_type", "")
+            source_number = event.get("source_number", "")
+            source_pr_number = event.get("source_pr_number", "")
+            if source_type == "issue" and source_number:
+                lines.append(f"Referenced by issue #{source_number}")
+                lines.append("")
+            elif source_type == "pull_request" and source_pr_number:
+                lines.append(f"Referenced by PR #{source_pr_number}")
+                lines.append("")
+
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fetch all issue comments and events, sorted by timestamp."
+    )
+    parser.add_argument("issue_number", type=int, help="Issue number")
+    parser.add_argument(
+        "repo",
+        nargs="?",
+        default=None,
+        help="Repository (owner/repo). Defaults to current directory's repo.",
+    )
+    parser.add_argument(
+        "--repo",
+        "-R",
+        dest="repo_flag",
+        default=None,
+        help="Repository (owner/repo). Alternative to positional argument.",
+    )
+
+    args = parser.parse_args()
+
+    repo = args.repo_flag or args.repo
+
+    issue_number = args.issue_number
+
+    # Determine repo
+    if not repo:
+        repo = get_repo_from_gh()
+        if not repo:
+            print("Error: Could not determine repository.", file=sys.stderr)
+            print("Run from a git repo or specify owner/repo.", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"Fetching Issue #{issue_number} from {repo}...", file=sys.stderr)
+
+    # Fetch all data
+    issue_info = fetch_issue_info(issue_number, repo)
+    if not issue_info:
+        print(f"Error: Could not fetch Issue #{issue_number}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  - Issue info: {issue_info['title']}", file=sys.stderr)
+
+    issue_comments = fetch_issue_comments(issue_number, repo)
+    print(f"  - Comments: {len(issue_comments)}", file=sys.stderr)
+
+    issue_events = fetch_issue_events(issue_number, repo)
+    print(f"  - Events: {len(issue_events)}", file=sys.stderr)
+
+    # Collect and sort events
+    events = collect_events(issue_info, issue_comments, issue_events)
+    print(f"  - Total events: {len(events)}", file=sys.stderr)
+
+    # Generate markdown
+    output_lines = []
+    output_lines.append(f"# Issue #{issue_number}: {issue_info['title']}")
+    output_lines.append("")
+    output_lines.append(f"**Repository:** {repo}")
+    output_lines.append(f"**State:** {issue_info['state']}")
+    output_lines.append(f"**URL:** {issue_info['url']}")
+    output_lines.append("")
+
+    # Add labels, assignees, milestone if present
+    labels = issue_info.get("labels", [])
+    if labels:
+        label_names = [label.get("name", "") for label in labels if label.get("name")]
+        if label_names:
+            output_lines.append(f"**Labels:** {', '.join(f'`{name}`' for name in label_names)}")
+            output_lines.append("")
+
+    assignees = issue_info.get("assignees", [])
+    if assignees:
+        assignee_names = [assignee.get("login", "") for assignee in assignees if assignee.get("login")]
+        if assignee_names:
+            output_lines.append(f"**Assignees:** {', '.join(f'@{name}' for name in assignee_names)}")
+            output_lines.append("")
+
+    milestone = issue_info.get("milestone")
+    if milestone:
+        milestone_title = milestone.get("title", "") if milestone else ""
+        if milestone_title:
+            output_lines.append(f"**Milestone:** {milestone_title}")
+            output_lines.append("")
+
+    output_lines.append("## Timeline")
+    output_lines.append("")
+
+    for event in events:
+        output_lines.append(format_event_md(event))
+
+    # Join and strip carriage returns (^M) that may come from GitHub API
+    output = "\n".join(output_lines).replace("\r", "")
+
+    # Write to stdout
+    print(output)
+
+    # If $L is defined, also write to a file there
+    log_dir = os.environ.get("L")
+    if log_dir:
+        # Generate timestamp for filename
+        now = datetime.now(DISPLAY_TIMEZONE)
+        timestamp = now.strftime("%Y-%m-%d+%H%M%S")
+
+        # Sanitize repo name for filename (owner/repo -> owner_repo)
+        repo_safe = repo.replace("/", "_")
+
+        filename = f"gh_issue_info_{repo_safe}_{issue_number}_{timestamp}.md"
+        filepath = os.path.join(log_dir, filename)
+
+        with open(filepath, "w") as f:
+            f.write(output)
+            f.write("\n")
+
+        print(f"\nOutput written to: {filepath}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
