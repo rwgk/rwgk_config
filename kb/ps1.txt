@@ -10,3 +10,8 @@ Remove-Item -Recurse -Force somedirectory
 # zip, unzip
 Compress-Archive -LiteralPath file1, file2 -DestinationPath ..\tmp.zip
 Expand-Archive ..\tmp.zip
+
+# Table with all details
+$PSVersionTable
+# Just the version (but as a table again)
+$PSVersionTable.PSVersion
