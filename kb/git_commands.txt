@@ -50,3 +50,6 @@ git init
 git config core.filemode false
 git add -A
 git commit -m "Baseline headers snapshot $(date -Iseconds)"
+
+# Switch to release branch with tracking (e.g. cpython)
+git switch --track upstream/3.14
