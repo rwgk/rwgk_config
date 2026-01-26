@@ -591,7 +591,7 @@ grr() {
 
 grep_installed_cuda() {
     echo "$@"
-    grep -a '^Successfully installed cuda-' "$@"
+    grep -a -e '^Successfully built cuda-' -e '^Successfully installed cuda-' "$@"
 }
 
 grep_pytest_summary() {
