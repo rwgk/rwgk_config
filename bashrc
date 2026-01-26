@@ -589,9 +589,9 @@ grr() {
     grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
 }
 
-grep_built_cuda() {
+grep_installed_cuda() {
     echo "$@"
-    grep '^Successfully built cuda-' "$@"
+    grep -a '^Successfully installed cuda-' "$@"
 }
 
 grep_pytest_summary() {
