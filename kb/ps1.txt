@@ -15,3 +15,6 @@ Expand-Archive ..\tmp.zip
 $PSVersionTable
 # Just the version (but as a table again)
 $PSVersionTable.PSVersion
+
+# Enable cl.exe
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64
