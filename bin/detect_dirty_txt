@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""
+Find .txt files that are likely not UTF-8.
+
+Heuristics:
+- Prefer explicit BOMs (UTF-8/16/32).
+- If a strong UTF-16/32 NUL-byte pattern is present, classify as non-UTF-8.
+- Otherwise, validate UTF-8 with a small allowance for bad bytes.
+"""
+
+import codecs
+import sys
+from pathlib import Path
+
+SAMPLE_SIZE = 8192
+MAX_BAD_RATIO = 0.00005  # allow up to 0.005% bad bytes
+MAX_BAD_MIN = 2
+
+
+def iter_txt_files(path):
+    if path.is_file():
+        yield path
+        return
+    for entry in path.rglob("*"):
+        if entry.is_file() and entry.suffix.lower() == ".txt":
+            yield entry
+
+
+def count_utf8_errors(data):
+    decoded = data.decode("utf-8", errors="surrogateescape")
+    bad = 0
+    for ch in decoded:
+        code = ord(ch)
+        if 0xDC80 <= code <= 0xDCFF:
+            bad += 1
+    return bad
+
+
+def detect_non_utf8_by_bom(data):
+    if data.startswith(codecs.BOM_UTF8):
+        return None
+    if data.startswith(codecs.BOM_UTF16_LE) or data.startswith(codecs.BOM_UTF16_BE):
+        return "utf16-bom"
+    if data.startswith(codecs.BOM_UTF32_LE) or data.startswith(codecs.BOM_UTF32_BE):
+        return "utf32-bom"
+    return None
+
+
+def detect_non_utf8_by_nuls(sample):
+    if not sample or b"\x00" not in sample:
+        return None
+
+    even = sample[0::2]
+    odd = sample[1::2]
+    even_null_ratio = even.count(0) / max(1, len(even))
+    odd_null_ratio = odd.count(0) / max(1, len(odd))
+
+    if odd_null_ratio > 0.6 and even_null_ratio < 0.2:
+        return "utf16le-nul-pattern"
+    if even_null_ratio > 0.6 and odd_null_ratio < 0.2:
+        return "utf16be-nul-pattern"
+
+    if len(sample) >= 4:
+        buckets = [sample[i::4].count(0) / max(1, len(sample[i::4])) for i in range(4)]
+        high = [i for i, ratio in enumerate(buckets) if ratio > 0.7]
+        low = [i for i, ratio in enumerate(buckets) if ratio < 0.2]
+        if len(high) >= 3 and len(low) >= 1:
+            if 0 in low:
+                return "utf32le-nul-pattern"
+            if 3 in low:
+                return "utf32be-nul-pattern"
+            return "utf32-nul-pattern"
+
+    null_ratio = sample.count(0) / max(1, len(sample))
+    if null_ratio > 0.2:
+        return "high-nul-ratio"
+
+    return None
+
+
+def is_utf8_forgiving(data):
+    if not data:
+        return True
+    bad_bytes = count_utf8_errors(data)
+    max_bad = max(MAX_BAD_MIN, int(len(data) * MAX_BAD_RATIO))
+    return bad_bytes <= max_bad
+
+
+def classify_file(path):
+    data = path.read_bytes()
+
+    bom_reason = detect_non_utf8_by_bom(data)
+    if bom_reason:
+        return False, bom_reason
+
+    sample = data[:SAMPLE_SIZE]
+    nul_reason = detect_non_utf8_by_nuls(sample)
+    if nul_reason:
+        return False, nul_reason
+
+    if is_utf8_forgiving(data):
+        return True, "utf8"
+    return False, "utf8-errors"
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: detect_dirty_txt <dir_or_file> [dir_or_file] ...")
+        return 1
+
+    args = sys.argv[1:]
+    paths = []
+    for arg in args:
+        path = Path(arg)
+        if not path.exists():
+            print(f"Error: path does not exist: {arg}", file=sys.stderr)
+            return 2
+        paths.append(path)
+
+    files = []
+    for path in paths:
+        files.extend(iter_txt_files(path))
+
+    unique_files = sorted(set(files))
+    utf8_count = 0
+    checked = 0
+
+    for path in unique_files:
+        checked += 1
+        try:
+            is_utf8, _reason = classify_file(path)
+        except Exception as exc:
+            print(f"Warning: failed to read {path}: {exc}", file=sys.stderr)
+            print(path)
+            continue
+
+        if is_utf8:
+            utf8_count += 1
+        else:
+            print(path)
+
+    print(f"UTF-8 (forgiving) files: {utf8_count}/{checked}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
