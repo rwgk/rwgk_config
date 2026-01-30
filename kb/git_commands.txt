@@ -27,6 +27,9 @@ git rev-parse HEAD@{1}
 # To archive numbered patches (e.g. from debugging work):
 git format-patch --author="Ralf W. Grosse-Kunstleve" upstream/main..HEAD
 
+# To extract one specific commit:
+git format-patch -1 8939898e5c5c28ff6e93bdb953f06a66399b82a7
+
 # Create __EMPTY__ branch
 git checkout --orphan new-branch-name && git rm -rf . && git status
 
