@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_NAME=$(basename "$0")
+
+usage() {
+    cat <<EOF
+Usage:
+  $SCRIPT_NAME <ssh-target>
+
+Copies ~/.ssh/{authorized_keys,config,id_ed25519,id_ed25519.pub}
+to the remote host (~/.ssh), preserving timestamps.
+EOF
+}
+
+if [[ $# -ne 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+    usage
+    exit 1
+fi
+
+tar -C "$HOME" -cf - \
+    .ssh/authorized_keys \
+    .ssh/config \
+    .ssh/id_ed25519 \
+    .ssh/id_ed25519.pub | ssh "$1" "tar -C ~ -xf - && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys ~/.ssh/id_ed25519 && ls -l ~/.ssh"

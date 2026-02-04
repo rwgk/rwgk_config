@@ -1,0 +1,5 @@
+Host *
+  # Keep idle SSH sessions alive.
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+  TCPKeepAlive yes
