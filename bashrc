@@ -885,14 +885,9 @@ git_branch_D_track_hash() (
 
     branch="$1"
 
-    # Check MY_GIT_BACKTRACKING_INFO
-    if [[ -z "${MY_GIT_BACKTRACKING_INFO:-}" ]]; then
-        echo "Error: Environment variable MY_GIT_BACKTRACKING_INFO is not set." >&2
-        return 1
-    fi
-
-    if [[ ! -d "$MY_GIT_BACKTRACKING_INFO" ]]; then
-        echo "Error: MY_GIT_BACKTRACKING_INFO='$MY_GIT_BACKTRACKING_INFO' is not a directory." >&2
+    # Fail early if neither environment variable is set
+    if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
+        echo "Error: Neither MY_GIT_BACKTRACKING_INFO_LOCAL nor MY_GIT_BACKTRACKING_INFO_REMOTE is set." >&2
         return 1
     fi
 
@@ -907,7 +902,7 @@ git_branch_D_track_hash() (
     timestamp=$(date +%Y-%m-%d+%H%M%S)
     safe_repo="${repo//[^A-Za-z0-9._@-]/_}"
     safe_branch="${branch//[^A-Za-z0-9._@-]/_}"
-    infofile="$MY_GIT_BACKTRACKING_INFO/${safe_repo}_${safe_branch}_${timestamp}.txt"
+    infofile="/tmp/${safe_repo}_${safe_branch}_${timestamp}.txt"
 
     {
         echo "Current host: '$(hostfqdn)'"
@@ -918,7 +913,16 @@ git_branch_D_track_hash() (
         git show --stat --summary "$commit"
     } >"$infofile"
 
-    echo "Backed up branch tip to: '$infofile'"
+    # Copy to local destination if MY_GIT_BACKTRACKING_INFO_LOCAL is set
+    if [[ -n "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" ]]; then
+        cp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_LOCAL/"
+        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_LOCAL/$(basename "$infofile")'"
+    # Otherwise, scp to remote destination if MY_GIT_BACKTRACKING_INFO_REMOTE is set
+    elif [[ -n "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
+        scp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_REMOTE"
+        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
+    fi
+
     git branch -D "$branch"
 )
 
