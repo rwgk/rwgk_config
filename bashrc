@@ -1,5 +1,7 @@
 # ~/.bashrc: executed by bash(1) for non-login shells.
 
+umask 022
+
 # --- Early return guard ------------------------------------------------------
 # Load full shell environment if:
 #   1. PRETEND_INTERACTIVE_SHELL is set (forced for special cases, e.g. pbpush/pbpull), OR
