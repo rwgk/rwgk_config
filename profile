@@ -2,7 +2,7 @@
 # This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login
 # exists.
 
-umask 022
+umask 0022
 
 # Export WHOME (Windows home in WSL path form) for all shells, only on WSL.
 # - Safe if cmd.exe isn't on PATH
