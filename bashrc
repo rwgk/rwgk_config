@@ -720,7 +720,20 @@ pid_info() {
 alias todate='date "+%Y-%m-%d"'
 alias now='date "+%Y-%m-%d+%H%M%S"'
 alias nowish='date "+%Y-%m-%d+%H%M"'
-alias dotdevnow='date +".dev%Y%m%d%H%M"'
+
+# Helper function to create log file timestamp ("make log timestamp")
+# Uses timezone offset if not in Los Angeles timezone to reduce the potential for confusion
+mlt() {
+    local TZ_ABBR
+    TZ_ABBR="$(date +%Z 2>/dev/null || echo "")"
+
+    # Check if we're in Los Angeles timezone (PST/PDT)
+    if [[ "$TZ_ABBR" == "PST" ]] || [[ "$TZ_ABBR" == "PDT" ]]; then
+        date "+%Y-%m-%d+%H%M%S"
+    else
+        date "+%Y-%m-%d+%H%M%S%z"
+    fi
+}
 
 alias mir='rsync --archive --delete --force --verbose --stats'
 
@@ -1568,7 +1581,7 @@ lcw() (
 
     # Create log filename with current directory and timestamp
     pwd_safe=$(pwd | sed 's|/|_|g; s|[[:space:]]|_|g')
-    log_file="$HOME/logs/cursor_stdout${pwd_safe}_$(now).txt"
+    log_file="$HOME/logs/cursor_stdout${pwd_safe}_$(mlt).txt"
 
     # Launch the monitoring function in background
     _lcw_impl "$log_file" "$@" &
@@ -1585,7 +1598,7 @@ _lcw_impl() (
     exit_code=$?
 
     # Append exit information to log file
-    echo "cursor EXIT at $(now) with exit code $exit_code" >>"$log_file"
+    echo "cursor EXIT at $(mlt) with exit code $exit_code" >>"$log_file"
 )
 
 nfid() {
