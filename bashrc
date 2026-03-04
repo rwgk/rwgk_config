@@ -144,6 +144,21 @@ EnableAppleFastKeyRepeat() {
     defaults read NSGlobalDomain KeyRepeat
     echo 'Please restart affected applications.'
 }
+SetAppleScreenshotLocation() {
+    if [ "$#" -gt 1 ]; then
+        echo "usage: SetAppleScreenshotLocation [directory]" >&2
+        return 1
+    fi
+
+    local location=${1:-"$HOME/Downloads"}
+    echo "Setting screenshot location to: $location"
+    defaults write com.apple.screencapture location "$location"
+    killall SystemUIServer
+    echo 'Screenshot location updated.'
+}
+SetAppleScreenshotLocationDownloads() {
+    SetAppleScreenshotLocation "$HOME/Downloads"
+}
 
 # pbff: PasteBoard From File
 # Copy the contents of a file into the pasteboard (clipboard).
