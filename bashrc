@@ -512,7 +512,7 @@ gov() {
         echo "$header:"
         # Print up to MAX lines
         printf "%s" "$list" | sed -e '/^$/d' | head -n "$MAX" | sed 's/^/  - /'
-        # “N more” note if truncated
+        # "N more" note if truncated
         if ((count > MAX)); then
             printf "  … (%d more)\n" "$((count - MAX))"
         fi
@@ -1530,6 +1530,107 @@ gha_logs_here() {
     cd "$dir_name" || return 1
 
     unpack_gha_logs.sh "$zip_abs"
+}
+
+gha_for_this_pr() {
+    # List all GitHub Actions workflow runs for the current PR (or branch if no PR)
+    # Usage: gha_for_this_pr [head_limit]
+    #   head_limit: optional number of runs to show (default: 1000, use head/tail to filter)
+    #
+    # Note: GitHub Actions runs for PRs are typically on the "pull-request/N" branch,
+    # not the original branch name. This function detects the PR and checks both.
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: 'gh' (GitHub CLI) is not installed or not on PATH." >&2
+        return 127
+    fi
+
+    # Must be in a git repository
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Error: not inside a git repository" >&2
+        return 1
+    fi
+
+    # Get current branch
+    local branch
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [[ -z "$branch" ]]; then
+        echo "Error: could not determine current branch" >&2
+        return 1
+    fi
+
+    # Determine repo from git remote (prefer upstream, fallback to origin, then first remote)
+    local upstream_url repo owner full_repo
+    upstream_url=$(git remote get-url upstream 2>/dev/null || git remote get-url origin 2>/dev/null || git remote get-url $(git remote | head -1) 2>/dev/null)
+    if [[ -z "$upstream_url" ]]; then
+        echo "Error: no git remote found (tried upstream, origin, and first available remote)" >&2
+        return 1
+    fi
+
+    # Normalize to owner/repo format
+    # Handle both https://github.com/owner/repo.git and git@github.com:owner/repo.git
+    if [[ "$upstream_url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+        owner="${BASH_REMATCH[1]}"
+        repo="${BASH_REMATCH[2]}"
+        # Remove .git suffix if present
+        repo="${repo%.git}"
+        full_repo="${owner}/${repo}"
+    else
+        echo "Error: could not parse owner/repo from remote URL: $upstream_url" >&2
+        return 1
+    fi
+
+    # Optional head limit (default to large number to get all runs)
+    local head_limit="${1:-1000}"
+
+    # Try to find PR number for this branch
+    local pr_number pr_branch
+    pr_number=$(gh pr list --head "$branch" --repo "$full_repo" --json number --jq '.[0].number' 2>/dev/null)
+    if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
+        pr_branch="pull-request/${pr_number}"
+        echo "Repository: $full_repo"
+        echo "Branch:     $branch (PR #$pr_number)"
+        echo "Checking runs on: $pr_branch (and $branch if any)"
+        echo ""
+
+        # Check runs on pull-request/N branch (where GitHub Actions typically runs)
+        local pr_runs
+        pr_runs=$(gh run list --branch "$pr_branch" --repo "$full_repo" --json url,workflowName,status,conclusion,createdAt,displayTitle --limit "$head_limit" 2>/dev/null)
+
+        if [[ -n "$pr_runs" && "$pr_runs" != "[]" ]]; then
+            echo "=== Runs on $pr_branch ==="
+            echo "$pr_runs" | jq -r '.[] | "\(.createdAt) \(.status)/\(.conclusion // "unknown") \(.workflowName)\n  \(.displayTitle)\n  \(.url)"'
+        fi
+
+        # Also check runs on the original branch (in case some workflows use it)
+        local branch_runs
+        branch_runs=$(gh run list --branch "$branch" --repo "$full_repo" --json url,workflowName,status,conclusion,createdAt,displayTitle --limit "$head_limit" 2>/dev/null)
+
+        if [[ -n "$branch_runs" && "$branch_runs" != "[]" ]]; then
+            if [[ -n "$pr_runs" && "$pr_runs" != "[]" ]]; then
+                echo ""
+            fi
+            echo "=== Runs on $branch ==="
+            echo "$branch_runs" | jq -r '.[] | "\(.createdAt) \(.status)/\(.conclusion // "unknown") \(.workflowName)\n  \(.displayTitle)\n  \(.url)"'
+        fi
+
+        # If no runs found on either branch
+        if [[ (-z "$pr_runs" || "$pr_runs" == "[]") && (-z "$branch_runs" || "$branch_runs" == "[]") ]]; then
+            echo "No workflow runs found for PR #$pr_number"
+        fi
+    else
+        # No PR found, just check the branch
+        echo "Repository: $full_repo"
+        echo "Branch:     $branch (no PR found)"
+        echo "Listing workflow runs..."
+
+        gh run list \
+            --branch "$branch" \
+            --repo "$full_repo" \
+            --json url,workflowName,status,conclusion,createdAt,displayTitle \
+            --jq '.[] | "\(.createdAt) \(.status)/\(.conclusion // "unknown") \(.workflowName)\n  \(.displayTitle)\n  \(.url)"' \
+            --limit "$head_limit"
+    fi
 }
 
 find_pr_for_commit() {
