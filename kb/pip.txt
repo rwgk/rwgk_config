@@ -1,0 +1,2 @@
+pip install --upgrade build wheel
+python -m build --wheel --outdir dist
