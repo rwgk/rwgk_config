@@ -1,0 +1,1 @@
+gh run download 22734923321 -n cuda-pathfinder-wheel --repo NVIDIA/cuda-python
