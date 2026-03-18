@@ -35,8 +35,29 @@ if ((${#bad[@]} > 0)); then
 fi
 
 # --- Load aliases (first key wins; preserve overall order) ---
-declare -A CMD_BY_KEY=()
-declare -a ORDERED_KEYS=()
+# Uses parallel indexed arrays instead of associative arrays for bash 3.2 compat.
+ORDERED_KEYS=()
+ORDERED_CMDS=()
+
+_key_exists() {
+    local needle="$1" k
+    ((${#ORDERED_KEYS[@]} > 0)) || return 1
+    for k in "${ORDERED_KEYS[@]}"; do
+        [[ "$k" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+_get_cmd() {
+    local needle="$1" i
+    for ((i = 0; i < ${#ORDERED_KEYS[@]}; i++)); do
+        if [[ "${ORDERED_KEYS[$i]}" == "$needle" ]]; then
+            printf '%s' "${ORDERED_CMDS[$i]}"
+            return 0
+        fi
+    done
+    return 1
+}
 
 load_aliases() {
     local file line key cmd
@@ -50,9 +71,9 @@ load_aliases() {
             cmd="${line#"$key"}"
             cmd="${cmd#"${cmd%%[![:space:]]*}"}"
             [[ -z "$key" || -z "$cmd" ]] && continue
-            if [[ -z "${CMD_BY_KEY[$key]:-}" ]]; then
-                CMD_BY_KEY["$key"]="$cmd"
+            if ! _key_exists "$key"; then
                 ORDERED_KEYS+=("$key")
+                ORDERED_CMDS+=("$cmd")
             fi
         done <"$file"
     done
@@ -86,17 +107,15 @@ EOF
 }
 
 run_one() {
-    local key="$1"
-    local cmd="${CMD_BY_KEY[$key]:-}"
-    [[ -n "$cmd" ]] || die "Unknown key: $key"
+    local key="$1" cmd
+    cmd=$(_get_cmd "$key") || die "Unknown key: $key"
     printf '+ %s\n' "$cmd"
     bash -c "$cmd"
 }
 
 show_one() {
-    local key="$1"
-    local cmd="${CMD_BY_KEY[$key]:-}"
-    [[ -n "$cmd" ]] || die "Unknown key: $key"
+    local key="$1" cmd
+    cmd=$(_get_cmd "$key") || die "Unknown key: $key"
     printf '+ %s\n' "$cmd"
 }
 
