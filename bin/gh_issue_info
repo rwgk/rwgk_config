@@ -11,7 +11,8 @@ Usage:
 Output: Markdown with timestamps and URLs for easy navigation.
 
 Environment:
-    L   If set, also writes output to $L/gh_issue_info_<owner>_<repo>_<issue>_<timestamp>.md
+    L   If set, writes output ONLY to $L/gh_issue_info_<owner>_<repo>_<issue>_<timestamp>.md
+        (suppresses stdout). If not set, writes to stdout.
 """
 
 import argparse
@@ -202,13 +203,21 @@ def collect_events(issue_info, issue_comments, issue_events):
         elif event_type == "moved":
             from_issue = e.get("from_issue", {})
             to_issue = e.get("to_issue", {})
-            event_data["from_issue"] = from_issue.get("number", "") if from_issue else ""
+            event_data["from_issue"] = (
+                from_issue.get("number", "") if from_issue else ""
+            )
             event_data["to_issue"] = to_issue.get("number", "") if to_issue else ""
         elif event_type == "cross-referenced":
             source = e.get("source", {})
             event_data["source_type"] = source.get("type", "")
-            event_data["source_number"] = source.get("issue", {}).get("number", "") if source.get("issue") else ""
-            event_data["source_pr_number"] = source.get("pull_request", {}).get("number", "") if source.get("pull_request") else ""
+            event_data["source_number"] = (
+                source.get("issue", {}).get("number", "") if source.get("issue") else ""
+            )
+            event_data["source_pr_number"] = (
+                source.get("pull_request", {}).get("number", "")
+                if source.get("pull_request")
+                else ""
+            )
 
         events.append(event_data)
 
@@ -413,14 +422,20 @@ def main():
     if labels:
         label_names = [label.get("name", "") for label in labels if label.get("name")]
         if label_names:
-            output_lines.append(f"**Labels:** {', '.join(f'`{name}`' for name in label_names)}")
+            output_lines.append(
+                f"**Labels:** {', '.join(f'`{name}`' for name in label_names)}"
+            )
             output_lines.append("")
 
     assignees = issue_info.get("assignees", [])
     if assignees:
-        assignee_names = [assignee.get("login", "") for assignee in assignees if assignee.get("login")]
+        assignee_names = [
+            assignee.get("login", "") for assignee in assignees if assignee.get("login")
+        ]
         if assignee_names:
-            output_lines.append(f"**Assignees:** {', '.join(f'@{name}' for name in assignee_names)}")
+            output_lines.append(
+                f"**Assignees:** {', '.join(f'@{name}' for name in assignee_names)}"
+            )
             output_lines.append("")
 
     milestone = issue_info.get("milestone")
@@ -439,19 +454,11 @@ def main():
     # Join and strip carriage returns (^M) that may come from GitHub API
     output = "\n".join(output_lines).replace("\r", "")
 
-    # Write to stdout
-    print(output)
-
-    # If $L is defined, also write to a file there
     log_dir = os.environ.get("L")
     if log_dir:
-        # Generate timestamp for filename
         now = datetime.now(DISPLAY_TIMEZONE)
         timestamp = now.strftime("%Y-%m-%d+%H%M%S")
-
-        # Sanitize repo name for filename (owner/repo -> owner_repo)
         repo_safe = repo.replace("/", "_")
-
         filename = f"gh_issue_info_{repo_safe}_{issue_number}_{timestamp}.md"
         filepath = os.path.join(log_dir, filename)
 
@@ -459,7 +466,9 @@ def main():
             f.write(output)
             f.write("\n")
 
-        print(f"\nOutput written to: {filepath}", file=sys.stderr)
+        print(f"Output written to: {filepath}", file=sys.stderr)
+    else:
+        print(output)
 
 
 if __name__ == "__main__":

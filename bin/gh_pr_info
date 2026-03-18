@@ -11,7 +11,8 @@ Usage:
 Output: Markdown with timestamps, URLs, and thread IDs for easy navigation.
 
 Environment:
-    L   If set, also writes output to $L/gh_pr_info_<owner>_<repo>_<pr>_<timestamp>.md
+    L   If set, writes output ONLY to $L/gh_pr_info_<owner>_<repo>_<pr>_<timestamp>.md
+        (suppresses stdout). If not set, writes to stdout.
 """
 
 import argparse
@@ -487,19 +488,11 @@ def main():
     # Join and strip carriage returns (^M) that may come from GitHub API
     output = "\n".join(output_lines).replace("\r", "")
 
-    # Write to stdout
-    print(output)
-
-    # If $L is defined, also write to a file there
     log_dir = os.environ.get("L")
     if log_dir:
-        # Generate timestamp for filename
         now = datetime.now(DISPLAY_TIMEZONE)
         timestamp = now.strftime("%Y-%m-%d+%H%M%S")
-
-        # Sanitize repo name for filename (owner/repo -> owner_repo)
         repo_safe = repo.replace("/", "_")
-
         filename = f"gh_pr_info_{repo_safe}_{pr_number}_{timestamp}.md"
         filepath = os.path.join(log_dir, filename)
 
@@ -507,7 +500,9 @@ def main():
             f.write(output)
             f.write("\n")
 
-        print(f"\nOutput written to: {filepath}", file=sys.stderr)
+        print(f"Output written to: {filepath}", file=sys.stderr)
+    else:
+        print(output)
 
 
 if __name__ == "__main__":
