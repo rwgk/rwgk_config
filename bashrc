@@ -1036,16 +1036,19 @@ git_log_grep() {
 
 git_remote_add() {
     if [ $# -ne 1 ]; then
-        echo "Usage: git_remote_add OWNER" >&2
+        echo "Usage: git_remote_add OWNER[:BRANCH]" >&2
         return 1
     fi
-    local owner="$1"
-    # Get the repo name (last path component without .git)
+    local owner="${1%%:*}"
     local repo
     repo=$(basename -s .git "$(git rev-parse --show-toplevel 2>/dev/null)" || true)
     if [ -z "$repo" ]; then
         echo "Error: not inside a git repository" >&2
         return 1
+    fi
+    if git remote get-url "$owner" &>/dev/null; then
+        echo "Remote '$owner' already exists: $(git remote get-url "$owner")"
+        return 0
     fi
     echo "git remote add -f \"$owner\" https://github.com/$owner/$repo"
     git remote add -f "$owner" "https://github.com/$owner/$repo"
@@ -1055,29 +1058,29 @@ git_swrp() (
     set -euo pipefail
 
     if [[ $# -ne 1 ]]; then
-        echo "Usage: git_swrp <remote/branch>" >&2
+        echo "Usage: git_swrp <remote:branch>" >&2
         return 1
     fi
 
     local arg="$1"
 
-    if [[ "$arg" != */* ]]; then
-        echo "Error: argument must contain '/'" >&2
+    if [[ "$arg" == *:* ]]; then
+        local remote="${arg%%:*}"
+        local branch="${arg#*:}"
+    elif [[ "$arg" == */* ]]; then
+        local remote="${arg%%/*}"
+        local branch="${arg#*/}"
+    else
+        echo "Error: argument must be in 'remote:branch' format" >&2
         return 1
     fi
 
-    local remote="${arg%%/*}"
-    local branch="${arg#*/}"
-
-    if ! git remote get-url "$remote" &>/dev/null; then
-        echo "Error: '$remote' is not a known remote" >&2
-        return 1
-    fi
+    git_remote_add "$arg"
 
     local new_branch="${remote}→${branch}"
 
-    echo "Creating local branch '$new_branch' from '$arg'..."
-    git switch -c "$new_branch" "$arg"
+    echo "Creating local branch '$new_branch' from '$remote/$branch'..."
+    git switch -c "$new_branch" "$remote/$branch"
 )
 
 git_show_merge_commits() {
