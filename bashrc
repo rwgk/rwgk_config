@@ -1138,6 +1138,10 @@ myt() (
                 echo "myt: Parent directory does not exist: $parent_dir" >&2
                 exit 1
             }
+            [[ -w "$parent_dir" ]] || {
+                echo "myt: Parent directory is not writable: $parent_dir" >&2
+                exit 1
+            }
         fi
     done
 
