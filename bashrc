@@ -29,7 +29,8 @@ show_motd() {
     run-parts /etc/update-motd.d/
 }
 
-alias RC='cd "$HOME/rwgk_config"'
+export RC="$HOME/rwgk_config"
+alias RC='cd "$RC"'
 
 if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
     . "$HOME/rwgk_config/bash_maybe_use_chd_history"
