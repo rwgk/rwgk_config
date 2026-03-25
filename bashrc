@@ -1229,6 +1229,10 @@ fresh_venv() {
     fi
 }
 
+pip_update_all() {
+    pip install --upgrade pip && pip freeze | cut -d= -f1 | xargs pip install --upgrade
+}
+
 which_venv() {
     if [ "$#" -ne 0 ]; then
         echo "which_venv: ERROR: no arguments expected, $# given." >&2
@@ -1684,6 +1688,8 @@ find_pr_for_commit() {
 
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
+
+export CCCJ="$HOME/.cursor/cli-config.json"
 
 # launch cursor window
 lcw() (
