@@ -1048,6 +1048,7 @@ git_remote_add() {
     fi
     if git remote get-url "$owner" &>/dev/null; then
         echo "Remote '$owner' already exists: $(git remote get-url "$owner")"
+        git fetch "$owner"
         return 0
     fi
     echo "git remote add -f \"$owner\" https://github.com/$owner/$repo"
