@@ -160,6 +160,10 @@ SetAppleScreenshotLocation() {
 SetAppleScreenshotLocationDownloads() {
     SetAppleScreenshotLocation "$HOME/Downloads"
 }
+DisableScreenshotFloatingThumbnail() {
+    defaults write com.apple.screencapture show-thumbnail -bool false
+    killall SystemUIServer
+}
 
 # pbff: PasteBoard From File
 # Copy the contents of a file into the pasteboard (clipboard).
