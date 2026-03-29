@@ -910,11 +910,11 @@ if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push
     )
 fi
 
-git_branch_D_track_hash() (
+_git_branch_D_track_hash_helper() (
     set -euo pipefail
 
     if [[ $# -ne 1 ]]; then
-        echo "Usage: git_branch_D_track_hash <branchname>" >&2
+        echo "ASSERTION FAILURE: _git_branch_D_track_hash_helper requires exactly 1 argument (got $#)" >&2
         return 1
     fi
 
@@ -967,6 +967,16 @@ git_branch_D_track_hash() (
 
     git branch -D "$branch"
 )
+
+git_branch_D_track_hash() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: git_branch_D_track_hash <branch> [<branch> ...]" >&2
+        return 1
+    fi
+    for branch in "$@"; do
+        _git_branch_D_track_hash_helper "$branch" || return
+    done
+}
 
 _git_branch_D_track_hash_COMPLETE() {
     # only complete if we're in a git repo
