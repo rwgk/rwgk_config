@@ -2000,6 +2000,11 @@ if command -v wslpath >/dev/null 2>&1; then
     fi
 fi
 
+if [ -d "$HOME/Downloads" ]; then
+    export D="$HOME/Downloads"
+    alias D='cd "$D"'
+fi
+
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
 [ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
 [ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
