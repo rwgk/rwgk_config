@@ -1736,53 +1736,44 @@ _lcw_impl() (
     echo "cursor EXIT at $(mlt) with exit code $exit_code" >>"$log_file"
 )
 
-nfid() {
-    local dir=$1
-    local pattern=${2:-*}
-
-    if [[ ! -d $dir ]]; then
-        echo "Error: '$dir' is not a directory" >&2
-        return 1
-    fi
-
-    # Collect matching files
-    local matches=()
-    while IFS= read -r -d '' file; do
-        matches+=("$file")
-    done < <(find "$dir" -maxdepth 1 -type f -name "$pattern" -print0)
-
-    if [[ ${#matches[@]} -eq 0 ]]; then
-        echo "Error: no files matching '$pattern' in '$dir'" >&2
-        return 1
-    fi
-
-    local newest=""
-    local newest_mtime=0
-    local mtime
-
-    for file in "${matches[@]}"; do
-        if [[ $(uname) == "Darwin" ]]; then
-            mtime=$(stat -f %m "$file") # macOS
-        else
-            mtime=$(stat -c %Y "$file") # Linux / GNU
-        fi
-
-        if ((mtime > newest_mtime)); then
-            newest_mtime=$mtime
-            newest=$file
-        fi
-    done
-
-    echo "$newest"
-}
-
+# List log files from $L by modification time (newest first).
+#   nlog      — newest file (same as nlog 1)
+#   nlog N    — Nth newest file
+#   nlog -N   — N newest files
+#   nlog N-M  — Nth through Mth newest files
+#   nlog N%C  — C files starting from the Nth newest
+#   nlog N+   — all files from Nth onward
 nlog() {
-    if [ -d /wrk/logs ]; then
-        nfid /wrk/logs "$@"
-    elif [ -d "$HOME/wrk/logs" ]; then
-        nfid "$HOME/wrk/logs" "$@"
+    if [[ -z "$L" || ! -d "$L" ]]; then
+        echo "Error: \$L is not set or is not a directory" >&2
+        return 1
+    fi
+    local dir
+    dir=$(realpath "$L") || return 1
+    local listing
+    listing=$(ls -1t "$dir") || return 1
+    if [[ -z "$listing" ]]; then
+        echo "Error: no files in '$dir'" >&2
+        return 1
+    fi
+    local fullpaths
+    fullpaths=$(echo "$listing" | awk -v d="$dir" '{print d "/" $0}')
+    local arg="${1:-1}"
+    if [[ "$arg" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+        echo "$fullpaths" | head -n "${BASH_REMATCH[2]}" | tail -n +"${BASH_REMATCH[1]}"
+    elif [[ "$arg" =~ ^([0-9]+)%([0-9]+)$ ]]; then
+        local start=${BASH_REMATCH[1]}
+        local end=$((start + BASH_REMATCH[2] - 1))
+        echo "$fullpaths" | head -n "$end" | tail -n +"$start"
+    elif [[ "$arg" =~ ^([0-9]+)\+$ ]]; then
+        echo "$fullpaths" | tail -n +"${BASH_REMATCH[1]}"
+    elif [[ "$arg" =~ ^-([0-9]+)$ ]]; then
+        echo "$fullpaths" | head -n "${BASH_REMATCH[1]}"
+    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+        echo "$fullpaths" | head -n "$arg" | tail -n 1
     else
-        nfid "$HOME/logs" "$@"
+        echo "Usage: nlog [N | -N | N-M | N%C | N+]" >&2
+        return 1
     fi
 }
 
