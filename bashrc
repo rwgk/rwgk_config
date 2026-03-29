@@ -932,6 +932,13 @@ git_branch_D_track_hash() (
         return 1
     fi
 
+    # Refuse to delete the currently checked-out branch
+    current_branch=$(git symbolic-ref --short HEAD 2>/dev/null) || true
+    if [[ "$branch" == "$current_branch" ]]; then
+        echo "Error: '$branch' is the current branch. Switch to another branch first." >&2
+        return 1
+    fi
+
     commit=$(git rev-parse "$branch")
     repo=$(basename "$(git rev-parse --show-toplevel)")
     timestamp=$(date +%Y-%m-%d+%H%M%S)
