@@ -394,9 +394,19 @@ find_here_between() {
 
     local start="$1"
     local end="$2"
+    local here
+    here=$(realpath .) || return 1
 
-    find "$(realpath .)" -type f -newermt "$start" ! -newermt "$end" \
-        -printf "%TY-%Tm-%Td %TH:%TM:%TS %p\n"
+    if command -v gfind >/dev/null 2>&1; then
+        gfind "$here" -type f -newermt "$start" ! -newermt "$end" \
+            -printf "%TY-%Tm-%Td %TH:%TM:%TS %p\n"
+    elif [ "$(uname)" = "Darwin" ]; then
+        find "$here" -type f -newermt "$start" ! -newermt "$end" \
+            -exec stat -f '%Sm %N' -t '%Y-%m-%d %H:%M:%S' {} \;
+    else
+        find "$here" -type f -newermt "$start" ! -newermt "$end" \
+            -printf "%TY-%Tm-%Td %TH:%TM:%TS %p\n"
+    fi
 }
 
 wipe_pycache() {
