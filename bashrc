@@ -385,6 +385,20 @@ ffRM() {
     find . -name "$@" -print -delete
 }
 
+find_here_between() {
+    if [ "$#" -ne 2 ]; then
+        echo "find_here_between: ERROR: exactly two arguments required, $# given." >&2
+        echo 'Usage: find_here_between "YYYY-MM-DD HH:MM" "YYYY-MM-DD HH:MM"' >&2
+        return 1
+    fi
+
+    local start="$1"
+    local end="$2"
+
+    find "$(realpath .)" -type f -newermt "$start" ! -newermt "$end" \
+        -printf "%TY-%Tm-%Td %TH:%TM:%TS %p\n"
+}
+
 wipe_pycache() {
     local dirs=("$@")
 
