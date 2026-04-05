@@ -31,6 +31,10 @@ def version_key(ver: str) -> tuple[int, ...]:
     return tuple(int(x) for x in ver.split("."))
 
 
+def download_archive_url(ver: str) -> str:
+    return f"https://developer.nvidia.com/cuda-{ver.replace('.', '-')}-download-archive"
+
+
 def extract_most_recent_minors_only(
     results: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
@@ -75,7 +79,7 @@ def main():
         results = extract_most_recent_minors_only(results)
 
     for version, date in results:
-        print(f"{version} — {date}")
+        print(f"{version} — {date} — {download_archive_url(version)}")
 
 
 if __name__ == "__main__":
