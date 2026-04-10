@@ -1879,7 +1879,7 @@ pixipath() {
         echo "Error: Neither /wrk/.pixi/bin nor \$HOME/.pixi/bin exists." >&2
         return 1
     fi
-    export PATH="$(clean_path $PATH)"
+    export PATH="$(clean_path .:"$PATH")"
 }
 
 set_cuda_env() {
@@ -2049,4 +2049,4 @@ if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
     fi
 fi
 
-export PATH="$(clean_path .:$PATH)"
+export PATH="$(clean_path .:"$PATH")"
