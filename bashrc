@@ -2048,3 +2048,5 @@ if [ -f "$HOME/rwgk_config/path_utility.py" ]; then
         export PYTHONPATH=$(/usr/bin/python "$HOME/rwgk_config/path_utility.py" tidy PYTHONPATH)
     fi
 fi
+
+export PATH="$(clean_path .:$PATH)"
