@@ -1872,8 +1872,9 @@ nvmdwnld() (
     local nvm_dir="$W/.nvm"
 
     set -x
-    PROFILE=/dev/null NVM_DIR="$nvm_dir" \
-        bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
+    mkdir -p "$nvm_dir" &&
+        PROFILE=/dev/null NVM_DIR="$nvm_dir" \
+            bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
 )
 
 nvmpath() {
