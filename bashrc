@@ -1858,6 +1858,59 @@ mf3path() {
     fi
 }
 
+nvmdwnld() (
+    if [[ "$OSTYPE" != linux* ]]; then
+        echo "nvmdwnld: intended for Linux only." >&2
+        return 1
+    fi
+
+    if [[ -z "${W:-}" || ! -d "$W" ]]; then
+        echo "nvmdwnld: \$W is not set or is not a directory." >&2
+        return 1
+    fi
+
+    local nvm_dir="$W/.nvm"
+
+    set -x
+    PROFILE=/dev/null NVM_DIR="$nvm_dir" \
+        bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
+)
+
+nvmpath() {
+    if [[ "$OSTYPE" != linux* ]]; then
+        echo "nvmpath: intended for Linux only." >&2
+        return 1
+    fi
+
+    if [[ -z "${W:-}" || ! -d "$W" ]]; then
+        echo "nvmpath: \$W is not set or is not a directory." >&2
+        return 1
+    fi
+
+    export NVM_DIR="$W/.nvm"
+
+    if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+        echo "nvmpath: '$NVM_DIR/nvm.sh' not found. Run nvmdwnld first." >&2
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    . "$NVM_DIR/nvm.sh"
+
+    export npm_config_cache="$W/.npm-cache"
+    mkdir -p "$npm_config_cache"
+}
+
+nvmhere() {
+    nvmpath || return
+    if [[ ! -f .nvmrc ]]; then
+        echo "nvmhere: no .nvmrc in $(pwd)" >&2
+        return 1
+    fi
+    nvm install
+    nvm use
+}
+
 conda_rm() {
     conda remove -y --all -n "$@"
     echo "Done: conda remove -y --all -n" "$@"
