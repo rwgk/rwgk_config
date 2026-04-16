@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+GET_GHA_LOGS="$SCRIPT_DIR/get_gha_logs"
+UNPACK_GHA_LOGS="$SCRIPT_DIR/unpack_gha_logs.sh"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: gha_logs_here <URL-or-zipfile>
+EOF
+}
+
+die() {
+    local message="$1"
+    local status="${2:-1}"
+    echo "Error: $message" >&2
+    exit "$status"
+}
+
+parsed_repo=""
+parsed_run_id=""
+
+parse_actions_run_url() {
+    local url="$1"
+    local host_and_path host path
+    local org repo_name rest after_runs
+
+    parsed_repo=""
+    parsed_run_id=""
+
+    host_and_path="${url#*://}"
+    host="${host_and_path%%/*}"
+    path="${host_and_path#*/}"
+
+    if [[ "$host" != "github.com" ]]; then
+        die "URL host must be github.com (got: '$host')." 2
+    fi
+
+    org="${path%%/*}"
+    rest="${path#*/}"
+    repo_name="${rest%%/*}"
+    rest="${rest#*/}"
+
+    if [[ -z "$org" || -z "$repo_name" || "$rest" != actions/* ]]; then
+        die "could not parse org/repo/actions/... from URL path '$path'." 2
+    fi
+
+    after_runs="${path#*/actions/runs/}"
+    if [[ "$after_runs" == "$path" ]]; then
+        die "URL does not contain '/actions/runs/RUN_ID'." 2
+    fi
+
+    if [[ "$after_runs" =~ ^([0-9]+) ]]; then
+        parsed_run_id="${BASH_REMATCH[1]}"
+    else
+        die "could not extract numeric RUN_ID from URL '$url'." 2
+    fi
+
+    parsed_repo="${org}/${repo_name}"
+}
+
+clear_cd_target_file() {
+    local cd_target_file="$1"
+
+    if [[ -n "$cd_target_file" ]]; then
+        : >"$cd_target_file"
+    fi
+}
+
+write_cd_target() {
+    local cd_target_file="$1"
+    local target="$2"
+
+    if [[ -n "$cd_target_file" ]]; then
+        printf '%s\n' "$target" >"$cd_target_file"
+    fi
+}
+
+unpack_zip_to_dir() {
+    local zip_path="$1"
+    local dir_name="$2"
+    local zip_abs
+
+    if [[ ! -f "$zip_path" ]]; then
+        die "zip file not found: '$zip_path'" 1
+    fi
+
+    if [[ "$zip_path" != *.zip ]]; then
+        die "expected a .zip file (got '$zip_path')." 2
+    fi
+
+    if ! zip_abs=$(realpath "$zip_path"); then
+        die "could not resolve path '$zip_path'." 1
+    fi
+
+    if [[ -e "$dir_name" ]]; then
+        die "target directory '$dir_name' already exists." 1
+    fi
+
+    mkdir "$dir_name"
+    if ! (
+        cd "$dir_name" || exit 1
+        "$UNPACK_GHA_LOGS" "$zip_abs"
+    ); then
+        return 1
+    fi
+
+    return 0
+}
+
+main() {
+    local cd_target_file=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --cd-target-file)
+            [[ $# -ge 2 ]] || die "Missing value for $1" 2
+            cd_target_file="$2"
+            shift 2
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            die "Unknown option: $1" 2
+            ;;
+        *)
+            break
+            ;;
+        esac
+    done
+
+    if [[ $# -ne 1 ]]; then
+        usage
+        exit 2
+    fi
+
+    clear_cd_target_file "$cd_target_file"
+
+    [[ -x "$GET_GHA_LOGS" ]] || die "helper script not found: '$GET_GHA_LOGS'"
+    [[ -x "$UNPACK_GHA_LOGS" ]] || die "helper script not found: '$UNPACK_GHA_LOGS'"
+
+    local arg="$1"
+    local zip_path dir_name
+    local -a zip_paths=() dir_names=()
+
+    if [[ "$arg" == http* ]]; then
+        command -v gh >/dev/null 2>&1 ||
+            die "'gh' (GitHub CLI) is not installed or not on PATH." 127
+
+        parse_actions_run_url "$arg"
+
+        local repo="$parsed_repo"
+        local run_id="$parsed_run_id"
+        local latest_attempt attempt
+
+        if ! latest_attempt=$(
+            gh api "/repos/${repo}/actions/runs/${run_id}" --jq '.run_attempt // 1'
+        ); then
+            echo "Error: failed to inspect run $run_id from $repo." >&2
+            exit 1
+        fi
+
+        if [[ ! "$latest_attempt" =~ ^[0-9]+$ ]] || ((latest_attempt < 1)); then
+            echo "Error: failed to determine run attempt count for run $run_id from $repo." >&2
+            exit 1
+        fi
+
+        if ((latest_attempt == 1)); then
+            zip_paths=("logs_${run_id}.zip")
+            dir_names=("logs_${run_id}")
+        else
+            for ((attempt = 1; attempt <= latest_attempt; attempt++)); do
+                zip_paths+=("logs_${run_id}_attempt${attempt}.zip")
+                dir_names+=("logs_${run_id}_attempt${attempt}")
+            done
+        fi
+
+        for dir_name in "${dir_names[@]}"; do
+            if [[ -e "$dir_name" ]]; then
+                echo "Error: target directory '$dir_name' already exists in '$(pwd)'." >&2
+                echo "       Remove/rename it or use that directory directly." >&2
+                exit 1
+            fi
+        done
+
+        for zip_path in "${zip_paths[@]}"; do
+            if [[ -e "$zip_path" ]]; then
+                echo "Error: zip file '$zip_path' already exists in '$(pwd)'." >&2
+                echo "       Use: gha_logs_here \"$zip_path\" or remove/rename it and retry." >&2
+                exit 1
+            fi
+        done
+
+        if ! "$GET_GHA_LOGS" "$arg"; then
+            echo "Error: get_gha_logs failed for '$arg'." >&2
+            exit 1
+        fi
+    else
+        zip_paths=("$arg")
+    fi
+
+    if ((${#zip_paths[@]} == 1)); then
+        zip_path="${zip_paths[0]}"
+        dir_name="$(basename "$zip_path")"
+        dir_name="${dir_name%.zip}"
+
+        unpack_zip_to_dir "$zip_path" "$dir_name"
+
+        if [[ -n "$cd_target_file" ]]; then
+            write_cd_target "$cd_target_file" "$(realpath "$dir_name")"
+        fi
+
+        exit 0
+    fi
+
+    local start_dir
+    start_dir="$(pwd)"
+
+    for zip_path in "${zip_paths[@]}"; do
+        dir_name="$(basename "$zip_path")"
+        dir_name="${dir_name%.zip}"
+
+        unpack_zip_to_dir "$zip_path" "$dir_name"
+        echo "Unpacked: $dir_name"
+    done
+
+    echo "Unpacked ${#zip_paths[@]} log directories in '$start_dir'."
+}
+
+main "$@"

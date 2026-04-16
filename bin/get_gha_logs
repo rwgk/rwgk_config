@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+    cat >&2 <<'EOF'
+Usage:
+  get_gha_logs org/repo RUN_ID [annotation]
+  get_gha_logs https://github.com/org/repo/actions/runs/RUN_ID[/...] [annotation]
+
+Downloads the log zip for the run. If the run has reruns, downloads one zip per
+attempt as logs_RUNID_attemptN[annotation].zip.
+
+Examples:
+  get_gha_logs NVIDIA/cuda-python 17475795472
+  get_gha_logs pybind/pybind11 18144031622
+  get_gha_logs pybind/pybind11 18144031622 ci
+  get_gha_logs https://github.com/NVIDIA/cuda-python/actions/runs/19652804989/job/56283268350?pr=1284
+EOF
+}
+
+die() {
+    local message="$1"
+    local status="${2:-1}"
+    echo "Error: $message" >&2
+    exit "$status"
+}
+
+parsed_repo=""
+parsed_run_id=""
+
+parse_actions_run_url() {
+    local url="$1"
+    local host_and_path host path
+    local org repo_name rest after_runs
+
+    parsed_repo=""
+    parsed_run_id=""
+
+    host_and_path="${url#*://}"
+    host="${host_and_path%%/*}"
+    path="${host_and_path#*/}"
+
+    if [[ "$host" != "github.com" ]]; then
+        die "URL host must be github.com (got: '$host')." 2
+    fi
+
+    org="${path%%/*}"
+    rest="${path#*/}"
+    repo_name="${rest%%/*}"
+    rest="${rest#*/}"
+
+    if [[ -z "$org" || -z "$repo_name" || "$rest" != actions/* ]]; then
+        die "could not parse org/repo/actions/... from URL path '$path'." 2
+    fi
+
+    after_runs="${path#*/actions/runs/}"
+    if [[ "$after_runs" == "$path" ]]; then
+        die "URL does not contain '/actions/runs/RUN_ID'." 2
+    fi
+
+    if [[ "$after_runs" =~ ^([0-9]+) ]]; then
+        parsed_run_id="${BASH_REMATCH[1]}"
+    else
+        die "could not extract numeric RUN_ID from URL '$url'." 2
+    fi
+
+    parsed_repo="${org}/${repo_name}"
+}
+
+sanitize_annotation() {
+    local annotation="${1:-}"
+
+    if [[ -n "$annotation" ]]; then
+        annotation="${annotation// /_}"
+        annotation="${annotation//\//-}"
+        annotation="_${annotation}"
+    fi
+
+    printf '%s\n' "$annotation"
+}
+
+download_logs_zip() {
+    local endpoint="$1"
+    local outfile="$2"
+    local fetch_error_message="$3"
+    local tmp_outfile status
+
+    tmp_outfile="${outfile}.tmp.$$"
+
+    echo "+ gh api \"$endpoint\" > \"$outfile\""
+    if gh api "$endpoint" >"$tmp_outfile"; then
+        if mv "$tmp_outfile" "$outfile"; then
+            echo "Saved: $outfile"
+            return 0
+        fi
+
+        status=$?
+        rm -f "$tmp_outfile"
+        echo "Failed to save logs to $outfile (exit $status)." >&2
+        return "$status"
+    fi
+
+    status=$?
+    rm -f "$tmp_outfile"
+    echo "$fetch_error_message (exit $status)." >&2
+    return "$status"
+}
+
+main() {
+    command -v gh >/dev/null 2>&1 ||
+        die "'gh' (GitHub CLI) is not installed or not on PATH." 127
+
+    local repo run_id annotation latest_attempt
+
+    if [[ $# -ge 1 && "$1" == http* ]]; then
+        if [[ $# -lt 1 || $# -gt 2 ]]; then
+            usage
+            exit 2
+        fi
+
+        parse_actions_run_url "$1"
+        repo="$parsed_repo"
+        run_id="$parsed_run_id"
+        annotation="${2:-}"
+    else
+        if [[ $# -lt 2 || $# -gt 3 ]]; then
+            usage
+            exit 2
+        fi
+
+        repo="$1"
+        run_id="$2"
+        annotation="${3:-}"
+    fi
+
+    if [[ "$repo" != */* ]]; then
+        die "repo must be in 'org/repo' form (got: '$repo')." 2
+    fi
+
+    if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
+        die "RUN_ID must be numeric (got: '$run_id')." 2
+    fi
+
+    annotation="$(sanitize_annotation "$annotation")"
+
+    if ! latest_attempt=$(
+        gh api "/repos/${repo}/actions/runs/${run_id}" --jq '.run_attempt // 1'
+    ); then
+        echo "Failed to inspect run $run_id from $repo." >&2
+        exit 1
+    fi
+
+    if [[ ! "$latest_attempt" =~ ^[0-9]+$ ]] || ((latest_attempt < 1)); then
+        echo "Failed to determine run attempt count for run $run_id from $repo." >&2
+        exit 1
+    fi
+
+    local endpoint outfile attempt status overall_status=0
+
+    if ((latest_attempt == 1)); then
+        endpoint="/repos/${repo}/actions/runs/${run_id}/logs"
+        outfile="logs_${run_id}${annotation}.zip"
+
+        if download_logs_zip \
+            "$endpoint" \
+            "$outfile" \
+            "Failed to fetch logs for run $run_id from $repo"; then
+            exit 0
+        fi
+
+        status=$?
+        exit "$status"
+    fi
+
+    echo "Run $run_id has ${latest_attempt} attempts; downloading each attempt-specific log archive."
+
+    for ((attempt = 1; attempt <= latest_attempt; attempt++)); do
+        endpoint="/repos/${repo}/actions/runs/${run_id}/attempts/${attempt}/logs"
+        outfile="logs_${run_id}_attempt${attempt}${annotation}.zip"
+
+        if download_logs_zip \
+            "$endpoint" \
+            "$outfile" \
+            "Failed to fetch logs for run $run_id attempt $attempt from $repo"; then
+            continue
+        fi
+
+        status=$?
+        overall_status="$status"
+    done
+
+    exit "$overall_status"
+}
+
+main "$@"
