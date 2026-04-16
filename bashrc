@@ -1390,6 +1390,9 @@ Usage:
   get_gha_logs org/repo RUN_ID [annotation]
   get_gha_logs https://github.com/org/repo/actions/runs/RUN_ID[/...] [annotation]
 
+Downloads the log zip for the run. If the run has reruns, downloads one zip per
+attempt as logs_RUNID_attemptN[annotation].zip.
+
 Examples:
   get_gha_logs NVIDIA/cuda-python 17475795472
   get_gha_logs pybind/pybind11 18144031622
@@ -1404,7 +1407,7 @@ get_gha_logs() {
         return 127
     fi
 
-    local repo run_id annotation url_mode=false
+    local repo run_id annotation
 
     if [[ $# -ge 1 && "$1" == http* ]]; then
         # URL mode: get_gha_logs URL [annotation]
@@ -1412,7 +1415,6 @@ get_gha_logs() {
             _get_gha_logs_usage
             return 2
         fi
-        url_mode=true
         local url="$1"
         annotation="${2:-}"
 
@@ -1482,21 +1484,71 @@ get_gha_logs() {
         annotation="_${annotation}"
     fi
 
-    local endpoint="/repos/${repo}/actions/runs/${run_id}/logs"
-    local outfile="logs_${run_id}${annotation}.zip"
-
-    # ---- show and run ----
-    echo "+ gh api \"$endpoint\" > \"$outfile\""
-    gh api "$endpoint" >"$outfile"
-    local status=$?
-
-    if [[ $status -eq 0 ]]; then
-        echo "Saved: $outfile"
-    else
-        echo "Failed to fetch logs for run $run_id from $repo (exit $status)." >&2
+    local latest_attempt
+    if ! latest_attempt=$(
+        gh api "/repos/${repo}/actions/runs/${run_id}" --jq '.run_attempt // 1'
+    ); then
+        echo "Failed to inspect run $run_id from $repo." >&2
+        return 1
     fi
 
-    return $status
+    if [[ ! "$latest_attempt" =~ ^[0-9]+$ ]] || ((latest_attempt < 1)); then
+        echo "Failed to determine run attempt count for run $run_id from $repo." >&2
+        return 1
+    fi
+
+    local attempt endpoint outfile tmp_outfile status overall_status=0
+
+    if ((latest_attempt == 1)); then
+        endpoint="/repos/${repo}/actions/runs/${run_id}/logs"
+        outfile="logs_${run_id}${annotation}.zip"
+        tmp_outfile="${outfile}.tmp.$$"
+
+        echo "+ gh api \"$endpoint\" > \"$outfile\""
+        if gh api "$endpoint" >"$tmp_outfile"; then
+            if mv "$tmp_outfile" "$outfile"; then
+                echo "Saved: $outfile"
+                return 0
+            fi
+
+            status=$?
+            rm -f "$tmp_outfile"
+            echo "Failed to save logs to $outfile (exit $status)." >&2
+            return $status
+        else
+            status=$?
+            rm -f "$tmp_outfile"
+            echo "Failed to fetch logs for run $run_id from $repo (exit $status)." >&2
+            return $status
+        fi
+    fi
+
+    echo "Run $run_id has ${latest_attempt} attempts; downloading each attempt-specific log archive."
+
+    for ((attempt = 1; attempt <= latest_attempt; attempt++)); do
+        endpoint="/repos/${repo}/actions/runs/${run_id}/attempts/${attempt}/logs"
+        outfile="logs_${run_id}_attempt${attempt}${annotation}.zip"
+        tmp_outfile="${outfile}.tmp.$$"
+
+        echo "+ gh api \"$endpoint\" > \"$outfile\""
+        if gh api "$endpoint" >"$tmp_outfile"; then
+            if mv "$tmp_outfile" "$outfile"; then
+                echo "Saved: $outfile"
+            else
+                status=$?
+                rm -f "$tmp_outfile"
+                echo "Failed to save logs to $outfile (exit $status)." >&2
+                overall_status=$status
+            fi
+        else
+            status=$?
+            rm -f "$tmp_outfile"
+            echo "Failed to fetch logs for run $run_id attempt $attempt from $repo (exit $status)." >&2
+            overall_status=$status
+        fi
+    done
+
+    return $overall_status
 }
 
 gha_logs_here() {
@@ -1507,11 +1559,18 @@ gha_logs_here() {
 
     local arg="$1"
     local zip_path dir_name
+    local -a zip_paths dir_names
 
     if [[ "$arg" == http* ]]; then
         # URL mode: download logs first via get_gha_logs
+        if ! command -v gh >/dev/null 2>&1; then
+            echo "Error: 'gh' (GitHub CLI) is not installed or not on PATH." >&2
+            return 127
+        fi
+
         local url="$arg"
         local host_and_path host path after_runs run_id
+        local org repo_name rest repo latest_attempt attempt
 
         host_and_path="${url#*://}"
         host="${host_and_path%%/*}"
@@ -1519,6 +1578,17 @@ gha_logs_here() {
 
         if [[ "$host" != "github.com" ]]; then
             echo "Error: URL host must be github.com (got: '$host')." >&2
+            return 2
+        fi
+
+        # path is: org/repo/actions/runs/RUN_ID[/...]
+        org="${path%%/*}"
+        rest="${path#*/}"
+        repo_name="${rest%%/*}"
+        rest="${rest#*/}" # now starts with actions/...
+
+        if [[ -z "$org" || -z "$repo_name" || "$rest" != actions/* ]]; then
+            echo "Error: could not parse org/repo/actions/... from URL path '$path'." >&2
             return 2
         fi
 
@@ -1535,22 +1605,45 @@ gha_logs_here() {
             return 2
         fi
 
-        # Determine zip and target directory names based on run_id
-        zip_path="logs_${run_id}.zip"
-        local target_dir="logs_${run_id}"
+        repo="${org}/${repo_name}"
 
-        # Fail early if target directory already exists
-        if [[ -e "$target_dir" ]]; then
-            echo "Error: target directory '$target_dir' already exists in '$(pwd)'." >&2
-            echo "       Remove/rename it or use that directory directly." >&2
+        if ! latest_attempt=$(
+            gh api "/repos/${repo}/actions/runs/${run_id}" --jq '.run_attempt // 1'
+        ); then
+            echo "Error: failed to inspect run $run_id from $repo." >&2
             return 1
         fi
 
-        if [[ -e "$zip_path" ]]; then
-            echo "Error: zip file '$zip_path' already exists in '$(pwd)'." >&2
-            echo "       Use: gha_logs_here \"$zip_path\"   or remove/rename it and retry." >&2
+        if [[ ! "$latest_attempt" =~ ^[0-9]+$ ]] || ((latest_attempt < 1)); then
+            echo "Error: failed to determine run attempt count for run $run_id from $repo." >&2
             return 1
         fi
+
+        if ((latest_attempt == 1)); then
+            zip_paths=("logs_${run_id}.zip")
+            dir_names=("logs_${run_id}")
+        else
+            for ((attempt = 1; attempt <= latest_attempt; attempt++)); do
+                zip_paths+=("logs_${run_id}_attempt${attempt}.zip")
+                dir_names+=("logs_${run_id}_attempt${attempt}")
+            done
+        fi
+
+        for dir_name in "${dir_names[@]}"; do
+            if [[ -e "$dir_name" ]]; then
+                echo "Error: target directory '$dir_name' already exists in '$(pwd)'." >&2
+                echo "       Remove/rename it or use that directory directly." >&2
+                return 1
+            fi
+        done
+
+        for zip_path in "${zip_paths[@]}"; do
+            if [[ -e "$zip_path" ]]; then
+                echo "Error: zip file '$zip_path' already exists in '$(pwd)'." >&2
+                echo "       Use: gha_logs_here \"$zip_path\" or remove/rename it and retry." >&2
+                return 1
+            fi
+        done
 
         if ! get_gha_logs "$url"; then
             echo "Error: get_gha_logs failed for '$url'." >&2
@@ -1558,36 +1651,81 @@ gha_logs_here() {
         fi
     else
         # Existing .zip file
-        zip_path="$arg"
+        zip_paths=("$arg")
+    fi
+
+    if ((${#zip_paths[@]} == 1)); then
+        zip_path="${zip_paths[0]}"
+
         if [[ ! -f "$zip_path" ]]; then
             echo "Error: zip file not found: '$zip_path'" >&2
             return 1
         fi
+
+        if [[ "$zip_path" != *.zip ]]; then
+            echo "Error: expected a .zip file (got '$zip_path')." >&2
+            return 2
+        fi
+
+        local zip_abs base
+        if ! zip_abs=$(realpath "$zip_path"); then
+            echo "Error: could not resolve path '$zip_path'." >&2
+            return 1
+        fi
+
+        base=$(basename "$zip_path")
+        dir_name="${base%.zip}"
+
+        if [[ -e "$dir_name" ]]; then
+            echo "Error: target directory '$dir_name' already exists." >&2
+            return 1
+        fi
+
+        mkdir "$dir_name" || return 1
+        cd "$dir_name" || return 1
+
+        unpack_gha_logs.sh "$zip_abs"
+        return $?
     fi
 
-    if [[ "$zip_path" != *.zip ]]; then
-        echo "Error: expected a .zip file (got '$zip_path')." >&2
-        return 2
-    fi
+    local zip_abs base start_dir
+    start_dir="$(pwd)"
 
-    local zip_abs base
-    if ! zip_abs=$(realpath "$zip_path"); then
-        echo "Error: could not resolve path '$zip_path'." >&2
-        return 1
-    fi
+    for zip_path in "${zip_paths[@]}"; do
+        if [[ ! -f "$zip_path" ]]; then
+            echo "Error: zip file not found: '$zip_path'" >&2
+            return 1
+        fi
 
-    base=$(basename "$zip_path")
-    dir_name="${base%.zip}"
+        if [[ "$zip_path" != *.zip ]]; then
+            echo "Error: expected a .zip file (got '$zip_path')." >&2
+            return 2
+        fi
 
-    if [[ -e "$dir_name" ]]; then
-        echo "Error: target directory '$dir_name' already exists." >&2
-        return 1
-    fi
+        if ! zip_abs=$(realpath "$zip_path"); then
+            echo "Error: could not resolve path '$zip_path'." >&2
+            return 1
+        fi
 
-    mkdir "$dir_name" || return 1
-    cd "$dir_name" || return 1
+        base=$(basename "$zip_path")
+        dir_name="${base%.zip}"
 
-    unpack_gha_logs.sh "$zip_abs"
+        if [[ -e "$dir_name" ]]; then
+            echo "Error: target directory '$dir_name' already exists." >&2
+            return 1
+        fi
+
+        mkdir "$dir_name" || return 1
+        if ! (
+            cd "$dir_name" || exit 1
+            unpack_gha_logs.sh "$zip_abs"
+        ); then
+            return 1
+        fi
+        echo "Unpacked: $dir_name"
+    done
+
+    echo "Unpacked ${#zip_paths[@]} log directories in '$start_dir'."
 }
 
 gha_for_this_pr() {
