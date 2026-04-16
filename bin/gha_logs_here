@@ -110,6 +110,18 @@ unpack_zip_to_dir() {
     return 0
 }
 
+combine_attempt_dirs() {
+    local combined_dir="$1"
+    shift
+    local dir_name
+
+    mkdir "$combined_dir"
+
+    for dir_name in "$@"; do
+        cp -a "$dir_name"/. "$combined_dir"/
+    done
+}
+
 main() {
     local cd_target_file=""
 
@@ -149,6 +161,7 @@ main() {
 
     local arg="$1"
     local zip_path dir_name
+    local combined_dir=""
     local -a zip_paths=() dir_names=()
 
     if [[ "$arg" == http* ]]; then
@@ -177,6 +190,7 @@ main() {
             zip_paths=("logs_${run_id}.zip")
             dir_names=("logs_${run_id}")
         else
+            combined_dir="logs_${run_id}_combined"
             for ((attempt = 1; attempt <= latest_attempt; attempt++)); do
                 zip_paths+=("logs_${run_id}_attempt${attempt}.zip")
                 dir_names+=("logs_${run_id}_attempt${attempt}")
@@ -190,6 +204,12 @@ main() {
                 exit 1
             fi
         done
+
+        if [[ -n "$combined_dir" && -e "$combined_dir" ]]; then
+            echo "Error: target directory '$combined_dir' already exists in '$(pwd)'." >&2
+            echo "       Remove/rename it or use that directory directly." >&2
+            exit 1
+        fi
 
         for zip_path in "${zip_paths[@]}"; do
             if [[ -e "$zip_path" ]]; then
@@ -231,6 +251,11 @@ main() {
         unpack_zip_to_dir "$zip_path" "$dir_name"
         echo "Unpacked: $dir_name"
     done
+
+    if [[ -n "$combined_dir" ]]; then
+        combine_attempt_dirs "$combined_dir" "${dir_names[@]}"
+        echo "Combined: $combined_dir"
+    fi
 
     echo "Unpacked ${#zip_paths[@]} log directories in '$start_dir'."
 }
