@@ -1923,6 +1923,19 @@ if [ -d "$HOME/Downloads" ]; then
     alias D='cd "$D"'
 fi
 
+pobox() {
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: pobox <ssh-target>" >&2
+        return 1
+    fi
+    local host="$1"
+    if [[ -z "${D:-}" || ! -d "$D" ]]; then
+        echo "Error: \$D is not set or is not a directory" >&2
+        return 1
+    fi
+    rsync --archive --verbose "$host:~/obox/" "$D/${host}_obox/"
+}
+
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
 [ -f "$HOME/.bashrc_os" ] && . "$HOME/.bashrc_os"
 [ -f "$HOME/.bashrc_host" ] && . "$HOME/.bashrc_host"
