@@ -119,6 +119,11 @@ histsync() {
     builtin history -r
 }
 
+rebash() {
+    set -x
+    exec bash -l
+}
+
 hostfqdn() {
     if command -v python3 >/dev/null 2>&1; then
         python3 -c 'import socket; print(socket.getfqdn())'
