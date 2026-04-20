@@ -385,17 +385,21 @@ function set_cuda_env {
     $targetPath = $targetEntry.FullName
 
     # Set environment variables
-    $env:CUDA_HOME = $targetPath
-    $env:CUDA_PATH = $env:CUDA_HOME
+    $env:CUDA_PATH = $targetPath
+    $env:CUDA_HOME = $env:CUDA_PATH
 
     Write-Host "CUDA environment set:" -ForegroundColor Green
-    Write-Host "  CUDA_HOME = $env:CUDA_HOME"
     Write-Host "  CUDA_PATH = $env:CUDA_PATH"
+    Write-Host "  CUDA_HOME = $env:CUDA_HOME"
 }
 
 function set_all_must_work {
-    $env:CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS = "all_must_work"
-    Write-Host "  CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work"
+    $env:CUDA_PATHFINDER_TEST_FIND_NVIDIA_BITCODE_LIB_STRICTNESS = "all_must_work"
+    Write-Host "  CUDA_PATHFINDER_TEST_FIND_NVIDIA_BITCODE_LIB_STRICTNESS=all_must_work"
     $env:CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS = "all_must_work"
     Write-Host "  CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work"
+    $env:CUDA_PATHFINDER_TEST_FIND_NVIDIA_STATIC_LIB_STRICTNESS = "all_must_work"
+    Write-Host "  CUDA_PATHFINDER_TEST_FIND_NVIDIA_STATIC_LIB_STRICTNESS=all_must_work"
+    $env:CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS = "all_must_work"
+    Write-Host "  CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work"
 }

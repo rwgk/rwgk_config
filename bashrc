@@ -1787,8 +1787,14 @@ set_cuda_env() {
         return 1
     fi
     local ver="$1"
+    local cuda_path="/usr/local/cuda-$ver"
+    if [[ ! -d "$cuda_path" ]]; then
+        echo "Error: CUDA_PATH is not a directory: $cuda_path" >&2
+        return 1
+    fi
     set -x
-    export CUDA_HOME="/usr/local/cuda-$ver"
+    export CUDA_PATH="$cuda_path"
+    export CUDA_HOME="$CUDA_PATH"
     set +x
 }
 
@@ -1806,8 +1812,10 @@ set_cuda_env_bld() {
 
 set_all_must_work() {
     set -x
-    export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
+    export CUDA_PATHFINDER_TEST_FIND_NVIDIA_BITCODE_LIB_STRICTNESS=all_must_work
     export CUDA_PATHFINDER_TEST_FIND_NVIDIA_HEADERS_STRICTNESS=all_must_work
+    export CUDA_PATHFINDER_TEST_FIND_NVIDIA_STATIC_LIB_STRICTNESS=all_must_work
+    export CUDA_PATHFINDER_TEST_LOAD_NVIDIA_DYNAMIC_LIB_STRICTNESS=all_must_work
     set +x
 }
 
