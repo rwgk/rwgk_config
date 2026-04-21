@@ -1086,12 +1086,23 @@ git_log_grep() {
 
 git_remote_add() {
     if [ $# -ne 1 ]; then
-        echo "Usage: git_remote_add OWNER[:BRANCH]" >&2
+        echo "Usage: git_remote_add OWNER | OWNER[:BRANCH] | OWNER/REPO[:BRANCH]" >&2
         return 1
     fi
-    local owner="${1%%:*}"
+
+    local spec_no_branch="${1%%:*}"
+    local owner
     local repo
-    repo=$(basename -s .git "$(git rev-parse --show-toplevel 2>/dev/null)" || true)
+
+    if [[ "$spec_no_branch" == */* ]]; then
+        owner="${spec_no_branch%%/*}"
+        repo="${spec_no_branch#*/}"
+        repo="${repo%.git}"
+    else
+        owner="$spec_no_branch"
+        repo=$(basename -s .git "$(git rev-parse --show-toplevel 2>/dev/null)" || true)
+    fi
+
     if [ -z "$repo" ]; then
         echo "Error: not inside a git repository" >&2
         return 1
@@ -1105,28 +1116,79 @@ git_remote_add() {
     git remote add -f "$owner" "https://github.com/$owner/$repo"
 }
 
+_git_primary_github_repo() (
+    set -euo pipefail
+
+    local remote_url first_remote
+
+    if remote_url=$(git remote get-url upstream 2>/dev/null); then
+        :
+    elif remote_url=$(git remote get-url origin 2>/dev/null); then
+        :
+    else
+        first_remote=$(git remote | sed -n '1p')
+        if [[ -z "$first_remote" ]]; then
+            echo "Error: no git remotes found" >&2
+            return 1
+        fi
+        remote_url=$(git remote get-url "$first_remote" 2>/dev/null) || {
+            echo "Error: could not determine git remote URL for '$first_remote'" >&2
+            return 1
+        }
+    fi
+
+    if [[ "$remote_url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+        printf '%s/%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]%.git}"
+    else
+        echo "Error: could not parse GitHub owner/repo from remote URL: $remote_url" >&2
+        return 1
+    fi
+)
+
 git_swrp() (
     set -euo pipefail
 
     if [[ $# -ne 1 ]]; then
-        echo "Usage: git_swrp <remote:branch>" >&2
+        echo "Usage: git_swrp <remote:branch | remote/branch | PR-number>" >&2
         return 1
     fi
 
     local arg="$1"
+    local remote branch repo=
 
-    if [[ "$arg" == *:* ]]; then
-        local remote="${arg%%:*}"
-        local branch="${arg#*:}"
+    if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        if ! command -v gh >/dev/null 2>&1; then
+            echo "Error: 'gh' is required for PR-number lookup." >&2
+            return 127
+        fi
+
+        local gh_repo pr_head
+        gh_repo=$(_git_primary_github_repo) || return
+        pr_head=$(gh pr --repo "$gh_repo" view "$arg" \
+            --json headRefName,headRepository,headRepositoryOwner \
+            --jq '[.headRepositoryOwner.login, .headRepository.name, .headRefName] | @tsv') || return
+
+        IFS=$'\t' read -r remote repo branch <<<"$pr_head"
+        if [[ -z "$remote" || -z "$repo" || -z "$branch" || "$remote" == "null" || "$repo" == "null" || "$branch" == "null" ]]; then
+            echo "Error: could not determine remote/repo/branch from PR #$arg in '$gh_repo'" >&2
+            return 1
+        fi
+    elif [[ "$arg" == *:* ]]; then
+        remote="${arg%%:*}"
+        branch="${arg#*:}"
     elif [[ "$arg" == */* ]]; then
-        local remote="${arg%%/*}"
-        local branch="${arg#*/}"
+        remote="${arg%%/*}"
+        branch="${arg#*/}"
     else
-        echo "Error: argument must be in 'remote:branch' format" >&2
+        echo "Error: argument must be 'remote:branch', 'remote/branch', or a PR number" >&2
         return 1
     fi
 
-    git_remote_add "$arg"
+    if [[ -n "$repo" ]]; then
+        git_remote_add "$remote/$repo"
+    else
+        git_remote_add "$remote"
+    fi
 
     local new_branch="${remote}→${branch}"
 
