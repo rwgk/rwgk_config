@@ -1060,9 +1060,9 @@ _complete_local_git_branches() {
     local IFS=$'\n'
     # List local branches (same as completing for `git branch -D`)
     local branches
-    mapfile -t branches < <(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+    branches=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
 
-    COMPREPLY=($(compgen -W "${branches[*]}" -- "$cur"))
+    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
 }
 
 complete -o bashdefault -o default -F _complete_local_git_branches git_branch_D_track_hash
