@@ -855,6 +855,47 @@ giturl() {
     git config --get remote.origin.url
 }
 
+show_upstream_for_branch() {
+    local branches=()
+    local branch
+    local result
+    local status
+    local rc=0
+
+    if [[ $# -eq 0 ]]; then
+        branch=$(git branch --show-current 2>/dev/null)
+        if [[ -z "$branch" ]]; then
+            echo "show_upstream_for_branch: could not determine current branch" >&2
+            return 1
+        fi
+        branches=("$branch")
+    else
+        branches=("$@")
+    fi
+
+    for branch in "${branches[@]}"; do
+        if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+            printf "%s → show_upstream_for_branch: invalid branch name\n" "$branch"
+            rc=1
+            continue
+        fi
+        if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+            printf "%s → show_upstream_for_branch: local branch not found\n" "$branch"
+            rc=1
+            continue
+        fi
+
+        result=$(git rev-parse --abbrev-ref --symbolic-full-name "${branch}@{upstream}" 2>&1)
+        status=$?
+        printf "%s → %s\n" "$branch" "$result"
+        if [[ $status -ne 0 ]]; then
+            rc=1
+        fi
+    done
+
+    return "$rc"
+}
+
 gls() {
     local num_commits="${1:-10}"
     git log -n "$num_commits" --format="%H %<(100,trunc)%s"
@@ -1007,7 +1048,7 @@ git_branch_D_track_hash() {
     done
 }
 
-_git_branch_D_track_hash_COMPLETE() {
+_complete_local_git_branches() {
     # only complete if we're in a git repo
     git rev-parse --git-dir >/dev/null 2>&1 || {
         COMPREPLY=()
@@ -1024,7 +1065,9 @@ _git_branch_D_track_hash_COMPLETE() {
     COMPREPLY=($(compgen -W "${branches[*]}" -- "$cur"))
 }
 
-complete -o bashdefault -o default -F _git_branch_D_track_hash_COMPLETE git_branch_D_track_hash
+complete -o bashdefault -o default -F _complete_local_git_branches git_branch_D_track_hash
+complete -o bashdefault -o default -F _complete_local_git_branches show_upstream_for_branch
+complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch.sh
 
 git_log_between() {
     if [ "$#" -lt 2 ]; then
@@ -1260,19 +1303,6 @@ myt() (
 
     exec tee "$@"
 )
-
-# https://chatgpt.com/share/67e8331b-6700-8008-9a09-31c9f1611a84  2025-03-29
-# Bash completion for show_pr_for_branch.sh
-_show_pr_for_branch_completions() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-    # Get local branch names (excluding remotes)
-    local branches
-    branches=$(git for-each-ref --format='%(refname:short)' refs/heads/)
-
-    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
-}
-# Register completion function
-complete -F _show_pr_for_branch_completions show_pr_for_branch.sh
 
 gerpush() {
     git push origin HEAD:refs/for/master
