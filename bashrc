@@ -784,6 +784,31 @@ mlt() {
     fi
 }
 
+_check_writable_output_files() {
+    local caller="$1"
+    shift
+
+    local f parent_dir
+    for f in "$@"; do
+        if [[ -e "$f" ]]; then
+            [[ -w "$f" ]] || {
+                echo "${caller}: File exists but is not writable: $f" >&2
+                return 1
+            }
+        else
+            parent_dir=$(dirname -- "$f")
+            [[ -d "$parent_dir" ]] || {
+                echo "${caller}: Parent directory does not exist: $parent_dir" >&2
+                return 1
+            }
+            [[ -w "$parent_dir" ]] || {
+                echo "${caller}: Parent directory is not writable: $parent_dir" >&2
+                return 1
+            }
+        fi
+    done
+}
+
 alias mir='rsync --archive --delete --force --verbose --stats'
 
 alias svnup='svn update && svn status'
@@ -1269,8 +1294,9 @@ git_show_merge_commits() {
 }
 
 myt() (
-    files=()
-    dash_dash_seen=0
+    local files=()
+    local dash_dash_seen=0
+    local arg
 
     for arg in "$@"; do
         if [[ "$dash_dash_seen" -eq 0 && "$arg" == "--" ]]; then
@@ -1282,26 +1308,39 @@ myt() (
         fi
     done
 
-    for f in "${files[@]}"; do
-        if [[ -e "$f" ]]; then
-            [[ -w "$f" ]] || {
-                echo "myt: File exists but is not writable: $f" >&2
-                exit 1
-            }
-        else
-            parent_dir=$(dirname "$f")
-            [[ -d "$parent_dir" ]] || {
-                echo "myt: Parent directory does not exist: $parent_dir" >&2
-                exit 1
-            }
-            [[ -w "$parent_dir" ]] || {
-                echo "myt: Parent directory is not writable: $parent_dir" >&2
-                exit 1
-            }
-        fi
-    done
+    _check_writable_output_files myt "${files[@]}" || return 1
 
     exec tee "$@"
+)
+
+mytt() (
+    if [[ $# -lt 2 ]]; then
+        echo "Usage: mytt <logfile> <command> [args...]" >&2
+        return 1
+    fi
+
+    local log_file="$1"
+    local cmd_status tee_status
+    shift
+
+    _check_writable_output_files mytt "$log_file" || return 1
+
+    {
+        printf '# START @ %s\n' "$(mlt)"
+        time (
+            "$@"
+            rc=$?
+            printf '# EXIT status=%s @ %s\n' "$rc" "$(mlt)"
+            exit "$rc"
+        )
+    } 2>&1 | tee -- "$log_file"
+
+    cmd_status=${PIPESTATUS[0]}
+    tee_status=${PIPESTATUS[1]}
+    if [[ "$tee_status" -ne 0 ]]; then
+        return "$tee_status"
+    fi
+    return "$cmd_status"
 )
 
 gerpush() {
