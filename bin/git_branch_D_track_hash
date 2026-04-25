@@ -37,19 +37,41 @@ get_remote_branch_sha() {
     fi
 }
 
-get_pr_number_for_remote_branch() {
+query_pr_info_for_remote_branch() {
     local remote_branch="$1"
+    local pr_state_filter="${2:-all}"
+    local gh_output
 
     if ! command -v gh >/dev/null 2>&1; then
-        return 0
+        echo "Error: 'gh' is not installed or not on PATH." >&2
+        return 1
     fi
 
-    gh pr list \
+    if ! gh_output=$(gh pr list \
         --head "$remote_branch" \
-        --state all \
+        --state "$pr_state_filter" \
         --limit 1000 \
-        --json number \
-        --jq '.[0].number // empty' 2>/dev/null || true
+        --json number,state,url \
+        --jq '.[0] | if . then "\(.number)\t\(.state)\t\(.url)" else empty end' 2>&1); then
+        printf '%s\n' "$gh_output" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$gh_output"
+}
+
+print_pr_state_unknown_error() {
+    local remote="$1"
+    local remote_branch="$2"
+    local details="${3:-}"
+
+    echo "Error: cannot determine PR state for upstream branch '$remote/$remote_branch'." >&2
+    if [[ -n "$details" ]]; then
+        printf '%s\n' "$details" >&2
+    fi
+    echo "Renaming the remote branch would be unsafe until PR state is known." >&2
+    echo "Please close the PR first, then try again." >&2
+    echo "Or use the --local-only option." >&2
 }
 
 build_archive_remote_branch_name() {
@@ -65,10 +87,10 @@ build_archive_remote_branch_name() {
     fi
 }
 
-maybe_rename_remote_upstream_branch() {
+plan_remote_upstream_archive() {
     local branch="$1"
-    local upstream_info remote remote_branch remote_sha pr_number archive_branch archive_sha
-    local push_output
+    local upstream_info remote remote_branch remote_sha open_pr_info pr_info
+    local pr_number="" pr_state="" pr_url="" archive_branch archive_sha
 
     if ! upstream_info=$(get_remote_upstream_info "$branch"); then
         return 0
@@ -83,7 +105,24 @@ maybe_rename_remote_upstream_branch() {
         return 0
     fi
 
-    pr_number=$(get_pr_number_for_remote_branch "$remote_branch")
+    if ! open_pr_info=$(query_pr_info_for_remote_branch "$remote_branch" open 2>&1); then
+        print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
+        return 1
+    fi
+    if [[ -n "$open_pr_info" ]]; then
+        IFS=$'\t' read -r pr_number pr_state pr_url <<<"$open_pr_info"
+        printf "Error: upstream branch '%s/%s' still has open PR #%s:\n" "$remote" "$remote_branch" "$pr_number" >&2
+        printf "  %s\n" "$pr_url" >&2
+        echo "Renaming the remote branch would likely close the PR." >&2
+        echo "Please close the PR first, then try again." >&2
+        echo "Or use the --local-only option." >&2
+        return 1
+    fi
+
+    if pr_info=$(query_pr_info_for_remote_branch "$remote_branch" all 2>/dev/null) && [[ -n "$pr_info" ]]; then
+        IFS=$'\t' read -r pr_number pr_state pr_url <<<"$pr_info"
+    fi
+
     archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
 
     if ! archive_sha=$(get_remote_branch_sha "$remote" "$archive_branch"); then
@@ -93,6 +132,16 @@ maybe_rename_remote_upstream_branch() {
         echo "Error: archive branch already exists on remote: '$remote/$archive_branch'." >&2
         return 1
     fi
+
+    printf '%s\t%s\t%s\t%s\n' "$remote" "$remote_branch" "$remote_sha" "$archive_branch"
+}
+
+rename_remote_upstream_branch() {
+    local remote="$1"
+    local remote_branch="$2"
+    local remote_sha="$3"
+    local archive_branch="$4"
+    local push_output
 
     if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
         echo "Error: failed to rename upstream branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
@@ -114,6 +163,7 @@ archive_branch_tip_and_delete() (
     local local_only="$1"
     local branch="$2"
     local current_branch commit repo timestamp safe_repo safe_branch infofile
+    local remote_archive_plan remote remote_branch remote_sha archive_branch
 
     if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
         echo "Error: Neither MY_GIT_BACKTRACKING_INFO_LOCAL nor MY_GIT_BACKTRACKING_INFO_REMOTE is set." >&2
@@ -129,6 +179,10 @@ archive_branch_tip_and_delete() (
     if [[ "$branch" == "$current_branch" ]]; then
         echo "Error: '$branch' is the current branch. Switch to another branch first." >&2
         return 1
+    fi
+
+    if [[ "$local_only" -eq 0 ]]; then
+        remote_archive_plan=$(plan_remote_upstream_archive "$branch") || return
     fi
 
     commit=$(git rev-parse "$branch")
@@ -155,8 +209,9 @@ archive_branch_tip_and_delete() (
         echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
     fi
 
-    if [[ "$local_only" -eq 0 ]]; then
-        maybe_rename_remote_upstream_branch "$branch" || return
+    if [[ -n "${remote_archive_plan:-}" ]]; then
+        IFS=$'\t' read -r remote remote_branch remote_sha archive_branch <<<"$remote_archive_plan"
+        rename_remote_upstream_branch "$remote" "$remote_branch" "$remote_sha" "$archive_branch" || return
     fi
 
     git branch -D "$branch"
