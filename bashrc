@@ -1013,7 +1013,7 @@ _complete_local_git_branches() {
 
 complete -o bashdefault -o default -F _complete_local_git_branches git_branch_D_track_hash
 complete -o bashdefault -o default -F _complete_local_git_branches show_upstream_for_branch
-complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch.sh
+complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch
 
 git_log_between() {
     if [ "$#" -lt 2 ]; then

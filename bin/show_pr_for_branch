@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# https://chatgpt.com/share/67e8331b-6700-8008-9a09-31c9f1611a84  2025-03-29
-
 set -euo pipefail
 
 # Get the remote branch name for PR lookup
@@ -11,7 +9,7 @@ get_pr_branch_name() {
     local branch="$1"
     local upstream
 
-    # Try to get upstream tracking branch (e.g., "b-pass/pytype-leaked-in-finalize")
+    # Try to get upstream tracking branch
     upstream=$(git rev-parse --abbrev-ref "$branch@{u}" 2>/dev/null) || true
 
     if [[ -n "$upstream" ]]; then
@@ -23,7 +21,7 @@ get_pr_branch_name() {
 }
 
 # Show PR URL for a branch name in the current repo context
-show_pr_for_branch() {
+show_pr_for_one_branch() {
     local branch="$1"
     local pr_branch
     pr_branch=$(get_pr_branch_name "$branch")
@@ -47,9 +45,9 @@ show_pr_for_branch() {
 
 # Entry point
 if [[ $# -eq 0 ]]; then
-    show_pr_for_branch "$(git branch --show-current)"
+    show_pr_for_one_branch "$(git branch --show-current)"
 else
     for branch in "$@"; do
-        show_pr_for_branch "$branch"
+        show_pr_for_one_branch "$branch"
     done
 fi
