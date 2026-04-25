@@ -152,6 +152,64 @@ rename_remote_upstream_branch() {
     printf 'INFO: upstream branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
 }
 
+print_backup_failure_error() {
+    local branch="$1"
+    local destination="$2"
+    local details="${3:-}"
+    local remote_rename_done="$4"
+
+    printf "Error: failed to back up branch tip for '%s' to '%s'.\n" "$branch" "$destination" >&2
+    if [[ -n "$details" ]]; then
+        printf '%s\n' "$details" >&2
+    fi
+    if [[ "$remote_rename_done" -eq 1 ]]; then
+        echo "The upstream archive rename already succeeded, but the local branch has not been deleted." >&2
+        echo "Please resolve the backup problem and rerun the command; rerunning is safe." >&2
+    else
+        echo "The local branch has not been deleted." >&2
+        echo "Please resolve the backup problem and try again." >&2
+    fi
+}
+
+back_up_branch_tip() {
+    local branch="$1"
+    local commit="$2"
+    local remote_rename_done="$3"
+    local repo timestamp safe_repo safe_branch infofile backup_output
+
+    repo=$(basename "$(git rev-parse --show-toplevel)")
+    timestamp=$(date +%Y-%m-%d+%H%M%S)
+    safe_repo="${repo//[^A-Za-z0-9._@-]/_}"
+    safe_branch="${branch//[^A-Za-z0-9._@-]/_}"
+    infofile="/tmp/${safe_repo}_${safe_branch}_${timestamp}.txt"
+
+    if ! backup_output=$({
+        echo "Current host: '$(hostfqdn)'"
+        echo "Current working directory: '$(pwd)'"
+        echo "Repository: '$repo'"
+        echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
+        echo
+        git show --stat --summary "$commit"
+    } 2>&1 >"$infofile"); then
+        print_backup_failure_error "$branch" "$infofile" "$backup_output" "$remote_rename_done"
+        return 1
+    fi
+
+    if [[ -n "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" ]]; then
+        if ! backup_output=$(cp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_LOCAL/" 2>&1); then
+            print_backup_failure_error "$branch" "$MY_GIT_BACKTRACKING_INFO_LOCAL/" "$backup_output" "$remote_rename_done"
+            return 1
+        fi
+        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_LOCAL/$(basename "$infofile")'"
+    elif [[ -n "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
+        if ! backup_output=$(scp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_REMOTE" 2>&1); then
+            print_backup_failure_error "$branch" "$MY_GIT_BACKTRACKING_INFO_REMOTE" "$backup_output" "$remote_rename_done"
+            return 1
+        fi
+        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
+    fi
+}
+
 archive_branch_tip_and_delete() (
     set -euo pipefail
 
@@ -162,7 +220,8 @@ archive_branch_tip_and_delete() (
 
     local local_only="$1"
     local branch="$2"
-    local current_branch commit repo timestamp safe_repo safe_branch infofile
+    local current_branch commit
+    local remote_rename_done=0
     local remote_archive_plan remote remote_branch remote_sha archive_branch
 
     if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
@@ -186,33 +245,14 @@ archive_branch_tip_and_delete() (
     fi
 
     commit=$(git rev-parse "$branch")
-    repo=$(basename "$(git rev-parse --show-toplevel)")
-    timestamp=$(date +%Y-%m-%d+%H%M%S)
-    safe_repo="${repo//[^A-Za-z0-9._@-]/_}"
-    safe_branch="${branch//[^A-Za-z0-9._@-]/_}"
-    infofile="/tmp/${safe_repo}_${safe_branch}_${timestamp}.txt"
-
-    {
-        echo "Current host: '$(hostfqdn)'"
-        echo "Current working directory: '$(pwd)'"
-        echo "Repository: '$repo'"
-        echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
-        echo
-        git show --stat --summary "$commit"
-    } >"$infofile"
-
-    if [[ -n "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" ]]; then
-        cp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_LOCAL/"
-        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_LOCAL/$(basename "$infofile")'"
-    elif [[ -n "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
-        scp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_REMOTE"
-        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
-    fi
 
     if [[ -n "${remote_archive_plan:-}" ]]; then
         IFS=$'\t' read -r remote remote_branch remote_sha archive_branch <<<"$remote_archive_plan"
         rename_remote_upstream_branch "$remote" "$remote_branch" "$remote_sha" "$archive_branch" || return
+        remote_rename_done=1
     fi
+
+    back_up_branch_tip "$branch" "$commit" "$remote_rename_done" || return
 
     git branch -D "$branch"
 )
