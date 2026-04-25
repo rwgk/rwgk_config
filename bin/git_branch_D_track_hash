@@ -2,18 +2,117 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $(basename "$0") <branch> [<branch> ...]" >&2
+    echo "Usage: $(basename "$0") [--local-only] <branch> [<branch> ...]" >&2
+}
+
+get_remote_upstream_info() {
+    local branch="$1"
+    local remote remote_ref
+
+    remote=$(git for-each-ref --format='%(upstream:remotename)' "refs/heads/$branch")
+    remote_ref=$(git for-each-ref --format='%(upstream:remoteref)' "refs/heads/$branch")
+
+    if [[ -z "$remote" ]] || [[ -z "$remote_ref" ]] || [[ "$remote" == "." ]]; then
+        return 1
+    fi
+    if [[ "$remote_ref" != refs/heads/* ]]; then
+        return 1
+    fi
+
+    printf '%s\t%s\n' "$remote" "${remote_ref#refs/heads/}"
+}
+
+get_remote_branch_sha() {
+    local remote="$1"
+    local remote_branch="$2"
+    local ls_remote_output
+
+    if ! ls_remote_output=$(git ls-remote --heads "$remote" "refs/heads/$remote_branch"); then
+        echo "Error: failed to query remote branch '$remote/$remote_branch'." >&2
+        return 1
+    fi
+
+    if [[ -n "$ls_remote_output" ]]; then
+        printf '%s\n' "${ls_remote_output%%$'\t'*}"
+    fi
+}
+
+get_pr_number_for_remote_branch() {
+    local remote_branch="$1"
+
+    if ! command -v gh >/dev/null 2>&1; then
+        return 0
+    fi
+
+    gh pr list \
+        --head "$remote_branch" \
+        --state all \
+        --limit 1000 \
+        --json number \
+        --jq '.[0].number // empty' 2>/dev/null || true
+}
+
+build_archive_remote_branch_name() {
+    local remote_branch="$1"
+    local pr_number="$2"
+    local timestamp
+
+    timestamp=$(mlt)
+    if [[ -n "$pr_number" ]]; then
+        printf 'archive/%s_pr%s_%s\n' "$timestamp" "$pr_number" "$remote_branch"
+    else
+        printf 'archive/%s_%s\n' "$timestamp" "$remote_branch"
+    fi
+}
+
+maybe_rename_remote_upstream_branch() {
+    local branch="$1"
+    local upstream_info remote remote_branch remote_sha pr_number archive_branch archive_sha
+    local push_output
+
+    if ! upstream_info=$(get_remote_upstream_info "$branch"); then
+        return 0
+    fi
+
+    IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
+
+    if ! remote_sha=$(get_remote_branch_sha "$remote" "$remote_branch"); then
+        return 1
+    fi
+    if [[ -z "$remote_sha" ]]; then
+        return 0
+    fi
+
+    pr_number=$(get_pr_number_for_remote_branch "$remote_branch")
+    archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
+
+    if ! archive_sha=$(get_remote_branch_sha "$remote" "$archive_branch"); then
+        return 1
+    fi
+    if [[ -n "$archive_sha" ]]; then
+        echo "Error: archive branch already exists on remote: '$remote/$archive_branch'." >&2
+        return 1
+    fi
+
+    if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
+        echo "Error: failed to rename upstream branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
+        printf '%s\n' "$push_output" >&2
+        return 1
+    fi
+
+    printf 'INFO: upstream branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
 }
 
 archive_branch_tip_and_delete() (
     set -euo pipefail
 
-    if [[ $# -ne 1 ]]; then
-        echo "ASSERTION FAILURE: archive_branch_tip_and_delete requires exactly 1 argument (got $#)" >&2
+    if [[ $# -ne 2 ]]; then
+        echo "ASSERTION FAILURE: archive_branch_tip_and_delete requires exactly 2 arguments (got $#)" >&2
         return 1
     fi
 
-    local branch="$1"
+    local local_only="$1"
+    local branch="$2"
     local current_branch commit repo timestamp safe_repo safe_branch infofile
 
     if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
@@ -21,7 +120,7 @@ archive_branch_tip_and_delete() (
         return 1
     fi
 
-    if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
+    if ! git show-ref --verify --quiet "refs/heads/$branch"; then
         echo "Error: branch '$branch' not found." >&2
         return 1
     fi
@@ -56,19 +155,56 @@ archive_branch_tip_and_delete() (
         echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
     fi
 
+    if [[ "$local_only" -eq 0 ]]; then
+        maybe_rename_remote_upstream_branch "$branch" || return
+    fi
+
     git branch -D "$branch"
 )
 
 main() {
-    local branch
+    local local_only=0
+    local arg
+    local -a branches=()
 
     if [[ $# -eq 0 ]]; then
         usage
         exit 1
     fi
 
-    for branch in "$@"; do
-        archive_branch_tip_and_delete "$branch"
+    while [[ $# -gt 0 ]]; do
+        arg="$1"
+        shift
+        case "$arg" in
+        --local-only)
+            local_only=1
+            ;;
+        --help | -h)
+            usage
+            exit 0
+            ;;
+        --)
+            branches+=("$@")
+            break
+            ;;
+        -*)
+            echo "Error: unknown option '$arg'." >&2
+            usage
+            exit 1
+            ;;
+        *)
+            branches+=("$arg")
+            ;;
+        esac
+    done
+
+    if [[ ${#branches[@]} -eq 0 ]]; then
+        usage
+        exit 1
+    fi
+
+    for arg in "${branches[@]}"; do
+        archive_branch_tip_and_delete "$local_only" "$arg"
     done
 }
 
