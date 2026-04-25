@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ $# -ne 0 ]]; then
+    echo "Usage: $(basename "$0")" >&2
+    exit 1
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import socket; print(socket.getfqdn())'
+else
+    hostname -f
+fi

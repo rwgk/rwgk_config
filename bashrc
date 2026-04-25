@@ -124,14 +124,6 @@ rebash() {
     exec bash -l
 }
 
-hostfqdn() {
-    if command -v python3 >/dev/null 2>&1; then
-        python3 -c 'import socket; print(socket.getfqdn())'
-    else
-        hostname -f
-    fi
-}
-
 export FIGNORE=".o:.so:.a:.pyc"
 
 export COPY_EXTENDED_ATTRIBUTES_DISABLE=true # Mac OS 10.4 or older
