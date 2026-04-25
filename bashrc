@@ -762,20 +762,6 @@ alias todate='date "+%Y-%m-%d"'
 alias now='date "+%Y-%m-%d+%H%M%S"'
 alias nowish='date "+%Y-%m-%d+%H%M"'
 
-# Helper function to create log file timestamp ("make log timestamp")
-# Uses timezone offset if not in Los Angeles timezone to reduce the potential for confusion
-mlt() {
-    local TZ_ABBR
-    TZ_ABBR="$(date +%Z 2>/dev/null || echo "")"
-
-    # Check if we're in Los Angeles timezone (PST/PDT)
-    if [[ "$TZ_ABBR" == "PST" ]] || [[ "$TZ_ABBR" == "PDT" ]]; then
-        date "+%Y-%m-%d+%H%M%S"
-    else
-        date "+%Y-%m-%d+%H%M%S%z"
-    fi
-}
-
 _check_writable_output_files() {
     local caller="$1"
     shift
