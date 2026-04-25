@@ -1005,72 +1005,15 @@ if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push
     )
 fi
 
-_git_branch_D_track_hash_helper() (
-    set -euo pipefail
-
-    if [[ $# -ne 1 ]]; then
-        echo "ASSERTION FAILURE: _git_branch_D_track_hash_helper requires exactly 1 argument (got $#)" >&2
-        return 1
-    fi
-
-    branch="$1"
-
-    # Fail early if neither environment variable is set
-    if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
-        echo "Error: Neither MY_GIT_BACKTRACKING_INFO_LOCAL nor MY_GIT_BACKTRACKING_INFO_REMOTE is set." >&2
-        return 1
-    fi
-
-    # Ensure the branch exists
-    if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
-        echo "Error: branch '$branch' not found." >&2
-        return 1
-    fi
-
-    # Refuse to delete the currently checked-out branch
-    current_branch=$(git symbolic-ref --short HEAD 2>/dev/null) || true
-    if [[ "$branch" == "$current_branch" ]]; then
-        echo "Error: '$branch' is the current branch. Switch to another branch first." >&2
-        return 1
-    fi
-
-    commit=$(git rev-parse "$branch")
-    repo=$(basename "$(git rev-parse --show-toplevel)")
-    timestamp=$(date +%Y-%m-%d+%H%M%S)
-    safe_repo="${repo//[^A-Za-z0-9._@-]/_}"
-    safe_branch="${branch//[^A-Za-z0-9._@-]/_}"
-    infofile="/tmp/${safe_repo}_${safe_branch}_${timestamp}.txt"
-
-    {
-        echo "Current host: '$(hostfqdn)'"
-        echo "Current working directory: '$(pwd)'"
-        echo "Repository: '$repo'"
-        echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
-        echo
-        git show --stat --summary "$commit"
-    } >"$infofile"
-
-    # Copy to local destination if MY_GIT_BACKTRACKING_INFO_LOCAL is set
-    if [[ -n "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" ]]; then
-        cp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_LOCAL/"
-        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_LOCAL/$(basename "$infofile")'"
-    # Otherwise, scp to remote destination if MY_GIT_BACKTRACKING_INFO_REMOTE is set
-    elif [[ -n "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
-        scp -p "$infofile" "$MY_GIT_BACKTRACKING_INFO_REMOTE"
-        echo "Backed up branch tip to: '$MY_GIT_BACKTRACKING_INFO_REMOTE'"
-    fi
-
-    git branch -D "$branch"
-)
-
 git_branch_D_track_hash() {
-    if [[ $# -eq 0 ]]; then
-        echo "Usage: git_branch_D_track_hash <branch> [<branch> ...]" >&2
+    local script="$HOME/rwgk_config/bin/git_branch_D_track_hash"
+
+    if [[ ! -x "$script" ]]; then
+        echo "Error: helper script not found: '$script'" >&2
         return 1
     fi
-    for branch in "$@"; do
-        _git_branch_D_track_hash_helper "$branch" || return
-    done
+
+    "$script" "$@"
 }
 
 _complete_local_git_branches() {
