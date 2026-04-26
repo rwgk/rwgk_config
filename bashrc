@@ -2009,7 +2009,7 @@ pobox() {
         echo "Error: \$D is not set or is not a directory" >&2
         return 1
     fi
-    rsync --archive --verbose "$host:~/obox/" "$D/${host}_obox/"
+    rsync --archive --verbose "$host:~/obox/" "$D/"
 }
 
 [ -f "$HOME/.bashrc_org" ] && . "$HOME/.bashrc_org"
