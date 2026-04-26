@@ -1850,7 +1850,7 @@ if command -v wslpath >/dev/null 2>&1; then
                 echo "Usage: wprc (no arguments allowed)" >&2
                 return 1
             fi
-            gitbash -l -i -c prc
+            "/mnt/c/Program Files/Git/bin/bash.exe" -l -i -c prc
         }
     fi
 fi
