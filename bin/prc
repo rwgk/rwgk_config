@@ -1,0 +1,73 @@
+#!/bin/bash
+
+set -euo pipefail
+
+main() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: $(basename "$0") (no arguments allowed)" >&2
+        exit 1
+    fi
+
+    local repo_list="${RWGK_CONFIG_REPOS:-rwgk_config}"
+    local IFS=:
+    local repos=()
+    read -r -a repos <<<"$repo_list"
+
+    for cfg in "${repos[@]}"; do
+        [[ -z "$cfg" ]] && continue
+        echo "$cfg"
+        cd "$HOME/$cfg" || {
+            echo "  (cannot cd)"
+            continue
+        }
+
+        git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+            echo "  (not a git repository)"
+            continue
+        }
+
+        git fetch --prune --quiet || echo "  (fetch failed)"
+
+        local branch upstream ahead=0 behind=0
+        branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo HEAD)
+        if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+            upstream='@{u}'
+            ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
+            behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0)
+        else
+            upstream=""
+        fi
+
+        local dirty=0
+        [[ -n "$(git status --porcelain)" ]] && dirty=1
+
+        if [[ -z "$upstream" ]]; then
+            echo "  (no upstream for $branch)"
+            command gov
+            continue
+        fi
+
+        if ((behind > 0)); then
+            if ((dirty)); then
+                echo "  - behind by $behind but worktree not clean - skipping pull"
+                command gov
+                continue
+            fi
+            command gov
+            if git pull --ff-only; then
+                command gov
+            else
+                echo "  (pull failed)"
+            fi
+            continue
+        fi
+
+        if ((ahead > 0 || dirty)); then
+            command gov
+        else
+            echo "  in sync with $(git rev-parse --abbrev-ref "$upstream")"
+        fi
+    done
+}
+
+main "$@"

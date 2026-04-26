@@ -1,0 +1,111 @@
+#!/bin/bash
+
+set -euo pipefail
+
+_gov_print_list() {
+    local header="$1"
+    local list="$2"
+    local count="$3"
+    local max="$4"
+    local shown=0
+
+    [[ $count -eq 0 ]] && return 0
+
+    echo "$header:"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        printf "  - %s\n" "$line"
+        ((shown += 1))
+        if ((shown >= max)); then
+            break
+        fi
+    done <<<"$list"
+
+    if ((count > max)); then
+        printf "  … (%d more)\n" "$((count - max))"
+    fi
+}
+
+# git overview (fetch first; show how the repo is out of sync or WIP)
+# Optional: limit per-category file listing (default 5)
+max="${GOV_MAX:-5}"
+
+# Must be in a git work tree
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "(not a git repository)"
+    exit 1
+}
+
+# Update tracking info
+git fetch --prune --quiet || echo "(fetch failed)"
+
+# Branch & upstream
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo HEAD)
+if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+    upstream='@{u}'
+    ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
+    behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0)
+else
+    upstream="(no upstream)"
+    ahead=0
+    behind=0
+fi
+
+# Porcelain scan
+staged=0
+unstaged=0
+untracked=0
+conflicted=0
+list_staged=""
+list_unstaged=""
+list_untracked=""
+list_conflicted=""
+
+# Read git status --porcelain (v1)
+while IFS= read -r line; do
+    # Lines look like "XY filename" (or "?? filename" for untracked)
+    # X: index status; Y: worktree status
+    x="${line:0:1}"
+    y="${line:1:1}"
+    file="${line:3}"
+    if [[ "$x$y" == "??" ]]; then
+        ((untracked += 1))
+        list_untracked+="$file"$'\n'
+    elif [[ "$x" == "U" || "$y" == "U" || ("$x" == "A" && "$y" == "A") || ("$x" == "D" && "$y" == "D") ]]; then
+        ((conflicted += 1))
+        list_conflicted+="$file"$'\n'
+    else
+        if [[ "$x" != " " ]]; then
+            ((staged += 1))
+            list_staged+="$file"$'\n'
+        fi
+        if [[ "$y" != " " ]]; then
+            ((unstaged += 1))
+            list_unstaged+="$file"$'\n'
+        fi
+    fi
+done < <(git status --porcelain)
+
+# Stash count (0 if none)
+stash=0
+if git rev-parse --quiet --verify refs/stash >/dev/null 2>&1; then
+    stash=$(git rev-list --count refs/stash 2>/dev/null || echo 0)
+fi
+
+# Summary line
+printf "%s " "$branch"
+if [[ "$upstream" == "(no upstream)" ]]; then
+    printf "[no upstream]"
+else
+    [[ $ahead -gt 0 ]] && printf "↑%d " "$ahead"
+    [[ $behind -gt 0 ]] && printf "↓%d " "$behind"
+    [[ $ahead -eq 0 && $behind -eq 0 ]] && printf "✓ "
+    printf "(vs %s)" "$(git rev-parse --abbrev-ref "$upstream")"
+fi
+printf " | staged:%d unstaged:%d untracked:%d conflicted:%d stash:%d\n" \
+    "$staged" "$unstaged" "$untracked" "$conflicted" "$stash"
+
+_gov_print_list "  Staged" "$list_staged" "$staged" "$max"
+_gov_print_list "  Unstaged" "$list_unstaged" "$unstaged" "$max"
+_gov_print_list "  Untracked" "$list_untracked" "$untracked" "$max"
+_gov_print_list "  Conflicted" "$list_conflicted" "$conflicted" "$max"
