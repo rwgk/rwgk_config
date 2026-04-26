@@ -460,7 +460,7 @@ cmdx() {
     "$@"
 }
 
-RWGK_CONFIG_REPOS=rwgk_config
+export RWGK_CONFIG_REPOS=rwgk_config
 # Extend like this:
 # RWGK_CONFIG_REPOS="$RWGK_CONFIG_REPOS:something_else"
 
@@ -1828,6 +1828,10 @@ export NUMBA_CAPTURED_ERRORS="new_style"
 if command -v wslpath >/dev/null 2>&1; then
     if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
         . "$HOME/rwgk_config/bash_wsl_tools"
+    fi
+    if [ -x "/mnt/c/Program Files/Git/bin/bash.exe" ]; then
+        alias gitbash='"/mnt/c/Program Files/Git/bin/bash.exe" -l -i'
+        alias wprc='"/mnt/c/Program Files/Git/bin/bash.exe" -l -i -c prc'
     fi
 fi
 
