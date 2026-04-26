@@ -464,6 +464,19 @@ export RWGK_CONFIG_REPOS=rwgk_config
 # Extend like this:
 # RWGK_CONFIG_REPOS="$RWGK_CONFIG_REPOS:something_else"
 
+function bash_startup_smoke_check {
+    printf '%s\n' "bash -l -i startup smoke check succeeded"
+}
+
+function prc {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: prc (no arguments allowed)" >&2
+        return 1
+    fi
+    "$HOME/rwgk_config/bin/pull_rwgk_config" || return
+    bash -l -i -c bash_startup_smoke_check
+}
+
 grr() {
     # -I ignores binary files
     grep -I --exclude \*.class --exclude \*.pyc --exclude-dir __pycache__ --exclude-dir .git --exclude-dir .svn --exclude-dir .mypy_cache --exclude-dir .pytest_cache --exclude-dir \*.egg-info -r "$@"
@@ -1831,7 +1844,14 @@ if command -v wslpath >/dev/null 2>&1; then
     fi
     if [ -x "/mnt/c/Program Files/Git/bin/bash.exe" ]; then
         alias gitbash='"/mnt/c/Program Files/Git/bin/bash.exe" -l -i'
-        alias wprc='"/mnt/c/Program Files/Git/bin/bash.exe" -l -i -c prc'
+
+        function wprc {
+            if [[ $# -ne 0 ]]; then
+                echo "Usage: wprc (no arguments allowed)" >&2
+                return 1
+            fi
+            gitbash -l -i -c prc
+        }
     fi
 fi
 
