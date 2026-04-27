@@ -666,7 +666,7 @@ apt_gh_setup() {
         echo "GitHub CLI repository already configured, skipping setup steps."
     else
         # Remove existing gh package if present
-        sudo apt remove gh
+        sudo apt remove -y gh
 
         # Download and install keyring
         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of="$keyring_file"
@@ -678,7 +678,52 @@ apt_gh_setup() {
 
     # Always update and install
     sudo apt update
-    sudo apt install gh
+    sudo apt install -y gh
+}
+
+apt_pwsh_setup() {
+    local repo_package="packages-microsoft-prod"
+    local sources_file="/etc/apt/sources.list.d/microsoft-prod.list"
+    local version_id repo_deb
+
+    if [[ ! -r /etc/os-release ]]; then
+        echo "Ubuntu release metadata not found: /etc/os-release" >&2
+        return 1
+    fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+
+    version_id="${VERSION_ID:-}"
+    if [[ "${ID:-}" != "ubuntu" || -z "$version_id" ]]; then
+        echo "apt_pwsh_setup currently supports Ubuntu only." >&2
+        return 1
+    fi
+
+    # Check if setup is already done
+    if dpkg-query -W -f='${Status}' "$repo_package" 2>/dev/null | grep -qx 'install ok installed' &&
+        [[ -f "$sources_file" ]]; then
+        echo "Microsoft repository already configured, skipping setup steps."
+    else
+        sudo apt update || return
+        sudo apt install -y wget apt-transport-https software-properties-common || return
+
+        repo_deb=$(mktemp /tmp/packages-microsoft-prod.XXXXXX.deb) || return
+        wget -q "https://packages.microsoft.com/config/ubuntu/${version_id}/packages-microsoft-prod.deb" -O "$repo_deb" || {
+            rm -f "$repo_deb"
+            echo "apt_pwsh_setup: failed to download Microsoft repository package." >&2
+            return 1
+        }
+        sudo dpkg -i "$repo_deb" || {
+            rm -f "$repo_deb"
+            return 1
+        }
+        rm -f "$repo_deb"
+    fi
+
+    # Always update and install
+    sudo apt update
+    sudo apt install -y powershell
 }
 
 if [ -f "$HOME/rwgk_config/git_stuff/git-completion.bash" ]; then
