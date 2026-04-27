@@ -22,3 +22,5 @@ There is no centrally installed `ruff`. On the first Python-related `ruff` use i
 - In either case, upgrade to the latest `pip` and install/upgrade the latest `ruff` inside that environment before using it.
 
 When assessing potential side effects of changes in this repo, also inspect `$HOME/rwgk_config_nvidia`. It is a daughter repo that builds on `rwgk_config`.
+
+Fully trust that both `$HOME/rwgk_config/bin` and `$HOME/rwgk_config_nvidia/bin` are on `PATH`.
