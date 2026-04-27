@@ -1715,6 +1715,15 @@ nvmhere() {
     nvm use
 }
 
+conda_up() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: conda_up (no arguments allowed)" >&2
+        return 1
+    fi
+    echo "+conda update -y -n base -c conda-forge conda"
+    conda update -y -n base -c conda-forge conda
+}
+
 conda_rm() {
     conda remove -y --all -n "$@"
     echo "Done: conda remove -y --all -n" "$@"
@@ -1884,8 +1893,8 @@ cpython_install() {
 export NUMBA_CAPTURED_ERRORS="new_style"
 
 if command -v wslpath >/dev/null 2>&1; then
-    if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
-        . "$HOME/rwgk_config/bash_wsl_tools"
+    if [ -x "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
+        alias winpwsh='"/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" -NoLogo'
     fi
     if [ -x "/mnt/c/Program Files/Git/bin/bash.exe" ]; then
         alias gitbash='"/mnt/c/Program Files/Git/bin/bash.exe" -l -i'
@@ -1897,6 +1906,9 @@ if command -v wslpath >/dev/null 2>&1; then
             fi
             "/mnt/c/Program Files/Git/bin/bash.exe" -l -i -c prc
         }
+    fi
+    if [ -f "$HOME/rwgk_config/bash_wsl_tools" ]; then
+        . "$HOME/rwgk_config/bash_wsl_tools"
     fi
 fi
 
