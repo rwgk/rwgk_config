@@ -1,5 +1,8 @@
 Host *
-  # Keep idle SSH sessions alive.
+  # Keep idle SSH sessions alive, but tolerate short VPN/network stalls.
   ServerAliveInterval 60
-  ServerAliveCountMax 3
-  TCPKeepAlive yes
+  ServerAliveCountMax 10
+  # Prefer SSH-level keepalives above. TCP keepalives are lower-level OS probes;
+  # if the VPN/route blips briefly, they can make the kernel kill an otherwise
+  # recoverable SSH session.
+  TCPKeepAlive no
