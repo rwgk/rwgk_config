@@ -17,6 +17,7 @@ Outputs are written to the current working directory:
     <prefix>_graphviz.gv
     <prefix>_connected_components.txt
     <prefix>_graphviz.pdf
+    <prefix>_graphviz.svg
 EOF
 }
 
@@ -238,6 +239,7 @@ main() {
     local graphviz_output="${prefix}_graphviz.gv"
     local components_output="${prefix}_connected_components.txt"
     local pdf_output="${prefix}_graphviz.pdf"
+    local svg_output="${prefix}_graphviz.svg"
 
     printf 'Input root: %s\n' "$input_root"
     printf 'Search mode: %s\n' "$search_mode"
@@ -284,9 +286,16 @@ main() {
             echo "Graphviz packing pipeline failed; falling back to dot -Tpdf." >&2
             dot -Tpdf "$graphviz_output" >"$pdf_output"
         fi
+        printf 'Writing %s\n' "$svg_output"
+        if ! write_packed_graphviz_output "$graphviz_output" "$svg_output" svg SVG; then
+            echo "Graphviz packing pipeline failed; falling back to dot -Tsvg." >&2
+            dot -Tsvg "$graphviz_output" >"$svg_output"
+        fi
     else
-        echo "ccomps/gvpack/neato not all available; falling back to dot -Tpdf." >&2
+        echo "ccomps/gvpack/neato not all available; falling back to dot outputs." >&2
         dot -Tpdf "$graphviz_output" >"$pdf_output"
+        printf 'Writing %s\n' "$svg_output"
+        dot -Tsvg "$graphviz_output" >"$svg_output"
     fi
 
     if command -v exiftool >/dev/null 2>&1; then
