@@ -15,6 +15,7 @@ Options:
 Outputs are written to the current working directory:
     <prefix>_find_ldd_output.txt
     <prefix>_graphviz.gv
+    <prefix>_connected_components.txt
     <prefix>_graphviz.pdf
 EOF
 }
@@ -60,6 +61,73 @@ write_packed_graphviz_output() {
     fi
 
     rm -f "$packed_output"
+    return 1
+}
+
+write_connected_components_text() {
+    local graphviz_output="$1"
+    local components_output="$2"
+    local components_output_tmp="${components_output}.tmp"
+    local components_status
+
+    rm -f "$components_output_tmp"
+    set +e
+    ccomps -x "$graphviz_output" |
+        awk '
+function flush_component(    i) {
+    if (component == 0) {
+        return
+    }
+    if (printed_component) {
+        print ""
+    }
+    printf "component %d (%d node(s)):\n", component, node_count
+    for (i = 1; i <= node_count; i++) {
+        print "  " nodes[i]
+    }
+    printed_component = 1
+    delete seen
+    delete nodes
+    node_count = 0
+}
+
+/^digraph[[:space:]]/ {
+    flush_component()
+    component += 1
+    next
+}
+
+{
+    if ($0 ~ /^[[:space:]]*(graph|node|edge)[[:space:]]*\[/) {
+        next
+    }
+    line = $0
+    while (match(line, /"[^"]+"/)) {
+        node = substr(line, RSTART + 1, RLENGTH - 2)
+        if (!(node in seen)) {
+            seen[node] = 1
+            nodes[++node_count] = node
+        }
+        line = substr(line, RSTART + RLENGTH)
+    }
+}
+
+END {
+    flush_component()
+}
+' >"$components_output_tmp"
+    components_status=$?
+    set -e
+
+    if [[ -s "$components_output_tmp" ]]; then
+        mv "$components_output_tmp" "$components_output"
+        if [[ $components_status -ne 0 ]]; then
+            echo "Connected-component pipeline returned status $components_status, but produced a text file; keeping it." >&2
+        fi
+        return 0
+    fi
+
+    rm -f "$components_output_tmp"
     return 1
 }
 
@@ -168,6 +236,7 @@ main() {
     local prefix="${positional_args[1]:-$(sanitize_prefix "$input_root")}"
     local ldd_output="${prefix}_find_ldd_output.txt"
     local graphviz_output="${prefix}_graphviz.gv"
+    local components_output="${prefix}_connected_components.txt"
     local pdf_output="${prefix}_graphviz.pdf"
 
     printf 'Input root: %s\n' "$input_root"
@@ -196,6 +265,15 @@ main() {
 
     printf 'Writing %s\n' "$graphviz_output"
     convert_find_ldd_output_to_graphviz.py "$ldd_output" >"$graphviz_output"
+
+    if command -v ccomps >/dev/null 2>&1; then
+        printf 'Writing %s\n' "$components_output"
+        if ! write_connected_components_text "$graphviz_output" "$components_output"; then
+            echo "Connected-component pipeline failed; skipping $components_output." >&2
+        fi
+    else
+        echo "ccomps not available; skipping $components_output." >&2
+    fi
 
     require_command dot
     printf 'Writing %s\n' "$pdf_output"
