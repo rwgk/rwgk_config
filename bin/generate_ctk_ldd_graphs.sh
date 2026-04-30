@@ -5,9 +5,12 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-    generate_ctk_ldd_graphs.sh /usr/local/cuda-13.2 [output-prefix]
+    generate_ctk_ldd_graphs.sh [--exclude=SUBSTRING[,SUBSTRING...]] /path/to/root [output-prefix]
 
-Generate a shared-library dependency graph for a CUDA Toolkit installation.
+Generate a shared-library dependency graph for a CUDA Toolkit installation or directory tree.
+
+Options:
+    --exclude=...    Comma-separated path substrings to exclude before running ldd.
 
 Outputs are written to the current working directory:
     <prefix>_find_ldd_output.txt
@@ -33,22 +36,91 @@ sanitize_prefix() {
             -e 's#_$##'
 }
 
+write_packed_graphviz_output() {
+    local graphviz_output="$1"
+    local output="$2"
+    local format="$3"
+    local format_label="$4"
+    shift 4
+    local -a output_args=("$@")
+    local packed_output="${output}.tmp"
+    local packed_status
+
+    rm -f "$packed_output"
+    set +e
+    ccomps -x "$graphviz_output" | dot | gvpack | neato -s -n2 "${output_args[@]}" -T"$format" >"$packed_output"
+    packed_status=$?
+    set -e
+    if [[ -s "$packed_output" ]]; then
+        mv "$packed_output" "$output"
+        if [[ $packed_status -ne 0 ]]; then
+            echo "Graphviz packing pipeline returned status $packed_status, but produced a $format_label; keeping it." >&2
+        fi
+        return 0
+    fi
+
+    rm -f "$packed_output"
+    return 1
+}
+
 main() {
-    if [[ $# -gt 2 ]]; then
+    local -a exclude_substrings=()
+    local -a exclude_substrings_to_add=()
+    local -a positional_args=()
+    local exclude_value
+    local exclude
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --exclude=* | --exlude=*)
+            exclude_value="${1#*=}"
+            exclude_substrings_to_add=()
+            IFS=, read -r -a exclude_substrings_to_add <<<"$exclude_value"
+            for exclude in "${exclude_substrings_to_add[@]}"; do
+                if [[ -n "$exclude" ]]; then
+                    exclude_substrings+=("$exclude")
+                fi
+            done
+            shift
+            ;;
+        --)
+            shift
+            while [[ $# -gt 0 ]]; do
+                positional_args+=("$1")
+                shift
+            done
+            ;;
+        --*)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+        *)
+            positional_args+=("$1")
+            shift
+            ;;
+        esac
+    done
+
+    if [[ ${#positional_args[@]} -gt 2 ]]; then
         usage >&2
         exit 1
     fi
-    if [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    if [[ ${#positional_args[@]} -eq 0 ]]; then
         usage
         exit 0
     fi
 
-    local cuda_root="$1"
-    if [[ ! -d "$cuda_root" ]]; then
-        echo "CUDA root does not exist: $cuda_root" >&2
+    local input_root="${positional_args[0]}"
+    if [[ ! -d "$input_root" ]]; then
+        echo "Input root does not exist: $input_root" >&2
         exit 1
     fi
-    cuda_root=$(readlink -f "$cuda_root")
+    input_root=$(readlink -f "$input_root")
 
     require_command find
     require_command ldd
@@ -56,16 +128,29 @@ main() {
 
     local -a search_dirs=()
     local -A seen_search_dirs=()
+    local -a search_dir_candidates=()
     local candidate
     local resolved
-    shopt -s nullglob
-    for candidate in \
-        "$cuda_root/lib64" \
-        "$cuda_root/lib" \
-        "$cuda_root/nvvm/lib64" \
-        "$cuda_root/nvvm/lib" \
-        "$cuda_root"/targets/*/lib64 \
-        "$cuda_root"/targets/*/lib; do
+    local search_mode
+
+    if [[ -f "$input_root/include/cuda.h" ]]; then
+        search_mode="CTK layout (include/cuda.h found)"
+        search_dir_candidates=(
+            "$input_root/lib64"
+            "$input_root/nvvm/lib64"
+        )
+    elif [[ -d "$input_root/nvidia" || -d "$input_root/cutensor" ]]; then
+        search_mode="Python CUDA package layout (nvidia/cutensor found)"
+        search_dir_candidates=(
+            "$input_root/nvidia"
+            "$input_root/cutensor"
+        )
+    else
+        search_mode="directory tree (include/cuda.h not found)"
+        search_dir_candidates=("$input_root")
+    fi
+
+    for candidate in "${search_dir_candidates[@]}"; do
         if [[ -d "$candidate" ]]; then
             resolved=$(readlink -f "$candidate")
             if [[ -d "$resolved" && -z "${seen_search_dirs[$resolved]+x}" ]]; then
@@ -74,26 +159,40 @@ main() {
             fi
         fi
     done
-    shopt -u nullglob
 
     if [[ ${#search_dirs[@]} -eq 0 ]]; then
-        echo "No supported library directories found under: $cuda_root" >&2
+        echo "No supported library directories found under: $input_root" >&2
         exit 1
     fi
 
-    local prefix="${2:-$(sanitize_prefix "$cuda_root")}"
+    local prefix="${positional_args[1]:-$(sanitize_prefix "$input_root")}"
     local ldd_output="${prefix}_find_ldd_output.txt"
     local graphviz_output="${prefix}_graphviz.gv"
     local pdf_output="${prefix}_graphviz.pdf"
 
-    printf 'CUDA root: %s\n' "$cuda_root"
+    printf 'Input root: %s\n' "$input_root"
+    printf 'Search mode: %s\n' "$search_mode"
     printf 'Search directories:\n'
     printf '  %s\n' "${search_dirs[@]}"
+    if [[ ${#exclude_substrings[@]} -gt 0 ]]; then
+        printf 'Exclude substrings:\n'
+        printf '  %s\n' "${exclude_substrings[@]}"
+    fi
 
     printf 'Writing %s\n' "$ldd_output"
-    find "${search_dirs[@]}" \
-        -path '*/stubs' -prune -o \
-        -type f -name '*.so*' -print -exec ldd {} \; >"$ldd_output"
+    while IFS= read -r candidate; do
+        for exclude in "${exclude_substrings[@]}"; do
+            if [[ "$candidate" == *"$exclude"* ]]; then
+                continue 2
+            fi
+        done
+        printf '%s\n' "$candidate"
+        ldd "$candidate"
+    done < <(
+        find "${search_dirs[@]}" \
+            -path '*/stubs' -prune -o \
+            -type f -name '*.so*' -print
+    ) >"$ldd_output"
 
     printf 'Writing %s\n' "$graphviz_output"
     convert_find_ldd_output_to_graphviz.py "$ldd_output" >"$graphviz_output"
@@ -103,20 +202,7 @@ main() {
     if command -v ccomps >/dev/null 2>&1 &&
         command -v gvpack >/dev/null 2>&1 &&
         command -v neato >/dev/null 2>&1; then
-        local packed_pdf="${pdf_output}.tmp"
-        local packed_status
-        rm -f "$packed_pdf"
-        set +e
-        ccomps -x "$graphviz_output" | dot | gvpack | neato -s -n2 -Tpdf >"$packed_pdf"
-        packed_status=$?
-        set -e
-        if [[ -s "$packed_pdf" ]]; then
-            mv "$packed_pdf" "$pdf_output"
-            if [[ $packed_status -ne 0 ]]; then
-                echo "Graphviz packing pipeline returned status $packed_status, but produced a PDF; keeping it." >&2
-            fi
-        else
-            rm -f "$packed_pdf"
+        if ! write_packed_graphviz_output "$graphviz_output" "$pdf_output" pdf PDF; then
             echo "Graphviz packing pipeline failed; falling back to dot -Tpdf." >&2
             dot -Tpdf "$graphviz_output" >"$pdf_output"
         fi
@@ -126,7 +212,7 @@ main() {
     fi
 
     if command -v exiftool >/dev/null 2>&1; then
-        exiftool -Title="$cuda_root" -overwrite_original "$pdf_output" >/dev/null
+        exiftool -Title="$input_root" -overwrite_original "$pdf_output" >/dev/null
     fi
 
     printf 'Done.\n'
