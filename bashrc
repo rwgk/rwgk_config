@@ -1632,6 +1632,24 @@ macos_brew_install() (
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 )
 
+brew_upgrade_all() (
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: brew_upgrade_all (no arguments allowed)" >&2
+        return 1
+    fi
+
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "brew_upgrade_all: brew not found in PATH" >&2
+        return 127
+    fi
+
+    set -x
+    brew update &&
+        brew upgrade &&
+        brew upgrade --cask --greedy &&
+        brew cleanup
+)
+
 mc3dwnld() (
     set -x
     wget "https://repo.anaconda.com/miniconda/Miniconda3-latest-$(uname)-$(uname -m).sh"
