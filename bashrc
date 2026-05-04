@@ -1292,6 +1292,8 @@ pybind11_in_tree_cmake_some() {
 # https://www.commandlinefu.com/commands/view/12043/remove-color-special-escape-ansi-codes-from-text-with-sed
 alias strip_ansi_esc='sed "s,\x1B\[[0-9;]*[a-zA-Z],,g"'
 
+alias od_reveal='od -An -c -tx1'
+
 alias ListAllCommands='compgen -A function -abck'
 
 alias cfd='clang-format --dry-run'
