@@ -488,7 +488,7 @@ grep_installed_cuda() {
 }
 
 grep_pytest_summary() {
-    local pattern='^rootdir: |==== .*?(passed|failed|skipped|errors).* ===='
+    local pattern='^rootdir: |^=+ .*(passed|failed|skipped|errors?).* =+[[:space:]]*$'
 
     echo "$@"
     if command -v rg >/dev/null 2>&1; then
