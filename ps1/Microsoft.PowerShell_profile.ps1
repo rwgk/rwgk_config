@@ -243,6 +243,49 @@ function Enable-Automatic-Driver-Updates {
     }
 }
 
+function Install-Driver-From-InfDirectory {
+    <#
+    .SYNOPSIS
+        Installs an NVIDIA display driver from a directory containing nv_dispi.inf.
+
+    .DESCRIPTION
+        Convenience wrapper for:
+            pnputil /add-driver "<directory>\nv_dispi.inf" /install
+
+        Pass the Display.Driver directory from an extracted NVIDIA driver package.
+
+    .EXAMPLE
+        Install-Driver-From-InfDirectory C:\Users\rgrossekunst\Downloads\610.47-GeforceWeb-Public-International-Display.Driver
+    #>
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$ArgsFromUser
+    )
+
+    if ($ArgsFromUser.Count -ne 1) {
+        Write-Error "Usage: Install-Driver-From-InfDirectory <directory-name>. Provide exactly one directory containing nv_dispi.inf."
+        return 1
+    }
+
+    $driverDir = $ArgsFromUser[0]
+    if (-not (Test-Path -LiteralPath $driverDir -PathType Container)) {
+        Write-Error "Install-Driver-From-InfDirectory: '$driverDir' is not an existing directory."
+        return 1
+    }
+
+    $infPath = Join-Path -Path $driverDir -ChildPath "nv_dispi.inf"
+    if (-not (Test-Path -LiteralPath $infPath -PathType Leaf)) {
+        Write-Error "Install-Driver-From-InfDirectory: expected NVIDIA display driver INF not found: '$infPath'. Pass the Display.Driver directory from the extracted NVIDIA driver package."
+        return 1
+    }
+
+    $fullInfPath = Resolve-Path -LiteralPath $infPath -ErrorAction Stop | Select-Object -ExpandProperty Path
+    $command = 'pnputil /add-driver "{0}" /install' -f $fullInfPath
+
+    Write-Host $command -ForegroundColor Cyan
+    & pnputil /add-driver $fullInfPath /install
+}
+
 function todate { Get-Date -Format 'yyyy-MM-dd' }
 function now { Get-Date -Format 'yyyy-MM-dd+HHmmss' }
 function nowish { Get-Date -Format 'yyyy-MM-dd+HHmm' }
