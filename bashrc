@@ -794,6 +794,49 @@ show_upstream_for_branch() {
     return "$rc"
 }
 
+git_swnc() (
+    set -euo pipefail
+
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: git_swnc <new-branch>" >&2
+        return 1
+    fi
+
+    local target_branch="$1"
+    local parent_branch
+    local parent_tracking_branch
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "git_swnc: not inside a git work tree" >&2
+        return 1
+    fi
+
+    if ! git check-ref-format --branch "$target_branch" >/dev/null 2>&1; then
+        echo "git_swnc: invalid branch name: $target_branch" >&2
+        return 1
+    fi
+
+    if git show-ref --verify --quiet "refs/heads/$target_branch"; then
+        echo "git_swnc: target branch already exists: $target_branch" >&2
+        return 1
+    fi
+
+    parent_branch=$(git branch --show-current)
+    if [[ -z "$parent_branch" ]]; then
+        echo "git_swnc: current checkout is detached; no parent branch to clear" >&2
+        return 1
+    fi
+
+    if ! parent_tracking_branch=$(git rev-parse --abbrev-ref --symbolic-full-name "${parent_branch}@{upstream}" 2>/dev/null); then
+        echo "git_swnc: current branch has no upstream/tracking branch: $parent_branch" >&2
+        return 1
+    fi
+
+    git switch -c "$target_branch"
+    git branch -f "$parent_branch" "$parent_tracking_branch"
+    echo "git_swnc: created '$target_branch' and reset '$parent_branch' to '$parent_tracking_branch'"
+)
+
 gls() {
     local num_commits="${1:-10}"
     git log -n "$num_commits" --format="%H %<(100,trunc)%s"
