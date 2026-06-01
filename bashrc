@@ -1593,6 +1593,15 @@ alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
 export CCCJ="$HOME/.cursor/cli-config.json"
 
+install_cursor() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: install_cursor (no arguments allowed)" >&2
+        return 1
+    fi
+
+    curl https://cursor.com/install -fsS | bash
+}
+
 # launch cursor window
 lcw() (
     if ! command -v cursor >/dev/null 2>&1; then
