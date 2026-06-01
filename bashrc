@@ -83,7 +83,7 @@ if [[ "${OSTYPE:-}" == msys* ]]; then
     # Git Bash
     export PS1='$(hostname):$PWD $ '
 else
-    export PS1='$(/bin/hostname -f):\w $ '
+    export PS1='$(/bin/hostname -f 2>/dev/null || hostname):\w $ '
 fi
 
 export IGNOREEOF=9999
