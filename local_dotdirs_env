@@ -72,9 +72,6 @@ rwgk_set_work_root() {
     user_name="${USER:-$(id -un 2>/dev/null || echo user)}"
     export W="/tmp/$user_name/wrk"
     mkdir -p "$W" 2>/dev/null || return 1
-    if rwgk_shell_is_interactive; then
-        echo "WARNING: falling back to W=$W; please create /wrk to avoid this warning." >&2
-    fi
 }
 
 rwgk_set_work_root
