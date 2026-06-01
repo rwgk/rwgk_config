@@ -66,54 +66,9 @@ venv_activate_maybe() {
     fi
 }
 
-# Silent setup: only sets cache dirs if not already set
-silent_use_tmp_user_caches() {
-    [ -n "$XDG_CACHE_HOME" ] || XDG_CACHE_HOME="/tmp/${USER}-xdg-cache"
-    [ -n "$PIP_CACHE_DIR" ] || PIP_CACHE_DIR="/tmp/${USER}-pip-cache"
-    [ -n "$TMPDIR" ] || TMPDIR="/tmp/${USER}-tmp"
-
-    export XDG_CACHE_HOME PIP_CACHE_DIR TMPDIR
-
-    mkdir -p "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR"
-}
-
-# Show current values (can be useful even outside setup)
-show_tmp_user_caches() {
-    echo "XDG_CACHE_HOME=$XDG_CACHE_HOME"
-    echo "PIP_CACHE_DIR=$PIP_CACHE_DIR"
-    echo "TMPDIR=$TMPDIR"
-}
-
-# Verbose setup with user feedback
-use_tmp_user_caches() {
-    silent_use_tmp_user_caches
-    echo "✅ Using temporary per-user cache directories:"
-    show_tmp_user_caches
-}
-
-# Safe cleanup: only removes per-user temp dirs under /tmp
-wipe_tmp_user_caches() {
-    for d in "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR"; do
-        case "$d" in
-        /tmp/*)
-            echo "🧹 Removing $d"
-            rm -rf -- "$d"
-            ;;
-        *)
-            echo "⚠️ Skipping non-/tmp path: $d"
-            ;;
-        esac
-    done
-    echo "✅ All cleaned up (safe mode)."
-}
-
-# Automatically use temp caches if $HOME is on NFS
-fs_device=$(df -P "$HOME" | awk 'NR==2 { print $1 }')
-case "$fs_device" in
-*:/*)
-    silent_use_tmp_user_caches
-    ;;
-esac
+if [ -f "$HOME/rwgk_config/local_dotdirs_env" ]; then
+    . "$HOME/rwgk_config/local_dotdirs_env"
+fi
 
 setup_vim_dirs() {
     mkdir -p "$HOME/.vim/backup" "$HOME/.vim/swap" "$HOME/.vim/undo"
@@ -129,10 +84,6 @@ fi
 export -f clean_path
 export -f prepend_maybe
 export -f venv_activate_maybe
-export -f silent_use_tmp_user_caches
-export -f show_tmp_user_caches
-export -f use_tmp_user_caches
-export -f wipe_tmp_user_caches
 export -f setup_vim_dirs
 
 if [[ -x /opt/homebrew/bin/brew ]]; then

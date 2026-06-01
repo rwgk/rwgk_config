@@ -2,6 +2,10 @@
 
 umask 0022
 
+if [ -f "$HOME/rwgk_config/local_dotdirs_env" ]; then
+    . "$HOME/rwgk_config/local_dotdirs_env"
+fi
+
 # --- Early return guard ------------------------------------------------------
 # Load full shell environment if:
 #   1. PRETEND_INTERACTIVE_SHELL is set (forced for special cases, e.g. pbpush/pbpull), OR
@@ -31,6 +35,10 @@ show_motd() {
 
 export RC="$HOME/rwgk_config"
 alias RC='cd "$RC"'
+
+if [[ $W ]]; then
+    alias W='cd "$W"'
+fi
 
 if [ -f "$HOME/rwgk_config/bash_maybe_use_chd_history" ]; then
     . "$HOME/rwgk_config/bash_maybe_use_chd_history"

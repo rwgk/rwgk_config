@@ -1,0 +1,254 @@
+# Shared local-machine storage setup.
+#
+# Keep cache/state/data that should not live on an NFS-mounted $HOME under
+# $W/dotdirs. This file is sourced by both profile and early bashrc.
+
+if ! command -v clean_path >/dev/null 2>&1; then
+    clean_path() {
+        echo "$1" | tr ':' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ':' | sed 's/:$//'
+    }
+fi
+
+if ! command -v prepend_maybe >/dev/null 2>&1; then
+    prepend_maybe() {
+        if [ "$#" -ne 2 ]; then
+            echo "Usage: prepend_maybe <VARNAME> <VALUE>" >&2
+            return 1
+        fi
+
+        if [ -d "$2" ]; then
+            if [ -z "${!1}" ]; then
+                eval "export $1=\"$2\""
+            else
+                eval "export $1=\"$2:\${$1}\""
+            fi
+        fi
+    }
+fi
+
+rwgk_home_is_nfs() {
+    local fs_device
+    fs_device=$(df -P "$HOME" 2>/dev/null | awk 'NR == 2 { print $1 }') || return 1
+    case "$fs_device" in
+    *:/*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+rwgk_shell_is_interactive() {
+    case "$-" in
+    *i*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+rwgk_set_work_root() {
+    if [ -n "${W:-}" ] && [ -d "$W" ]; then
+        export W
+        return 0
+    fi
+
+    if [ -d "/wrk" ]; then
+        export W="/wrk"
+        return 0
+    fi
+
+    if [ -d "$HOME/wrk" ]; then
+        export W="$HOME/wrk"
+        return 0
+    fi
+
+    if ! rwgk_home_is_nfs; then
+        mkdir -p "$HOME/wrk" 2>/dev/null || return 1
+        export W="$HOME/wrk"
+        return 0
+    fi
+
+    local user_name
+    user_name="${USER:-$(id -un 2>/dev/null || echo user)}"
+    export W="/tmp/$user_name/wrk"
+    mkdir -p "$W" 2>/dev/null || return 1
+    if rwgk_shell_is_interactive; then
+        echo "WARNING: falling back to W=$W; please create /wrk to avoid this warning." >&2
+    fi
+}
+
+rwgk_set_local_dotdir_paths() {
+    [ -n "${W:-}" ] && [ -d "$W" ] || return 1
+
+    export RWGK_DOTDIRS="$W/dotdirs"
+    export RWGK_DOTDIRS_CACHE="$RWGK_DOTDIRS/cache"
+    export RWGK_DOTDIRS_BIN="$RWGK_DOTDIRS/local/bin"
+    export RWGK_DOTDIRS_LIB="$RWGK_DOTDIRS/local/lib"
+    export RWGK_DOTDIRS_DATA="$RWGK_DOTDIRS/local/share"
+    export RWGK_DOTDIRS_STATE="$RWGK_DOTDIRS/local/state"
+    export RWGK_DOTDIRS_TMP="$RWGK_DOTDIRS/tmp"
+    export RWGK_DOTDIRS_PIP_CACHE="$RWGK_DOTDIRS/cache/pip"
+    export RWGK_DOTDIRS_NV="$RWGK_DOTDIRS/nv"
+    export RWGK_DOTDIRS_CUDA_CACHE="$RWGK_DOTDIRS_NV/ComputeCache"
+}
+
+rwgk_mkdir_local_dotdirs() {
+    rwgk_set_local_dotdir_paths || return 1
+    mkdir -p \
+        "$RWGK_DOTDIRS_CACHE" \
+        "$RWGK_DOTDIRS_BIN" \
+        "$RWGK_DOTDIRS_LIB" \
+        "$RWGK_DOTDIRS_DATA" \
+        "$RWGK_DOTDIRS_STATE" \
+        "$RWGK_DOTDIRS_TMP" \
+        "$RWGK_DOTDIRS_PIP_CACHE" \
+        "$RWGK_DOTDIRS_CUDA_CACHE" 2>/dev/null
+}
+
+rwgk_ensure_dotdir_symlink() {
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: rwgk_ensure_dotdir_symlink <source> <target>" >&2
+        return 1
+    fi
+
+    local source_path="$1"
+    local target_path="$2"
+    local source_parent
+
+    mkdir -p "$target_path" 2>/dev/null || return 1
+
+    if [ -L "$source_path" ]; then
+        if [ "$(readlink "$source_path")" = "$target_path" ]; then
+            return 0
+        fi
+        rm -- "$source_path" || return 1
+    elif [ -e "$source_path" ]; then
+        return 0
+    fi
+
+    source_parent=$(dirname -- "$source_path")
+    mkdir -p "$source_parent" 2>/dev/null || return 1
+    ln -s "$target_path" "$source_path"
+}
+
+rwgk_ensure_local_dotdir_symlinks() {
+    rwgk_mkdir_local_dotdirs || return 1
+
+    rwgk_ensure_dotdir_symlink "$HOME/.nv" "$RWGK_DOTDIRS_NV" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.cache" "$RWGK_DOTDIRS_CACHE" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.local/bin" "$RWGK_DOTDIRS_BIN" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.local/lib" "$RWGK_DOTDIRS_LIB" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.local/share" "$RWGK_DOTDIRS_DATA" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.local/state" "$RWGK_DOTDIRS_STATE" || return
+}
+
+silent_use_local_dotdirs() {
+    rwgk_mkdir_local_dotdirs || return 1
+
+    [ -n "${XDG_CACHE_HOME:-}" ] || XDG_CACHE_HOME="$RWGK_DOTDIRS_CACHE"
+    [ -n "${XDG_DATA_HOME:-}" ] || XDG_DATA_HOME="$RWGK_DOTDIRS_DATA"
+    [ -n "${XDG_STATE_HOME:-}" ] || XDG_STATE_HOME="$RWGK_DOTDIRS_STATE"
+    [ -n "${PIP_CACHE_DIR:-}" ] || PIP_CACHE_DIR="$RWGK_DOTDIRS_PIP_CACHE"
+    [ -n "${TMPDIR:-}" ] || TMPDIR="$RWGK_DOTDIRS_TMP"
+    [ -n "${CUDA_CACHE_PATH:-}" ] || CUDA_CACHE_PATH="$RWGK_DOTDIRS_CUDA_CACHE"
+
+    export XDG_CACHE_HOME XDG_DATA_HOME XDG_STATE_HOME
+    export PIP_CACHE_DIR TMPDIR CUDA_CACHE_PATH
+
+    mkdir -p \
+        "$XDG_CACHE_HOME" \
+        "$XDG_DATA_HOME" \
+        "$XDG_STATE_HOME" \
+        "$PIP_CACHE_DIR" \
+        "$TMPDIR" \
+        "$CUDA_CACHE_PATH" 2>/dev/null
+}
+
+show_local_dotdirs() {
+    echo "W=${W:-}"
+    echo "RWGK_DOTDIRS=${RWGK_DOTDIRS:-}"
+    echo "RWGK_DOTDIRS_BIN=${RWGK_DOTDIRS_BIN:-}"
+    echo "RWGK_DOTDIRS_LIB=${RWGK_DOTDIRS_LIB:-}"
+    echo "XDG_CACHE_HOME=${XDG_CACHE_HOME:-}"
+    echo "XDG_DATA_HOME=${XDG_DATA_HOME:-}"
+    echo "XDG_STATE_HOME=${XDG_STATE_HOME:-}"
+    echo "PIP_CACHE_DIR=${PIP_CACHE_DIR:-}"
+    echo "TMPDIR=${TMPDIR:-}"
+    echo "CUDA_CACHE_PATH=${CUDA_CACHE_PATH:-}"
+}
+
+use_local_dotdirs() {
+    silent_use_local_dotdirs || return
+    echo "Using local per-machine dotdirs:"
+    show_local_dotdirs
+}
+
+rwgk_path_is_under_local_dotdirs() {
+    case "$1" in
+    "$RWGK_DOTDIRS"/*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+wipe_local_dotdir_caches() {
+    rwgk_set_local_dotdir_paths || return 1
+
+    local d
+    for d in "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$TMPDIR" "$CUDA_CACHE_PATH"; do
+        [ -n "$d" ] || continue
+        if rwgk_path_is_under_local_dotdirs "$d"; then
+            echo "Removing $d"
+            rm -rf -- "$d"
+        else
+            echo "Skipping non-local-dotdirs path: $d"
+        fi
+    done
+
+    silent_use_local_dotdirs
+}
+
+# Compatibility wrappers for the old /tmp-oriented helper names.
+silent_use_tmp_user_caches() {
+    silent_use_local_dotdirs
+}
+
+show_tmp_user_caches() {
+    show_local_dotdirs
+}
+
+use_tmp_user_caches() {
+    use_local_dotdirs
+}
+
+wipe_tmp_user_caches() {
+    wipe_local_dotdir_caches
+}
+
+rwgk_set_work_root
+if rwgk_home_is_nfs; then
+    silent_use_local_dotdirs >/dev/null 2>&1 || true
+    rwgk_ensure_local_dotdir_symlinks >/dev/null 2>&1 || true
+fi
+
+if [ -n "${BASH_VERSION:-}" ]; then
+    export -f clean_path
+    export -f prepend_maybe
+    export -f rwgk_home_is_nfs
+    export -f rwgk_shell_is_interactive
+    export -f rwgk_set_work_root
+    export -f rwgk_set_local_dotdir_paths
+    export -f rwgk_mkdir_local_dotdirs
+    export -f rwgk_ensure_dotdir_symlink
+    export -f rwgk_ensure_local_dotdir_symlinks
+    export -f silent_use_local_dotdirs
+    export -f show_local_dotdirs
+    export -f use_local_dotdirs
+    export -f rwgk_path_is_under_local_dotdirs
+    export -f wipe_local_dotdir_caches
+    export -f silent_use_tmp_user_caches
+    export -f show_tmp_user_caches
+    export -f use_tmp_user_caches
+    export -f wipe_tmp_user_caches
+fi
