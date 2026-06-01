@@ -2,7 +2,20 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $(basename "$0") [--local-only] <branch> [<branch> ...]" >&2
+    cat >&2 <<EOF
+Usage: $(basename "$0") [--local-only | --rename-tracking] <branch> [<branch> ...]
+
+Options:
+  --local-only       Delete only the local branch.
+  --rename-tracking  Also archive the tracked remote branch, even when it is
+                     not safe to do so by default.
+
+Default behavior:
+  The tracked remote branch is archived only when this script can identify the
+  remote as your authenticated GitHub fork and confirm that there is no open PR.
+  Upstream and other non-fork remotes require --local-only or --rename-tracking.
+  A tracked remote branch on someone else's GitHub fork is left unchanged.
+EOF
 }
 
 get_remote_upstream_info() {
@@ -37,22 +50,72 @@ get_remote_branch_sha() {
     fi
 }
 
-query_pr_info_for_remote_branch() {
-    local remote_branch="$1"
-    local pr_state_filter="${2:-all}"
-    local gh_output
+get_github_remote_repo_info() {
+    local remote="$1"
+    local remote_url gh_output viewer_login repo_url repo_host repo_name is_fork repo_owner parent_repo
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
         return 1
     fi
 
-    if ! gh_output=$(gh pr list \
-        --head "$remote_branch" \
-        --state "$pr_state_filter" \
-        --limit 1000 \
-        --json number,state,url \
-        --jq '.[0] | if . then "\(.number)\t\(.state)\t\(.url)" else empty end' 2>&1); then
+    if ! remote_url=$(git remote get-url --push "$remote" 2>&1); then
+        printf '%s\n' "$remote_url" >&2
+        return 1
+    fi
+
+    if ! gh_output=$(gh repo view "$remote_url" \
+        --json url,nameWithOwner,isFork,owner,parent \
+        --jq '[.url, .nameWithOwner, .isFork, .owner.login, (.parent.nameWithOwner // "")] | @tsv' 2>&1); then
+        printf '%s\n' "$gh_output" >&2
+        return 1
+    fi
+
+    IFS=$'\t' read -r repo_url repo_name is_fork repo_owner parent_repo <<<"$gh_output"
+    repo_host="${repo_url#https://}"
+    repo_host="${repo_host%%/*}"
+    if [[ -z "$repo_host" || "$repo_host" == "$repo_url" ]]; then
+        printf "Error: cannot determine GitHub host from repository URL '%s'.\n" "$repo_url" >&2
+        return 1
+    fi
+
+    if ! viewer_login=$(gh api --hostname "$repo_host" user --jq .login 2>&1); then
+        printf '%s\n' "$viewer_login" >&2
+        return 1
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$parent_repo" "$viewer_login" "$repo_host"
+}
+
+query_pr_info_for_remote_branch() {
+    local head_owner="$1"
+    local remote_branch="$2"
+    local pr_state_filter="${3:-all}"
+    local github_host="${4:-}"
+    local gh_output
+    local -a gh_args=(
+        search prs
+        --head "$head_owner:$remote_branch"
+        --limit 1000
+        --json number,state,url
+        --jq '.[0] | if . then "\(.number)\t\(.state)\t\(.url)" else empty end'
+    )
+
+    if [[ "$pr_state_filter" != "all" ]]; then
+        gh_args+=(--state "$pr_state_filter")
+    fi
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: 'gh' is not installed or not on PATH." >&2
+        return 1
+    fi
+
+    if [[ -n "$github_host" ]]; then
+        gh_output=$(GH_HOST="$github_host" gh "${gh_args[@]}" 2>&1) || {
+            printf '%s\n' "$gh_output" >&2
+            return 1
+        }
+    elif ! gh_output=$(gh "${gh_args[@]}" 2>&1); then
         printf '%s\n' "$gh_output" >&2
         return 1
     fi
@@ -65,11 +128,39 @@ print_pr_state_unknown_error() {
     local remote_branch="$2"
     local details="${3:-}"
 
-    echo "Error: cannot determine PR state for upstream branch '$remote/$remote_branch'." >&2
+    echo "Error: cannot determine PR state for remote branch '$remote/$remote_branch'." >&2
     if [[ -n "$details" ]]; then
         printf '%s\n' "$details" >&2
     fi
     echo "Renaming the remote branch would be unsafe until PR state is known." >&2
+    echo "Please close the PR first, then try again." >&2
+    echo "Or use the --local-only option." >&2
+}
+
+print_explicit_remote_choice_required_error() {
+    local remote="$1"
+    local remote_branch="$2"
+    local reason="$3"
+    local details="${4:-}"
+
+    printf "Error: tracked remote branch '%s/%s' is not safe to rename by default.\n" "$remote" "$remote_branch" >&2
+    printf '%s\n' "$reason" >&2
+    if [[ -n "$details" ]]; then
+        printf '%s\n' "$details" >&2
+    fi
+    echo "Use --local-only to delete only the local branch." >&2
+    echo "Use --rename-tracking to also archive the tracked remote branch." >&2
+}
+
+print_open_pr_error() {
+    local remote="$1"
+    local remote_branch="$2"
+    local pr_number="$3"
+    local pr_url="$4"
+
+    printf "Error: remote branch '%s/%s' still has open PR #%s:\n" "$remote" "$remote_branch" "$pr_number" >&2
+    printf "  %s\n" "$pr_url" >&2
+    echo "Renaming the remote branch would likely close the PR." >&2
     echo "Please close the PR first, then try again." >&2
     echo "Or use the --local-only option." >&2
 }
@@ -87,39 +178,34 @@ build_archive_remote_branch_name() {
     fi
 }
 
-plan_remote_upstream_archive() {
-    local branch="$1"
-    local upstream_info remote remote_branch remote_sha open_pr_info pr_info
+plan_remote_branch_archive() {
+    local remote="$1"
+    local remote_branch="$2"
+    local remote_sha="$3"
+    local pr_head_owner="${4:-}"
+    local pr_lookup_host="${5:-}"
+    local require_pr_check="${6:-1}"
+    local open_pr_info pr_info
     local pr_number="" pr_state="" pr_url="" archive_branch archive_sha
 
-    if ! upstream_info=$(get_remote_upstream_info "$branch"); then
-        return 0
+    if [[ -n "$pr_head_owner" ]]; then
+        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_head_owner" "$remote_branch" open "$pr_lookup_host" 2>&1); then
+            if [[ "$require_pr_check" -eq 1 ]]; then
+                print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
+                return 1
+            fi
+            printf "Warning: could not determine PR state for '%s/%s'; proceeding because --rename-tracking was explicit.\n" "$remote" "$remote_branch" >&2
+            printf '%s\n' "$open_pr_info" >&2
+        elif [[ -n "$open_pr_info" ]]; then
+            IFS=$'\t' read -r pr_number pr_state pr_url <<<"$open_pr_info"
+            print_open_pr_error "$remote" "$remote_branch" "$pr_number" "$pr_url"
+            return 1
+        fi
+    else
+        printf "Warning: PR state was not checked for '%s/%s'; proceeding because --rename-tracking was explicit.\n" "$remote" "$remote_branch" >&2
     fi
 
-    IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
-
-    if ! remote_sha=$(get_remote_branch_sha "$remote" "$remote_branch"); then
-        return 1
-    fi
-    if [[ -z "$remote_sha" ]]; then
-        return 0
-    fi
-
-    if ! open_pr_info=$(query_pr_info_for_remote_branch "$remote_branch" open 2>&1); then
-        print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
-        return 1
-    fi
-    if [[ -n "$open_pr_info" ]]; then
-        IFS=$'\t' read -r pr_number pr_state pr_url <<<"$open_pr_info"
-        printf "Error: upstream branch '%s/%s' still has open PR #%s:\n" "$remote" "$remote_branch" "$pr_number" >&2
-        printf "  %s\n" "$pr_url" >&2
-        echo "Renaming the remote branch would likely close the PR." >&2
-        echo "Please close the PR first, then try again." >&2
-        echo "Or use the --local-only option." >&2
-        return 1
-    fi
-
-    if pr_info=$(query_pr_info_for_remote_branch "$remote_branch" all 2>/dev/null) && [[ -n "$pr_info" ]]; then
+    if [[ -n "$pr_head_owner" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_head_owner" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
         IFS=$'\t' read -r pr_number pr_state pr_url <<<"$pr_info"
     fi
 
@@ -136,6 +222,69 @@ plan_remote_upstream_archive() {
     printf '%s\t%s\t%s\t%s\n' "$remote" "$remote_branch" "$remote_sha" "$archive_branch"
 }
 
+plan_remote_tracking_archive() {
+    local branch="$1"
+    local archive_mode="$2"
+    local upstream_info remote remote_branch remote_sha repo_info repo_name is_fork repo_owner parent_repo viewer_login repo_host
+    local pr_head_owner="" pr_lookup_host="" require_pr_check=1
+
+    if ! upstream_info=$(get_remote_upstream_info "$branch"); then
+        return 0
+    fi
+
+    IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
+
+    if ! remote_sha=$(get_remote_branch_sha "$remote" "$remote_branch"); then
+        return 1
+    fi
+    if [[ -z "$remote_sha" ]]; then
+        return 0
+    fi
+
+    case "$archive_mode" in
+    auto)
+        if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
+            print_explicit_remote_choice_required_error \
+                "$remote" \
+                "$remote_branch" \
+                "Cannot determine whether '$remote' is your GitHub fork." \
+                "$repo_info"
+            return 1
+        fi
+
+        IFS=$'\t' read -r repo_name is_fork repo_owner parent_repo viewer_login repo_host <<<"$repo_info"
+        if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
+            pr_head_owner="$repo_owner"
+            pr_lookup_host="$repo_host"
+        elif [[ "$is_fork" == "true" ]]; then
+            printf "INFO: tracked remote branch '%s/%s' is on fork '%s', owned by '%s'; leaving the remote branch unchanged.\n" "$remote" "$remote_branch" "$repo_name" "$repo_owner" >&2
+            return 0
+        else
+            print_explicit_remote_choice_required_error \
+                "$remote" \
+                "$remote_branch" \
+                "Remote repository '$repo_name' is not a fork owned by '$viewer_login'."
+            return 1
+        fi
+        ;;
+    rename-tracking)
+        if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
+            IFS=$'\t' read -r repo_name is_fork repo_owner parent_repo viewer_login repo_host <<<"$repo_info"
+            pr_head_owner="$repo_owner"
+            pr_lookup_host="$repo_host"
+        else
+            require_pr_check=0
+        fi
+        ;;
+    *)
+        echo "ASSERTION FAILURE: unknown archive mode '$archive_mode'" >&2
+        return 1
+        ;;
+    esac
+
+    plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
+}
+
 rename_remote_upstream_branch() {
     local remote="$1"
     local remote_branch="$2"
@@ -144,12 +293,12 @@ rename_remote_upstream_branch() {
     local push_output
 
     if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
-        echo "Error: failed to rename upstream branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
+        echo "Error: failed to rename remote branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
         printf '%s\n' "$push_output" >&2
         return 1
     fi
 
-    printf 'INFO: upstream branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
+    printf 'INFO: remote branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
 }
 
 print_backup_failure_error() {
@@ -163,7 +312,7 @@ print_backup_failure_error() {
         printf '%s\n' "$details" >&2
     fi
     if [[ "$remote_rename_done" -eq 1 ]]; then
-        echo "The upstream archive rename already succeeded, but the local branch has not been deleted." >&2
+        echo "The remote archive rename already succeeded, but the local branch has not been deleted." >&2
         echo "Please resolve the backup problem and rerun the command; rerunning is safe." >&2
     else
         echo "The local branch has not been deleted." >&2
@@ -218,7 +367,7 @@ archive_branch_tip_and_delete() (
         return 1
     fi
 
-    local local_only="$1"
+    local archive_mode="$1"
     local branch="$2"
     local current_branch commit
     local remote_rename_done=0
@@ -240,8 +389,8 @@ archive_branch_tip_and_delete() (
         return 1
     fi
 
-    if [[ "$local_only" -eq 0 ]]; then
-        remote_archive_plan=$(plan_remote_upstream_archive "$branch") || return
+    if [[ "$archive_mode" != "local-only" ]]; then
+        remote_archive_plan=$(plan_remote_tracking_archive "$branch" "$archive_mode") || return
     fi
 
     commit=$(git rev-parse "$branch")
@@ -258,7 +407,7 @@ archive_branch_tip_and_delete() (
 )
 
 main() {
-    local local_only=0
+    local archive_mode=auto
     local arg
     local -a branches=()
 
@@ -272,7 +421,20 @@ main() {
         shift
         case "$arg" in
         --local-only)
-            local_only=1
+            if [[ "$archive_mode" == "rename-tracking" ]]; then
+                echo "Error: --local-only and --rename-tracking are mutually exclusive." >&2
+                usage
+                exit 1
+            fi
+            archive_mode=local-only
+            ;;
+        --rename-tracking)
+            if [[ "$archive_mode" == "local-only" ]]; then
+                echo "Error: --local-only and --rename-tracking are mutually exclusive." >&2
+                usage
+                exit 1
+            fi
+            archive_mode=rename-tracking
             ;;
         --help | -h)
             usage
@@ -299,7 +461,7 @@ main() {
     fi
 
     for arg in "${branches[@]}"; do
-        archive_branch_tip_and_delete "$local_only" "$arg"
+        archive_branch_tip_and_delete "$archive_mode" "$arg"
     done
 }
 
