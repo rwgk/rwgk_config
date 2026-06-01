@@ -79,7 +79,7 @@ mosh_ls() {
     sudo ss -lunp | grep mosh-server
 }
 
-if [[ "$OSTYPE" == "msys" ]]; then
+if [[ "${OSTYPE:-}" == msys* ]]; then
     # Git Bash
     export PS1='$(hostname):$PWD $ '
 else
