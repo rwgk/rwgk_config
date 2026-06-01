@@ -62,7 +62,7 @@ rwgk_set_work_root() {
         return 0
     fi
 
-    if ! rwgk_home_is_nfs; then
+    if [[ "${OSTYPE:-}" == msys* ]] || ! rwgk_home_is_nfs; then
         mkdir -p "$HOME/wrk" 2>/dev/null || return 1
         export W="$HOME/wrk"
         return 0
@@ -76,6 +76,13 @@ rwgk_set_work_root() {
         echo "WARNING: falling back to W=$W; please create /wrk to avoid this warning." >&2
     fi
 }
+
+rwgk_set_work_root
+
+# Git Bash uses the Windows home directory. Set W uniformly, but skip the $W/dotdirs setup.
+if [[ "${OSTYPE:-}" == msys* ]]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 rwgk_set_local_dotdir_paths() {
     [ -n "${W:-}" ] && [ -d "$W" ] || return 1
@@ -226,7 +233,6 @@ wipe_tmp_user_caches() {
     wipe_local_dotdir_caches
 }
 
-rwgk_set_work_root
 if rwgk_home_is_nfs; then
     silent_use_local_dotdirs >/dev/null 2>&1 || true
     rwgk_ensure_local_dotdir_symlinks >/dev/null 2>&1 || true
