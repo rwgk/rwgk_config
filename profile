@@ -70,6 +70,20 @@ if [ -f "$HOME/rwgk_config/local_dotdirs_env" ]; then
     . "$HOME/rwgk_config/local_dotdirs_env"
 fi
 
+check_rwgkscrts_permissions() {
+    local secrets_dir="$HOME/.rwgkscrts"
+    local path
+
+    [ -e "$secrets_dir" ] || return 0
+
+    while IFS= read -r path; do
+        echo "WARNING: insecure permissions on secret path: $path" >&2
+        ls -ld "$path" >&2
+    done < <(find "$secrets_dir" -perm /077 -print 2>/dev/null)
+}
+
+check_rwgkscrts_permissions
+
 setup_vim_dirs() {
     mkdir -p "$HOME/.vim/backup" "$HOME/.vim/swap" "$HOME/.vim/undo"
     echo "✅ Vim directories created"
@@ -84,6 +98,7 @@ fi
 export -f clean_path
 export -f prepend_maybe
 export -f venv_activate_maybe
+export -f check_rwgkscrts_permissions
 export -f setup_vim_dirs
 
 if [[ -x /opt/homebrew/bin/brew ]]; then
