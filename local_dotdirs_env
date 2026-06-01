@@ -1,7 +1,8 @@
 # Shared local-machine storage setup.
 #
-# Keep cache/state/data that should not live on an NFS-mounted $HOME under
-# $W/dotdirs. This file is sourced by both profile and early bashrc.
+# Keep cache/state/data that should not live on an NFS-mounted $HOME under a
+# stable /tmp/$USER/dotdirs indirection. This file is sourced by both profile
+# and early bashrc.
 
 if ! command -v clean_path >/dev/null 2>&1; then
     clean_path() {
@@ -81,10 +82,88 @@ if [[ "${OSTYPE:-}" == msys* ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
-rwgk_set_local_dotdir_paths() {
-    [ -n "${W:-}" ] && [ -d "$W" ] || return 1
+rwgk_set_tmp_user_root() {
+    local user_name
 
-    export RWGK_DOTDIRS="$W/dotdirs"
+    user_name="${USER:-$(id -un 2>/dev/null || echo user)}"
+    export RWGK_TMP_USER_ROOT="/tmp/$user_name"
+
+    if [ -e "$RWGK_TMP_USER_ROOT" ] && [ ! -d "$RWGK_TMP_USER_ROOT" ]; then
+        return 1
+    fi
+
+    mkdir -p "$RWGK_TMP_USER_ROOT" 2>/dev/null || return 1
+    [ -O "$RWGK_TMP_USER_ROOT" ] || return 1
+    chmod 700 "$RWGK_TMP_USER_ROOT" 2>/dev/null || return 1
+}
+
+rwgk_new_inactive_dotdirs_path() {
+    local timestamp
+
+    timestamp="$(date +%Y-%m-%d+%H%M%S 2>/dev/null || echo unknown)"
+    echo "$RWGK_TMP_USER_ROOT/dotdirs-inactive-$timestamp-$$"
+}
+
+rwgk_restore_inactive_dotdirs() {
+    local candidate=""
+    local d
+
+    for d in "$RWGK_TMP_USER_ROOT"/dotdirs-inactive-*; do
+        [ -d "$d" ] || continue
+        candidate="$d"
+    done
+
+    if [ -n "$candidate" ]; then
+        mv "$candidate" "$RWGK_TMP_USER_ROOT/dotdirs"
+    else
+        mkdir -p "$RWGK_TMP_USER_ROOT/dotdirs" 2>/dev/null || return 1
+    fi
+}
+
+rwgk_configure_dotdirs_indirection() {
+    rwgk_set_tmp_user_root || return 1
+
+    local dotdirs_path="$RWGK_TMP_USER_ROOT/dotdirs"
+    local lock_dir="$RWGK_TMP_USER_ROOT/dotdirs.lock"
+    local inactive_path
+
+    mkdir "$lock_dir" 2>/dev/null || return 1
+
+    if [ -d "/wrk" ]; then
+        mkdir -p "/wrk/dotdirs" 2>/dev/null || {
+            rmdir "$lock_dir"
+            return 1
+        }
+        chmod 700 "/wrk/dotdirs" 2>/dev/null || true
+
+        if [ -L "$dotdirs_path" ]; then
+            if [ "$(readlink "$dotdirs_path")" != "/wrk/dotdirs" ]; then
+                rm -- "$dotdirs_path" && ln -s "/wrk/dotdirs" "$dotdirs_path"
+            fi
+        elif [ -e "$dotdirs_path" ]; then
+            inactive_path="$(rwgk_new_inactive_dotdirs_path)"
+            if [ ! -e "$inactive_path" ]; then
+                mv "$dotdirs_path" "$inactive_path" && ln -s "/wrk/dotdirs" "$dotdirs_path"
+            fi
+        else
+            ln -s "/wrk/dotdirs" "$dotdirs_path"
+        fi
+    else
+        if [ -L "$dotdirs_path" ]; then
+            rm -- "$dotdirs_path" && rwgk_restore_inactive_dotdirs
+        elif [ ! -e "$dotdirs_path" ]; then
+            rwgk_restore_inactive_dotdirs
+        fi
+        [ ! -d "$dotdirs_path" ] || chmod 700 "$dotdirs_path" 2>/dev/null || true
+    fi
+
+    rmdir "$lock_dir"
+}
+
+rwgk_set_local_dotdir_paths() {
+    rwgk_set_tmp_user_root || return 1
+
+    export RWGK_DOTDIRS="$RWGK_TMP_USER_ROOT/dotdirs"
     export RWGK_DOTDIRS_CACHE="$RWGK_DOTDIRS/cache"
     export RWGK_DOTDIRS_BIN="$RWGK_DOTDIRS/local/bin"
     export RWGK_DOTDIRS_LIB="$RWGK_DOTDIRS/local/lib"
@@ -97,6 +176,7 @@ rwgk_set_local_dotdir_paths() {
 }
 
 rwgk_mkdir_local_dotdirs() {
+    rwgk_configure_dotdirs_indirection || return 1
     rwgk_set_local_dotdir_paths || return 1
     mkdir -p \
         "$RWGK_DOTDIRS_CACHE" \
@@ -241,6 +321,10 @@ if [ -n "${BASH_VERSION:-}" ]; then
     export -f rwgk_home_is_nfs
     export -f rwgk_shell_is_interactive
     export -f rwgk_set_work_root
+    export -f rwgk_set_tmp_user_root
+    export -f rwgk_new_inactive_dotdirs_path
+    export -f rwgk_restore_inactive_dotdirs
+    export -f rwgk_configure_dotdirs_indirection
     export -f rwgk_set_local_dotdir_paths
     export -f rwgk_mkdir_local_dotdirs
     export -f rwgk_ensure_dotdir_symlink
