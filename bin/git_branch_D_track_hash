@@ -52,7 +52,7 @@ get_remote_branch_sha() {
 
 get_github_remote_repo_info() {
     local remote="$1"
-    local remote_url gh_output viewer_login repo_url repo_host repo_name is_fork repo_owner parent_repo
+    local remote_url gh_output viewer_login repo_url repo_host repo_name is_fork repo_owner
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
@@ -65,13 +65,13 @@ get_github_remote_repo_info() {
     fi
 
     if ! gh_output=$(gh repo view "$remote_url" \
-        --json url,nameWithOwner,isFork,owner,parent \
-        --jq '[.url, .nameWithOwner, .isFork, .owner.login, (.parent.nameWithOwner // "")] | @tsv' 2>&1); then
+        --json url,nameWithOwner,isFork,owner \
+        --jq '[.url, .nameWithOwner, .isFork, .owner.login] | @tsv' 2>&1); then
         printf '%s\n' "$gh_output" >&2
         return 1
     fi
 
-    IFS=$'\t' read -r repo_url repo_name is_fork repo_owner parent_repo <<<"$gh_output"
+    IFS=$'\t' read -r repo_url repo_name is_fork repo_owner <<<"$gh_output"
     repo_host="${repo_url#https://}"
     repo_host="${repo_host%%/*}"
     if [[ -z "$repo_host" || "$repo_host" == "$repo_url" ]]; then
@@ -84,7 +84,7 @@ get_github_remote_repo_info() {
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$parent_repo" "$viewer_login" "$repo_host"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$viewer_login" "$repo_host"
 }
 
 query_pr_info_for_remote_branch() {
@@ -225,7 +225,7 @@ plan_remote_branch_archive() {
 plan_remote_tracking_archive() {
     local branch="$1"
     local archive_mode="$2"
-    local upstream_info remote remote_branch remote_sha repo_info repo_name is_fork repo_owner parent_repo viewer_login repo_host
+    local upstream_info remote remote_branch remote_sha repo_info repo_name is_fork repo_owner viewer_login repo_host
     local pr_head_owner="" pr_lookup_host="" require_pr_check=1
 
     if ! upstream_info=$(get_remote_upstream_info "$branch"); then
@@ -252,7 +252,7 @@ plan_remote_tracking_archive() {
             return 1
         fi
 
-        IFS=$'\t' read -r repo_name is_fork repo_owner parent_repo viewer_login repo_host <<<"$repo_info"
+        IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
         if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
             pr_head_owner="$repo_owner"
             pr_lookup_host="$repo_host"
@@ -269,7 +269,7 @@ plan_remote_tracking_archive() {
         ;;
     rename-tracking)
         if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
-            IFS=$'\t' read -r repo_name is_fork repo_owner parent_repo viewer_login repo_host <<<"$repo_info"
+            IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
             pr_head_owner="$repo_owner"
             pr_lookup_host="$repo_host"
         else
