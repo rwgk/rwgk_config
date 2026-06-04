@@ -961,7 +961,7 @@ _complete_git_branch_D_track_hash() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--local-only" -- "$cur"))
+        COMPREPLY=($(compgen -W "--local-only --rename-tracking --archive-to-remote=" -- "$cur"))
         return
     fi
 

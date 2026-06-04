@@ -3,17 +3,21 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<EOF
-Usage: $(basename "$0") [--local-only | --rename-tracking] <branch> [<branch> ...]
+Usage: $(basename "$0") [--local-only | --rename-tracking | --archive-to-remote=<remote>] <branch> [<branch> ...]
 
 Options:
-  --local-only       Delete only the local branch.
-  --rename-tracking  Also archive the tracked remote branch, even when it is
-                     not safe to do so by default.
+  --local-only                 Delete only the local branch.
+  --rename-tracking            Also archive the tracked remote branch, even
+                               when it is not safe to do so by default.
+  --archive-to-remote=<remote> If the tracked branch is not on your fork,
+                               archive it to your fork remote, then delete the
+                               tracked remote branch.
 
 Default behavior:
   The tracked remote branch is archived only when this script can identify the
   remote as your authenticated GitHub fork and confirm that there is no open PR.
-  Upstream and other non-fork remotes require --local-only or --rename-tracking.
+  Upstream and other non-fork remotes require --local-only, --rename-tracking,
+  or --archive-to-remote=<remote>.
   A tracked remote branch on someone else's GitHub fork is left unchanged.
 EOF
 }
@@ -132,7 +136,7 @@ print_pr_state_unknown_error() {
     if [[ -n "$details" ]]; then
         printf '%s\n' "$details" >&2
     fi
-    echo "Renaming the remote branch would be unsafe until PR state is known." >&2
+    echo "Deleting or renaming the remote branch would be unsafe until PR state is known." >&2
     echo "Please close the PR first, then try again." >&2
     echo "Or use the --local-only option." >&2
 }
@@ -150,6 +154,7 @@ print_explicit_remote_choice_required_error() {
     fi
     echo "Use --local-only to delete only the local branch." >&2
     echo "Use --rename-tracking to also archive the tracked remote branch." >&2
+    echo "Use --archive-to-remote=<remote> to archive to your fork before deleting the tracked branch." >&2
 }
 
 print_open_pr_error() {
@@ -160,7 +165,7 @@ print_open_pr_error() {
 
     printf "Error: remote branch '%s/%s' still has open PR #%s:\n" "$remote" "$remote_branch" "$pr_number" >&2
     printf "  %s\n" "$pr_url" >&2
-    echo "Renaming the remote branch would likely close the PR." >&2
+    echo "Deleting or renaming the remote branch would likely close the PR." >&2
     echo "Please close the PR first, then try again." >&2
     echo "Or use the --local-only option." >&2
 }
@@ -185,6 +190,7 @@ plan_remote_branch_archive() {
     local pr_head_owner="${4:-}"
     local pr_lookup_host="${5:-}"
     local require_pr_check="${6:-1}"
+    local archive_remote="${7:-$remote}"
     local open_pr_info pr_info
     local pr_number="" pr_state="" pr_url="" archive_branch archive_sha
 
@@ -194,7 +200,7 @@ plan_remote_branch_archive() {
                 print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
                 return 1
             fi
-            printf "Warning: could not determine PR state for '%s/%s'; proceeding because --rename-tracking was explicit.\n" "$remote" "$remote_branch" >&2
+            printf "Warning: could not determine PR state for '%s/%s'; proceeding because remote archive/delete was explicitly requested.\n" "$remote" "$remote_branch" >&2
             printf '%s\n' "$open_pr_info" >&2
         elif [[ -n "$open_pr_info" ]]; then
             IFS=$'\t' read -r pr_number pr_state pr_url <<<"$open_pr_info"
@@ -202,7 +208,7 @@ plan_remote_branch_archive() {
             return 1
         fi
     else
-        printf "Warning: PR state was not checked for '%s/%s'; proceeding because --rename-tracking was explicit.\n" "$remote" "$remote_branch" >&2
+        printf "Warning: PR state was not checked for '%s/%s'; proceeding because remote archive/delete was explicitly requested.\n" "$remote" "$remote_branch" >&2
     fi
 
     if [[ -n "$pr_head_owner" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_head_owner" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
@@ -211,21 +217,42 @@ plan_remote_branch_archive() {
 
     archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
 
-    if ! archive_sha=$(get_remote_branch_sha "$remote" "$archive_branch"); then
+    if ! archive_sha=$(get_remote_branch_sha "$archive_remote" "$archive_branch"); then
         return 1
     fi
     if [[ -n "$archive_sha" ]]; then
-        echo "Error: archive branch already exists on remote: '$remote/$archive_branch'." >&2
+        echo "Error: archive branch already exists on remote: '$archive_remote/$archive_branch'." >&2
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\n' "$remote" "$remote_branch" "$remote_sha" "$archive_branch"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$remote" "$remote_branch" "$remote_sha" "$archive_branch" "$archive_remote"
+}
+
+get_owned_fork_remote_info() {
+    local remote="$1"
+    local repo_info repo_name is_fork repo_owner viewer_login repo_host
+
+    if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
+        printf "Error: cannot determine whether archive remote '%s' is your GitHub fork.\n" "$remote" >&2
+        printf '%s\n' "$repo_info" >&2
+        return 1
+    fi
+
+    IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+    if [[ "$is_fork" != "true" || "$repo_owner" != "$viewer_login" ]]; then
+        printf "Error: archive remote '%s' points to '%s', which is not your authenticated GitHub fork.\n" "$remote" "$repo_name" >&2
+        printf "Authenticated GitHub user: '%s'; repository owner: '%s'; is fork: '%s'.\n" "$viewer_login" "$repo_owner" "$is_fork" >&2
+        return 1
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$viewer_login" "$repo_host"
 }
 
 plan_remote_tracking_archive() {
     local branch="$1"
     local archive_mode="$2"
     local upstream_info remote remote_branch remote_sha repo_info repo_name is_fork repo_owner viewer_login repo_host
+    local archive_to_remote="" archive_repo_info archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host
     local pr_head_owner="" pr_lookup_host="" require_pr_check=1
 
     if ! upstream_info=$(get_remote_upstream_info "$branch"); then
@@ -267,6 +294,34 @@ plan_remote_tracking_archive() {
             return 1
         fi
         ;;
+    archive-to-remote:*)
+        archive_to_remote="${archive_mode#archive-to-remote:}"
+        if [[ -z "$archive_to_remote" ]]; then
+            echo "Error: --archive-to-remote requires a remote name." >&2
+            return 1
+        fi
+        if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
+            print_explicit_remote_choice_required_error \
+                "$remote" \
+                "$remote_branch" \
+                "Cannot determine whether tracked remote '$remote' is your GitHub fork." \
+                "$repo_info"
+            return 1
+        fi
+
+        IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+        pr_head_owner="$repo_owner"
+        pr_lookup_host="$repo_host"
+        if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
+            printf "INFO: tracked remote branch '%s/%s' is already on your fork; archiving on the tracked remote.\n" "$remote" "$remote_branch" >&2
+        else
+            if ! archive_repo_info=$(get_owned_fork_remote_info "$archive_to_remote"); then
+                return 1
+            fi
+            IFS=$'\t' read -r archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host <<<"$archive_repo_info"
+            printf "INFO: tracked remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
+        fi
+        ;;
     rename-tracking)
         if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
             IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
@@ -282,7 +337,11 @@ plan_remote_tracking_archive() {
         ;;
     esac
 
-    plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
+    if [[ -n "$archive_to_remote" && ! ( "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ) ]]; then
+        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check" "$archive_to_remote"
+    else
+        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
+    fi
 }
 
 rename_remote_upstream_branch() {
@@ -290,15 +349,33 @@ rename_remote_upstream_branch() {
     local remote_branch="$2"
     local remote_sha="$3"
     local archive_branch="$4"
+    local archive_remote="${5:-$remote}"
     local push_output
 
-    if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
-        echo "Error: failed to rename remote branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
+    if [[ "$archive_remote" == "$remote" ]]; then
+        if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
+            echo "Error: failed to rename remote branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
+            printf '%s\n' "$push_output" >&2
+            return 1
+        fi
+
+        printf 'INFO: remote branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
+        return 0
+    fi
+
+    if ! push_output=$(git push "$archive_remote" "$remote_sha:refs/heads/$archive_branch" 2>&1); then
+        echo "Error: failed to archive remote branch '$remote/$remote_branch' to '$archive_remote/$archive_branch'." >&2
         printf '%s\n' "$push_output" >&2
         return 1
     fi
 
-    printf 'INFO: remote branch %s/%s renamed to %s/%s\n' "$remote" "$remote_branch" "$remote" "$archive_branch"
+    if ! push_output=$(git push "$remote" ":refs/heads/$remote_branch" 2>&1); then
+        echo "Error: archived remote branch to '$archive_remote/$archive_branch', but failed to delete '$remote/$remote_branch'." >&2
+        printf '%s\n' "$push_output" >&2
+        return 1
+    fi
+
+    printf 'INFO: remote branch %s/%s archived to %s/%s and deleted from %s\n' "$remote" "$remote_branch" "$archive_remote" "$archive_branch" "$remote"
 }
 
 print_backup_failure_error() {
@@ -371,7 +448,7 @@ archive_branch_tip_and_delete() (
     local branch="$2"
     local current_branch commit
     local remote_rename_done=0
-    local remote_archive_plan remote remote_branch remote_sha archive_branch
+    local remote_archive_plan remote remote_branch remote_sha archive_branch archive_remote
 
     if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
         echo "Error: Neither MY_GIT_BACKTRACKING_INFO_LOCAL nor MY_GIT_BACKTRACKING_INFO_REMOTE is set." >&2
@@ -396,8 +473,8 @@ archive_branch_tip_and_delete() (
     commit=$(git rev-parse "$branch")
 
     if [[ -n "${remote_archive_plan:-}" ]]; then
-        IFS=$'\t' read -r remote remote_branch remote_sha archive_branch <<<"$remote_archive_plan"
-        rename_remote_upstream_branch "$remote" "$remote_branch" "$remote_sha" "$archive_branch" || return
+        IFS=$'\t' read -r remote remote_branch remote_sha archive_branch archive_remote <<<"$remote_archive_plan"
+        rename_remote_upstream_branch "$remote" "$remote_branch" "$remote_sha" "$archive_branch" "${archive_remote:-$remote}" || return
         remote_rename_done=1
     fi
 
@@ -421,20 +498,33 @@ main() {
         shift
         case "$arg" in
         --local-only)
-            if [[ "$archive_mode" == "rename-tracking" ]]; then
-                echo "Error: --local-only and --rename-tracking are mutually exclusive." >&2
+            if [[ "$archive_mode" != "auto" ]]; then
+                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
                 usage
                 exit 1
             fi
             archive_mode=local-only
             ;;
         --rename-tracking)
-            if [[ "$archive_mode" == "local-only" ]]; then
-                echo "Error: --local-only and --rename-tracking are mutually exclusive." >&2
+            if [[ "$archive_mode" != "auto" ]]; then
+                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
                 usage
                 exit 1
             fi
             archive_mode=rename-tracking
+            ;;
+        --archive-to-remote=*)
+            if [[ "$archive_mode" != "auto" ]]; then
+                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
+                usage
+                exit 1
+            fi
+            archive_mode="archive-to-remote:${arg#--archive-to-remote=}"
+            ;;
+        --archive-to-remote)
+            echo "Error: --archive-to-remote requires '=REMOTE', for example --archive-to-remote=origin." >&2
+            usage
+            exit 1
             ;;
         --help | -h)
             usage
