@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<EOF
-Usage: $(basename "$0") [--local-only | --rename-tracking | --archive-to-remote=<remote>] <branch> [<branch> ...]
+Usage: $(basename "$0") [--local-only | --archive-tracking | --archive-to-remote=<remote>] <branch> [<branch> ...]
 
 Options:
   --local-only                 Delete only the local branch.
-  --rename-tracking            Also archive the tracked remote branch, even
+  --archive-tracking           Also archive the tracked remote branch, even
                                when it is not safe to do so by default.
   --archive-to-remote=<remote> If the tracked branch is not on your fork,
                                archive it to your fork remote, then delete the
@@ -16,7 +16,7 @@ Options:
 Default behavior:
   The tracked remote branch is archived only when this script can identify the
   remote as your authenticated GitHub fork and confirm that there is no open PR.
-  Upstream and other non-fork remotes require --local-only, --rename-tracking,
+  Upstream and other non-fork remotes require --local-only, --archive-tracking,
   or --archive-to-remote=<remote>.
   A tracked remote branch on someone else's GitHub fork is left unchanged.
 EOF
@@ -153,7 +153,7 @@ print_explicit_remote_choice_required_error() {
         printf '%s\n' "$details" >&2
     fi
     echo "Use --local-only to delete only the local branch." >&2
-    echo "Use --rename-tracking to also archive the tracked remote branch." >&2
+    echo "Use --archive-tracking to also archive the tracked remote branch." >&2
     echo "Use --archive-to-remote=<remote> to archive to your fork before deleting the tracked branch." >&2
 }
 
@@ -322,7 +322,7 @@ plan_remote_tracking_archive() {
             printf "INFO: tracked remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
         fi
         ;;
-    rename-tracking)
+    archive-tracking)
         if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
             IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
             pr_head_owner="$repo_owner"
@@ -499,23 +499,23 @@ main() {
         case "$arg" in
         --local-only)
             if [[ "$archive_mode" != "auto" ]]; then
-                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
+                echo "Error: --local-only, --archive-tracking, and --archive-to-remote are mutually exclusive." >&2
                 usage
                 exit 1
             fi
             archive_mode=local-only
             ;;
-        --rename-tracking)
+        --archive-tracking)
             if [[ "$archive_mode" != "auto" ]]; then
-                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
+                echo "Error: --local-only, --archive-tracking, and --archive-to-remote are mutually exclusive." >&2
                 usage
                 exit 1
             fi
-            archive_mode=rename-tracking
+            archive_mode=archive-tracking
             ;;
         --archive-to-remote=*)
             if [[ "$archive_mode" != "auto" ]]; then
-                echo "Error: --local-only, --rename-tracking, and --archive-to-remote are mutually exclusive." >&2
+                echo "Error: --local-only, --archive-tracking, and --archive-to-remote are mutually exclusive." >&2
                 usage
                 exit 1
             fi
