@@ -7,13 +7,14 @@ SCRIPT_NAME=$(basename "$0")
 usage() {
     cat <<EOF
 Usage:
-  $SCRIPT_NAME <upstream-git-url> [fork-git-url] [--branch <branch-name>]
+  $SCRIPT_NAME <upstream-git-url> [fork-git-url] [--branch <branch-name>] [--clone-dir <directory>]
 
 Examples:
   $SCRIPT_NAME https://github.com/pybind/pybind11.git
   $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git
   $SCRIPT_NAME https://github.com/pybind/pybind11.git --branch specific-upstream-branch
   $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git --branch specific-upstream-branch
+  $SCRIPT_NAME https://gitlab-master.nvidia.com/kpilch/ansible.git https://gitlab-master.nvidia.com/rgrossekunst/kpilch-ansible.git --clone-dir kpilch-ansible
 EOF
 }
 
@@ -21,6 +22,7 @@ EOF
 UPSTREAM_URL=""
 FORK_URL=""
 BRANCH_NAME=""
+CLONE_DIR=""
 
 # Collect at most two positionals (upstream, optional fork) and handle flags anywhere.
 positional_count=0
@@ -34,6 +36,16 @@ while [[ $# -gt 0 ]]; do
             exit 1
         }
         BRANCH_NAME="$1"
+        shift
+        ;;
+    --clone-dir)
+        shift
+        [[ $# -gt 0 ]] || {
+            echo "Error: --clone-dir requires a value"
+            usage
+            exit 1
+        }
+        CLONE_DIR="$1"
         shift
         ;;
     -h | --help)
@@ -98,7 +110,9 @@ if [[ -z "${FORK_URL:-}" ]]; then
 fi
 
 # Choose clone directory
-if [[ -n "$BRANCH_NAME" ]]; then
+if [[ -n "$CLONE_DIR" ]]; then
+    :
+elif [[ -n "$BRANCH_NAME" ]]; then
     CLONE_DIR="$BRANCH_NAME"
 else
     CLONE_DIR="$REPO_NAME"
