@@ -929,17 +929,6 @@ if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push
     )
 fi
 
-git_branch_D_track_hash() {
-    local script="$HOME/rwgk_config/bin/git_branch_D_track_hash"
-
-    if [[ ! -x "$script" ]]; then
-        echo "Error: helper script not found: '$script'" >&2
-        return 1
-    fi
-
-    "$script" "$@"
-}
-
 _complete_local_git_branches() {
     # only complete if we're in a git repo
     git rev-parse --git-dir >/dev/null 2>&1 || {
