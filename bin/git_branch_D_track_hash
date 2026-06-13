@@ -7,11 +7,11 @@ Usage: $(basename "$0") [--local-only | --archive-tracking | --archive-to-remote
 
 Options:
   --local-only                 Delete only the local branch.
-  --archive-tracking           Also archive the tracked remote branch, even
+  --archive-tracking           Also archive the tracked/detected remote branch, even
                                when it is not safe to do so by default.
-  --archive-to-remote=<remote> If the tracked branch is not on your fork,
+  --archive-to-remote=<remote> If the tracked/detected branch is not on your fork,
                                archive it to your fork remote, then delete the
-                               tracked remote branch.
+                               tracked/detected remote branch.
 
 Default behavior:
   The tracked remote branch is archived only when this script can identify the
@@ -19,6 +19,8 @@ Default behavior:
   Upstream and other non-fork remotes require --local-only, --archive-tracking,
   or --archive-to-remote=<remote>.
   A tracked remote branch on someone else's GitHub fork is left unchanged.
+  If there is no live tracked remote branch, a same-name remote branch is
+  detected and these safety rules are applied before any local deletion happens.
 EOF
 }
 
@@ -52,6 +54,51 @@ get_remote_branch_sha() {
     if [[ -n "$ls_remote_output" ]]; then
         printf '%s\n' "${ls_remote_output%%$'\t'*}"
     fi
+}
+
+get_remote_archive_source_info() {
+    local branch="$1"
+    local upstream_info remote remote_branch remote_sha
+    local remote_ref
+    local -a matching_remote_refs=()
+
+    if upstream_info=$(get_remote_upstream_info "$branch"); then
+        IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
+        if ! remote_sha=$(get_remote_branch_sha "$remote" "$remote_branch"); then
+            return 1
+        fi
+        if [[ -n "$remote_sha" ]]; then
+            printf '%s\t%s\t%s\ttracked\n' "$remote" "$remote_branch" "$remote_sha"
+            return 0
+        fi
+    fi
+
+    while IFS= read -r remote; do
+        if ! remote_sha=$(get_remote_branch_sha "$remote" "$branch"); then
+            return 1
+        fi
+        if [[ -n "$remote_sha" ]]; then
+            matching_remote_refs+=("$remote"$'\t'"$branch"$'\t'"$remote_sha")
+        fi
+    done < <(git remote)
+
+    case "${#matching_remote_refs[@]}" in
+    0)
+        return 2
+        ;;
+    1)
+        printf '%s\tmatching-name\n' "${matching_remote_refs[0]}"
+        ;;
+    *)
+        printf "Error: branch '%s' does not have a live tracked remote branch, and same-name remote branches exist on multiple remotes:\n" "$branch" >&2
+        for remote_ref in "${matching_remote_refs[@]}"; do
+            IFS=$'\t' read -r remote remote_branch remote_sha <<<"$remote_ref"
+            printf "  %s/%s (%s)\n" "$remote" "$remote_branch" "$remote_sha" >&2
+        done
+        echo "Set the local branch upstream to the intended remote branch, or use --local-only to delete only the local branch." >&2
+        return 1
+        ;;
+    esac
 }
 
 get_github_remote_repo_info() {
@@ -89,6 +136,19 @@ get_github_remote_repo_info() {
     fi
 
     printf '%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$viewer_login" "$repo_host"
+}
+
+find_owned_fork_remote_name() {
+    local remote
+
+    while IFS= read -r remote; do
+        if get_owned_fork_remote_info "$remote" >/dev/null 2>&1; then
+            printf '%s\n' "$remote"
+            return 0
+        fi
+    done < <(git remote)
+
+    return 1
 }
 
 query_pr_info_for_remote_branch() {
@@ -146,15 +206,21 @@ print_explicit_remote_choice_required_error() {
     local remote_branch="$2"
     local reason="$3"
     local details="${4:-}"
+    local fork_remote
 
-    printf "Error: tracked remote branch '%s/%s' is not safe to rename by default.\n" "$remote" "$remote_branch" >&2
+    printf "Error: tracked/detected remote branch '%s/%s' is not safe to rename by default.\n" "$remote" "$remote_branch" >&2
     printf '%s\n' "$reason" >&2
     if [[ -n "$details" ]]; then
         printf '%s\n' "$details" >&2
     fi
+    echo "No local or remote changes were made." >&2
     echo "Use --local-only to delete only the local branch." >&2
-    echo "Use --archive-tracking to also archive the tracked remote branch." >&2
-    echo "Use --archive-to-remote=<remote> to archive to your fork before deleting the tracked branch." >&2
+    if fork_remote=$(find_owned_fork_remote_name 2>/dev/null); then
+        printf "Use --archive-to-remote=%s to archive to your fork before deleting the tracked/detected branch.\n" "$fork_remote" >&2
+    else
+        echo "Use --archive-to-remote=<fork-remote> to archive to your fork before deleting the tracked/detected branch." >&2
+    fi
+    echo "Use --archive-tracking to archive/delete on the tracked/detected remote itself." >&2
 }
 
 print_open_pr_error() {
@@ -177,7 +243,7 @@ build_archive_remote_branch_name() {
 
     timestamp=$(mlt)
     if [[ -n "$pr_number" ]]; then
-        printf 'archive/%s_pr%s_%s\n' "$timestamp" "$pr_number" "$remote_branch"
+        printf 'archive/pr%s_%s_%s\n' "$pr_number" "$timestamp" "$remote_branch"
     else
         printf 'archive/%s_%s\n' "$timestamp" "$remote_branch"
     fi
@@ -251,19 +317,27 @@ get_owned_fork_remote_info() {
 plan_remote_tracking_archive() {
     local branch="$1"
     local archive_mode="$2"
-    local upstream_info remote remote_branch remote_sha repo_info repo_name is_fork repo_owner viewer_login repo_host
+    local source_info remote remote_branch remote_sha source_kind repo_info repo_name is_fork repo_owner viewer_login repo_host
     local archive_to_remote="" archive_repo_info archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host
     local pr_head_owner="" pr_lookup_host="" require_pr_check=1
+    local reason source_status
 
-    if ! upstream_info=$(get_remote_upstream_info "$branch"); then
-        return 0
-    fi
-
-    IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
-
-    if ! remote_sha=$(get_remote_branch_sha "$remote" "$remote_branch"); then
+    if source_info=$(get_remote_archive_source_info "$branch"); then
+        :
+    else
+        source_status="$?"
+        if [[ "$source_status" -eq 2 ]]; then
+            return 0
+        fi
         return 1
     fi
+
+    IFS=$'\t' read -r remote remote_branch remote_sha source_kind <<<"$source_info"
+
+    if [[ "$source_kind" == "matching-name" ]]; then
+        printf "INFO: local branch '%s' is not tracking a live remote branch, but '%s/%s' exists.\n" "$branch" "$remote" "$remote_branch" >&2
+    fi
+
     if [[ -z "$remote_sha" ]]; then
         return 0
     fi
@@ -284,13 +358,17 @@ plan_remote_tracking_archive() {
             pr_head_owner="$repo_owner"
             pr_lookup_host="$repo_host"
         elif [[ "$is_fork" == "true" ]]; then
-            printf "INFO: tracked remote branch '%s/%s' is on fork '%s', owned by '%s'; leaving the remote branch unchanged.\n" "$remote" "$remote_branch" "$repo_name" "$repo_owner" >&2
+            printf "INFO: tracked/detected remote branch '%s/%s' is on fork '%s', owned by '%s'; leaving the remote branch unchanged.\n" "$remote" "$remote_branch" "$repo_name" "$repo_owner" >&2
             return 0
         else
+            reason="Remote repository '$repo_name' is not a fork owned by '$viewer_login'."
+            if [[ "$source_kind" == "matching-name" ]]; then
+                reason="$reason The local branch is not configured to track it, but a remote branch with the same name exists there."
+            fi
             print_explicit_remote_choice_required_error \
                 "$remote" \
                 "$remote_branch" \
-                "Remote repository '$repo_name' is not a fork owned by '$viewer_login'."
+                "$reason"
             return 1
         fi
         ;;
@@ -304,7 +382,7 @@ plan_remote_tracking_archive() {
             print_explicit_remote_choice_required_error \
                 "$remote" \
                 "$remote_branch" \
-                "Cannot determine whether tracked remote '$remote' is your GitHub fork." \
+                "Cannot determine whether tracked/detected remote '$remote' is your GitHub fork." \
                 "$repo_info"
             return 1
         fi
@@ -313,13 +391,13 @@ plan_remote_tracking_archive() {
         pr_head_owner="$repo_owner"
         pr_lookup_host="$repo_host"
         if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
-            printf "INFO: tracked remote branch '%s/%s' is already on your fork; archiving on the tracked remote.\n" "$remote" "$remote_branch" >&2
+            printf "INFO: tracked/detected remote branch '%s/%s' is already on your fork; archiving on that remote.\n" "$remote" "$remote_branch" >&2
         else
             if ! archive_repo_info=$(get_owned_fork_remote_info "$archive_to_remote"); then
                 return 1
             fi
             IFS=$'\t' read -r archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host <<<"$archive_repo_info"
-            printf "INFO: tracked remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
+            printf "INFO: tracked/detected remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
         fi
         ;;
     archive-tracking)
@@ -337,7 +415,7 @@ plan_remote_tracking_archive() {
         ;;
     esac
 
-    if [[ -n "$archive_to_remote" && ! ( "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ) ]]; then
+    if [[ -n "$archive_to_remote" && ! ("$is_fork" == "true" && "$repo_owner" == "$viewer_login") ]]; then
         plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check" "$archive_to_remote"
     else
         plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
