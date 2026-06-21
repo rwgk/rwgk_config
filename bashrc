@@ -1279,8 +1279,25 @@ fresh_venv() {
 }
 
 pip_update_all() {
+    if [ "$#" -ne 0 ]; then
+        echo "pip_update_all: ERROR: no arguments expected, $# given." >&2
+        return 1
+    fi
+
     pip install --upgrade pip && pip freeze | cut -d= -f1 | xargs pip install --upgrade
 }
+
+pip_list_top_level_packages() (
+    if [ "$#" -ne 0 ]; then
+        echo "pip_list_top_level_packages: ERROR: no arguments expected, $# given." >&2
+        return 1
+    fi
+
+    python -m pip list --not-required --format=freeze |
+        grep -v '^-e ' |
+        grep -v '@ file://' |
+        sed -E 's/==.*//'
+)
 
 which_venv() {
     if [ "$#" -ne 0 ]; then
