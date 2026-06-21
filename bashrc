@@ -1310,23 +1310,42 @@ which_venv() {
 
 vac() {
     if [ "$#" -ne 1 ]; then
-        echo "Usage: vac <venv-dir>" >&2
+        echo "vac: Usage: vac <venv-dir>" >&2
         return 2
     fi
 
-    local venv_dir=$1
+    local venv_dir="$1"
 
     if [ ! -d "$venv_dir" ]; then
-        echo "Error: '$venv_dir' is not a directory" >&2
+        echo "vac: ERROR: '$venv_dir' is not a directory" >&2
         return 1
     fi
 
     if [ ! -f "$venv_dir/bin/activate" ]; then
-        echo "Error: '$venv_dir/bin/activate' not found" >&2
+        echo "vac: ERROR: '$venv_dir/bin/activate' not found" >&2
         return 1
     fi
 
     . "$venv_dir/bin/activate"
+}
+
+vacm() {
+    if [ "$#" -ne 0 ]; then
+        echo "vacm: Usage: vacm" >&2
+        return 2
+    fi
+
+    if [ -z "${W+x}" ]; then
+        echo "vacm: ERROR: \$W is not defined; expected virtualenv at \$W/MiscVenv." >&2
+        return 1
+    fi
+
+    if [ -z "$W" ]; then
+        echo "vacm: ERROR: \$W is empty; expected virtualenv at \$W/MiscVenv." >&2
+        return 1
+    fi
+
+    vac "$W/MiscVenv"
 }
 
 pybind11_fresh_venv_for_cmake() {
