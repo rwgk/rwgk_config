@@ -1330,11 +1330,6 @@ vac() {
 }
 
 vacm() {
-    if [ "$#" -ne 0 ]; then
-        echo "vacm: Usage: vacm" >&2
-        return 2
-    fi
-
     if [ -z "${W+x}" ]; then
         echo "vacm: ERROR: \$W is not defined; expected virtualenv at \$W/MiscVenv." >&2
         return 1
@@ -1345,7 +1340,14 @@ vacm() {
         return 1
     fi
 
-    vac "$W/MiscVenv"
+    local venv_dir="$W/MiscVenv"
+
+    if [ "$#" -eq 0 ]; then
+        vac "$venv_dir"
+        return
+    fi
+
+    (vac "$venv_dir" && "$@")
 }
 
 pybind11_fresh_venv_for_cmake() {
