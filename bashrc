@@ -845,6 +845,14 @@ git_swnc() (
     echo "git_swnc: created '$target_branch' and reset '$parent_branch' to '$parent_tracking_branch'"
 )
 
+git_drop_head() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: git_drop_head (no arguments allowed)" >&2
+        return 1
+    fi
+    git rebase --onto HEAD~1 HEAD
+}
+
 gls() {
     local num_commits="${1:-10}"
     git log -n "$num_commits" --format="%H %<(100,trunc)%s"
