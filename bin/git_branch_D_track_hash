@@ -17,8 +17,9 @@ Default behavior (no option):
   Before making changes, every requested branch is checked for a configured
   remote tracking branch. If none has one, this command behaves as --local-only.
   If any branch has one, this command shows and classifies each tracking branch,
-  then stops without making changes. Remote branches are archived or deleted
-  only when --archive-tracking or --archive-to-remote=<remote> is explicit.
+  reports any matching PR, then stops without making changes. Remote branches
+  are archived or deleted only when --archive-tracking or
+  --archive-to-remote=<remote> is explicit.
 
 Explicit remote archive behavior:
   If there is no live tracked remote branch, a same-name remote branch is
@@ -189,7 +190,7 @@ query_pr_info_for_remote_branch() {
         -f "state=$pr_state_filter"
         -f "head=$head_owner:$remote_branch"
         -f per_page=100
-        --jq 'first(.[] | [.number, .state, .html_url] | @tsv) // empty'
+        --jq 'first(.[] | [.number, .state, .html_url, .draft, (.merged_at != null)] | @tsv) // empty'
     )
 
     if ! command -v gh >/dev/null 2>&1; then
@@ -208,6 +209,35 @@ query_pr_info_for_remote_branch() {
     fi
 
     printf '%s\n' "$gh_output"
+}
+
+print_pr_status_for_remote_branch() {
+    local pulls_repo="$1"
+    local head_owner="$2"
+    local remote_branch="$3"
+    local github_host="$4"
+    local pr_info pr_state pr_url is_draft is_merged label
+
+    if ! pr_info=$(query_pr_info_for_remote_branch "$pulls_repo" "$head_owner" "$remote_branch" all "$github_host" 2>/dev/null); then
+        echo "  PR status: unavailable." >&2
+        return
+    fi
+    if [[ -z "$pr_info" ]]; then
+        return
+    fi
+
+    IFS=$'\t' read -r _ pr_state pr_url is_draft is_merged <<<"$pr_info"
+    if [[ "$is_merged" == "true" ]]; then
+        label=Merged
+    elif [[ "$pr_state" == "open" && "$is_draft" == "true" ]]; then
+        label=Draft
+    elif [[ "$pr_state" == "open" ]]; then
+        label=Open
+    else
+        label=Closed
+    fi
+
+    printf "  %s PR: %s\n" "$label" "$pr_url" >&2
 }
 
 query_merged_pr_info_for_head_sha() {
@@ -315,7 +345,8 @@ print_remote_tracking_branch_classification() {
     local branch="$1"
     local remote="$2"
     local remote_branch="$3"
-    local repo_info repo_name is_fork repo_owner viewer_login
+    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
+    local is_owned_fork=1
 
     printf "Local branch '%s' has configured remote tracking branch '%s/%s'.\n" "$branch" "$remote" "$remote_branch" >&2
 
@@ -324,10 +355,10 @@ print_remote_tracking_branch_classification() {
         return 1
     fi
 
-    IFS=$'\t' read -r repo_name is_fork repo_owner _ viewer_login _ <<<"$repo_info"
+    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
     if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
         printf "  Classification: your authenticated GitHub fork '%s'.\n" "$repo_name" >&2
-        return 0
+        is_owned_fork=0
     elif [[ "$is_fork" == "true" ]]; then
         printf "  Classification: someone else's GitHub fork '%s' (owner '%s'; authenticated as '%s').\n" "$repo_name" "$repo_owner" "$viewer_login" >&2
     elif [[ "$is_fork" == "false" ]]; then
@@ -336,7 +367,8 @@ print_remote_tracking_branch_classification() {
         printf "  Classification: unknown; GitHub returned an unrecognized fork status for '%s'.\n" "$repo_name" >&2
     fi
 
-    return 1
+    print_pr_status_for_remote_branch "$pulls_repo" "$repo_owner" "$remote_branch" "$repo_host"
+    return "$is_owned_fork"
 }
 
 validate_branch_for_deletion() {
@@ -394,8 +426,14 @@ print_open_pr_error() {
     local remote_branch="$2"
     local pr_number="$3"
     local pr_url="$4"
+    local is_draft="${5:-false}"
+    local pr_kind=open
 
-    printf "Error: remote branch '%s/%s' still has open PR #%s:\n" "$remote" "$remote_branch" "$pr_number" >&2
+    if [[ "$is_draft" == "true" ]]; then
+        pr_kind=draft
+    fi
+
+    printf "Error: remote branch '%s/%s' still has %s PR #%s:\n" "$remote" "$remote_branch" "$pr_kind" "$pr_number" >&2
     printf "  %s\n" "$pr_url" >&2
     echo "Deleting or renaming the remote branch would likely close the PR." >&2
     echo "Please close the PR first, then try again." >&2
@@ -425,7 +463,7 @@ plan_remote_branch_archive() {
     local require_pr_check="${7:-1}"
     local archive_remote="${8:-$remote}"
     local open_pr_info pr_info
-    local pr_number="" pr_url="" archive_branch archive_sha
+    local pr_number="" pr_url="" is_draft="" archive_branch archive_sha
 
     if [[ -n "$pr_pulls_repo" && -n "$pr_head_owner" ]]; then
         if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_owner" "$remote_branch" open "$pr_lookup_host" 2>&1); then
@@ -436,8 +474,8 @@ plan_remote_branch_archive() {
             printf "Warning: could not determine PR state for '%s/%s'; proceeding because remote archive/delete was explicitly requested.\n" "$remote" "$remote_branch" >&2
             printf '%s\n' "$open_pr_info" >&2
         elif [[ -n "$open_pr_info" ]]; then
-            IFS=$'\t' read -r pr_number _ pr_url <<<"$open_pr_info"
-            print_open_pr_error "$remote" "$remote_branch" "$pr_number" "$pr_url"
+            IFS=$'\t' read -r pr_number _ pr_url is_draft _ <<<"$open_pr_info"
+            print_open_pr_error "$remote" "$remote_branch" "$pr_number" "$pr_url" "$is_draft"
             return 1
         fi
     else
