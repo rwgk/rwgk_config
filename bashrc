@@ -761,7 +761,7 @@ giturl() {
     git config --get remote.origin.url
 }
 
-show_upstream_for_branch() {
+git_show_upstream_for_branch() {
     local branches=()
     local branch
     local result
@@ -771,7 +771,7 @@ show_upstream_for_branch() {
     if [[ $# -eq 0 ]]; then
         branch=$(git branch --show-current 2>/dev/null)
         if [[ -z "$branch" ]]; then
-            echo "show_upstream_for_branch: could not determine current branch" >&2
+            echo "git_show_upstream_for_branch: could not determine current branch" >&2
             return 1
         fi
         branches=("$branch")
@@ -781,12 +781,12 @@ show_upstream_for_branch() {
 
     for branch in "${branches[@]}"; do
         if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-            printf "%s → show_upstream_for_branch: invalid branch name\n" "$branch"
+            printf "%s → git_show_upstream_for_branch: invalid branch name\n" "$branch"
             rc=1
             continue
         fi
         if ! git show-ref --verify --quiet "refs/heads/$branch"; then
-            printf "%s → show_upstream_for_branch: local branch not found\n" "$branch"
+            printf "%s → git_show_upstream_for_branch: local branch not found\n" "$branch"
             rc=1
             continue
         fi
@@ -966,7 +966,7 @@ _complete_git_branch_D_track_hash() {
 }
 
 complete -o bashdefault -o default -F _complete_git_branch_D_track_hash git_branch_D_track_hash
-complete -o bashdefault -o default -F _complete_local_git_branches show_upstream_for_branch
+complete -o bashdefault -o default -F _complete_local_git_branches git_show_upstream_for_branch
 complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch
 
 git_log_between() {
