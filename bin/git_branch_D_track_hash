@@ -296,13 +296,19 @@ print_command_with_option() {
 }
 
 print_default_mode_choices() {
+    local remote_archive_choice="$1"
+    shift
+
     echo "No changes were made. Run the command again with one of these explicit choices:" >&2
     echo "Delete only the local branch(es):" >&2
     print_command_with_option --local-only "$@"
-    echo "Archive/delete on each tracked or detected remote:" >&2
-    print_command_with_option --archive-tracking "$@"
-    echo "Archive to your fork before deleting from each tracked or detected remote (replace FORK_REMOTE):" >&2
-    print_command_with_option --archive-to-remote=FORK_REMOTE "$@"
+    if [[ "$remote_archive_choice" == "archive-tracking" ]]; then
+        echo "Archive/delete on each tracked or detected remote:" >&2
+        print_command_with_option --archive-tracking "$@"
+    else
+        echo "Archive to your fork before deleting from each tracked or detected remote (replace FORK_REMOTE):" >&2
+        print_command_with_option --archive-to-remote=FORK_REMOTE "$@"
+    fi
 }
 
 print_remote_tracking_branch_classification() {
@@ -315,12 +321,13 @@ print_remote_tracking_branch_classification() {
 
     if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
         printf "  Classification: unknown; '%s' could not be identified as a GitHub fork or upstream.\n" "$remote" >&2
-        return
+        return 1
     fi
 
     IFS=$'\t' read -r repo_name is_fork repo_owner _ viewer_login _ <<<"$repo_info"
     if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
         printf "  Classification: your authenticated GitHub fork '%s'.\n" "$repo_name" >&2
+        return 0
     elif [[ "$is_fork" == "true" ]]; then
         printf "  Classification: someone else's GitHub fork '%s' (owner '%s'; authenticated as '%s').\n" "$repo_name" "$repo_owner" "$viewer_login" >&2
     elif [[ "$is_fork" == "false" ]]; then
@@ -328,6 +335,8 @@ print_remote_tracking_branch_classification() {
     else
         printf "  Classification: unknown; GitHub returned an unrecognized fork status for '%s'.\n" "$repo_name" >&2
     fi
+
+    return 1
 }
 
 validate_branch_for_deletion() {
@@ -356,6 +365,7 @@ validate_branch_for_deletion() {
 preflight_default_mode() {
     local branch upstream_info remote remote_branch
     local tracking_branch_found=0
+    local remote_archive_choice=archive-tracking
 
     for branch in "$@"; do
         validate_branch_for_deletion "$branch" || return
@@ -364,13 +374,15 @@ preflight_default_mode() {
     for branch in "$@"; do
         if upstream_info=$(get_remote_upstream_info "$branch"); then
             IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
-            print_remote_tracking_branch_classification "$branch" "$remote" "$remote_branch"
+            if ! print_remote_tracking_branch_classification "$branch" "$remote" "$remote_branch"; then
+                remote_archive_choice=archive-to-remote
+            fi
             tracking_branch_found=1
         fi
     done
 
     if [[ "$tracking_branch_found" -eq 1 ]]; then
-        print_default_mode_choices "$@"
+        print_default_mode_choices "$remote_archive_choice" "$@"
         return 1
     fi
 
