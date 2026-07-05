@@ -114,7 +114,7 @@ get_remote_archive_source_info() {
 
 get_github_remote_repo_info() {
     local remote="$1"
-    local remote_url gh_output viewer_login repo_url repo_host repo_name is_fork repo_owner
+    local remote_url gh_output repo_metadata viewer_login repo_url repo_host repo_name is_fork repo_owner pulls_repo
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
@@ -127,17 +127,29 @@ get_github_remote_repo_info() {
     fi
 
     if ! gh_output=$(gh repo view "$remote_url" \
-        --json url,nameWithOwner,isFork,owner \
-        --jq '[.url, .nameWithOwner, .isFork, .owner.login] | @tsv' 2>&1); then
+        --json url,nameWithOwner \
+        --jq '[.url, .nameWithOwner] | @tsv' 2>&1); then
         printf '%s\n' "$gh_output" >&2
         return 1
     fi
 
-    IFS=$'\t' read -r repo_url repo_name is_fork repo_owner <<<"$gh_output"
+    IFS=$'\t' read -r repo_url repo_name <<<"$gh_output"
     repo_host="${repo_url#https://}"
     repo_host="${repo_host%%/*}"
     if [[ -z "$repo_host" || "$repo_host" == "$repo_url" ]]; then
         printf "Error: cannot determine GitHub host from repository URL '%s'.\n" "$repo_url" >&2
+        return 1
+    fi
+
+    if ! repo_metadata=$(GH_HOST="$repo_host" gh api "repos/$repo_name" \
+        --jq '[.fork, .owner.login, (if .fork then (.source.full_name // .parent.full_name // "") else .full_name end)] | @tsv' 2>&1); then
+        printf '%s\n' "$repo_metadata" >&2
+        return 1
+    fi
+
+    IFS=$'\t' read -r is_fork repo_owner pulls_repo <<<"$repo_metadata"
+    if [[ -z "$pulls_repo" ]]; then
+        printf "Error: cannot determine the pull-request base repository for fork '%s'.\n" "$repo_name" >&2
         return 1
     fi
 
@@ -146,7 +158,7 @@ get_github_remote_repo_info() {
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$viewer_login" "$repo_host"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$pulls_repo" "$viewer_login" "$repo_host"
 }
 
 find_owned_fork_remote_name() {
@@ -163,22 +175,20 @@ find_owned_fork_remote_name() {
 }
 
 query_pr_info_for_remote_branch() {
-    local head_owner="$1"
-    local remote_branch="$2"
-    local pr_state_filter="${3:-all}"
-    local github_host="${4:-}"
+    local pulls_repo="$1"
+    local head_owner="$2"
+    local remote_branch="$3"
+    local pr_state_filter="${4:-all}"
+    local github_host="${5:-}"
     local gh_output
     local -a gh_args=(
-        search prs
-        --head "$head_owner:$remote_branch"
-        --limit 1000
-        --json number,state,url
-        --jq '.[0] | if . then "\(.number)\t\(.state)\t\(.url)" else empty end'
+        api "repos/$pulls_repo/pulls"
+        --method GET
+        -f "state=$pr_state_filter"
+        -f "head=$head_owner:$remote_branch"
+        -f per_page=100
+        --jq 'first(.[] | [.number, .state, .html_url] | @tsv) // empty'
     )
-
-    if [[ "$pr_state_filter" != "all" ]]; then
-        gh_args+=(--state "$pr_state_filter")
-    fi
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
@@ -301,15 +311,16 @@ plan_remote_branch_archive() {
     local remote="$1"
     local remote_branch="$2"
     local remote_sha="$3"
-    local pr_head_owner="${4:-}"
-    local pr_lookup_host="${5:-}"
-    local require_pr_check="${6:-1}"
-    local archive_remote="${7:-$remote}"
+    local pr_pulls_repo="${4:-}"
+    local pr_head_owner="${5:-}"
+    local pr_lookup_host="${6:-}"
+    local require_pr_check="${7:-1}"
+    local archive_remote="${8:-$remote}"
     local open_pr_info pr_info
     local pr_number="" pr_state="" pr_url="" archive_branch archive_sha
 
-    if [[ -n "$pr_head_owner" ]]; then
-        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_head_owner" "$remote_branch" open "$pr_lookup_host" 2>&1); then
+    if [[ -n "$pr_pulls_repo" && -n "$pr_head_owner" ]]; then
+        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_owner" "$remote_branch" open "$pr_lookup_host" 2>&1); then
             if [[ "$require_pr_check" -eq 1 ]]; then
                 print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
                 return 1
@@ -325,7 +336,7 @@ plan_remote_branch_archive() {
         printf "Warning: PR state was not checked for '%s/%s'; proceeding because remote archive/delete was explicitly requested.\n" "$remote" "$remote_branch" >&2
     fi
 
-    if [[ -n "$pr_head_owner" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_head_owner" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
+    if [[ -n "$pr_pulls_repo" && -n "$pr_head_owner" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_owner" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
         IFS=$'\t' read -r pr_number pr_state pr_url <<<"$pr_info"
     fi
 
@@ -346,13 +357,13 @@ plan_deleted_remote_branch_archive() {
     local remote="$1"
     local remote_branch="$2"
     local local_sha="$3"
-    local repo_name="$4"
+    local pulls_repo="$4"
     local repo_owner="$5"
     local repo_host="$6"
     local archive_remote="$7"
     local pr_info pr_number pr_state pr_url pr_head_sha archive_branch archive_sha
 
-    if ! pr_info=$(query_merged_pr_info_for_head_sha "$repo_name" "$repo_owner" "$remote_branch" "$local_sha" "$repo_host" 2>&1); then
+    if ! pr_info=$(query_merged_pr_info_for_head_sha "$pulls_repo" "$repo_owner" "$remote_branch" "$local_sha" "$repo_host" 2>&1); then
         echo "Error: cannot verify whether deleted remote branch '$remote/$remote_branch' was merged at local tip '$local_sha'." >&2
         printf '%s\n' "$pr_info" >&2
         echo "The local branch has not been deleted." >&2
@@ -382,7 +393,7 @@ plan_deleted_remote_branch_archive() {
 
 get_owned_fork_remote_info() {
     local remote="$1"
-    local repo_info repo_name is_fork repo_owner viewer_login repo_host
+    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
 
     if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
         printf "Error: cannot determine whether archive remote '%s' is your GitHub fork.\n" "$remote" >&2
@@ -390,23 +401,23 @@ get_owned_fork_remote_info() {
         return 1
     fi
 
-    IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
     if [[ "$is_fork" != "true" || "$repo_owner" != "$viewer_login" ]]; then
         printf "Error: archive remote '%s' points to '%s', which is not your authenticated GitHub fork.\n" "$remote" "$repo_name" >&2
         printf "Authenticated GitHub user: '%s'; repository owner: '%s'; is fork: '%s'.\n" "$viewer_login" "$repo_owner" "$is_fork" >&2
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$viewer_login" "$repo_host"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$pulls_repo" "$viewer_login" "$repo_host"
 }
 
 plan_remote_tracking_archive() {
     local branch="$1"
     local archive_mode="$2"
     local local_sha="$3"
-    local source_info remote remote_branch remote_sha source_kind repo_info repo_name is_fork repo_owner viewer_login repo_host
-    local archive_to_remote="" archive_repo_info archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host
-    local pr_head_owner="" pr_lookup_host="" require_pr_check=1
+    local source_info remote remote_branch remote_sha source_kind repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
+    local archive_to_remote="" archive_repo_info archive_repo_name archive_is_fork archive_repo_owner archive_pulls_repo archive_viewer_login archive_repo_host
+    local pr_pulls_repo="" pr_head_owner="" pr_lookup_host="" require_pr_check=1
     local reason source_status
 
     if source_info=$(get_remote_archive_source_info "$branch" "$local_sha"); then
@@ -458,8 +469,9 @@ plan_remote_tracking_archive() {
             return 1
         fi
 
-        IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+        IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
         if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
+            pr_pulls_repo="$pulls_repo"
             pr_head_owner="$repo_owner"
             pr_lookup_host="$repo_host"
         elif [[ "$is_fork" == "true" ]]; then
@@ -492,14 +504,15 @@ plan_remote_tracking_archive() {
             return 1
         fi
 
-        IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+        IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
+        pr_pulls_repo="$pulls_repo"
         pr_head_owner="$repo_owner"
         pr_lookup_host="$repo_host"
         if [[ "$source_kind" == "missing-tracked" ]]; then
             if ! archive_repo_info=$(get_owned_fork_remote_info "$archive_to_remote"); then
                 return 1
             fi
-            plan_deleted_remote_branch_archive "$remote" "$remote_branch" "$local_sha" "$repo_name" "$repo_owner" "$repo_host" "$archive_to_remote"
+            plan_deleted_remote_branch_archive "$remote" "$remote_branch" "$local_sha" "$pulls_repo" "$repo_owner" "$repo_host" "$archive_to_remote"
             return
         fi
 
@@ -509,7 +522,7 @@ plan_remote_tracking_archive() {
             if ! archive_repo_info=$(get_owned_fork_remote_info "$archive_to_remote"); then
                 return 1
             fi
-            IFS=$'\t' read -r archive_repo_name archive_is_fork archive_repo_owner archive_viewer_login archive_repo_host <<<"$archive_repo_info"
+            IFS=$'\t' read -r archive_repo_name archive_is_fork archive_repo_owner archive_pulls_repo archive_viewer_login archive_repo_host <<<"$archive_repo_info"
             printf "INFO: tracked/detected remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
         fi
         ;;
@@ -521,7 +534,8 @@ plan_remote_tracking_archive() {
         fi
 
         if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
-            IFS=$'\t' read -r repo_name is_fork repo_owner viewer_login repo_host <<<"$repo_info"
+            IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
+            pr_pulls_repo="$pulls_repo"
             pr_head_owner="$repo_owner"
             pr_lookup_host="$repo_host"
         else
@@ -535,9 +549,9 @@ plan_remote_tracking_archive() {
     esac
 
     if [[ -n "$archive_to_remote" && ! ("$is_fork" == "true" && "$repo_owner" == "$viewer_login") ]]; then
-        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check" "$archive_to_remote"
+        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_pulls_repo" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check" "$archive_to_remote"
     else
-        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
+        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_pulls_repo" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
     fi
 }
 
