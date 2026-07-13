@@ -1,1 +1,4 @@
 gh run download 22734923321 -n cuda-pathfinder-wheel --repo NVIDIA/cuda-python
+
+# List all forks
+gh api --paginate 'repos/pybind/pybind11/forks?per_page=100&sort=newest' --jq '.[].full_name'
