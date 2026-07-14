@@ -56,3 +56,6 @@ git commit -m "Baseline headers snapshot $(date -Iseconds)"
 
 # Switch to release branch with tracking (e.g. cpython)
 git switch --track upstream/3.14
+
+# Example: 12 files changed, 345 insertions(+), 87 deletions(-)
+git diff --shortstat main
