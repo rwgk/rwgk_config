@@ -136,6 +136,12 @@ export FIGNORE=".o:.so:.a:.pyc"
 
 export COPY_EXTENDED_ATTRIBUTES_DISABLE=true # Mac OS 10.4 or older
 export COPYFILE_DISABLE=true                 # Mac OS 10.5
+DisableAppleSleep() (
+    set -x
+    sudo pmset -c sleep 0 # on power
+    sudo pmset -b sleep 0 # on battery
+    pmset -g custom
+)
 DisableApplePressAndHold() {
     echo 'Re-enabling auto-repeat for a-z character keys.'
     defaults write -g ApplePressAndHoldEnabled -bool false
