@@ -971,7 +971,19 @@ _complete_git_branch_D_track_hash() {
     _complete_local_git_branches
 }
 
+_complete_archive_branch_to_fork() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--pr= --fork-remote=" -- "$cur"))
+        return
+    fi
+
+    _complete_local_git_branches
+}
+
 complete -o bashdefault -o default -F _complete_git_branch_D_track_hash git_branch_D_track_hash
+complete -o bashdefault -o default -F _complete_archive_branch_to_fork archive_branch_to_fork.sh
 complete -o bashdefault -o default -F _complete_local_git_branches git_show_upstream_for_branch
 complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch
 
