@@ -767,6 +767,18 @@ giturl() {
     git config --get remote.origin.url
 }
 
+gcx() (
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: gcx (no arguments allowed)" >&2
+        return 1
+    fi
+    set -x
+    git clean --force -d -x \
+        --exclude '/.agents/' \
+        --exclude '/.codex/' \
+        --exclude '/.lycheecache/'
+)
+
 git_show_upstream_for_branch() {
     local branches=()
     local branch
