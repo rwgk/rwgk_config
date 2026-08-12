@@ -18,7 +18,7 @@ unchanged.
 Options:
   --pr NUMBER             Use this merged PR instead of discovering it from
                           the base repository and exact branch name.
-  --fork-remote REMOTE    Personal-fork remote to archive to (default: origin).
+  --fork-remote REMOTE    Fork remote you own or administer (default: origin).
   -h, --help              Show this help.
 EOF
 }
@@ -329,7 +329,7 @@ main() {
         printf '%s\n' "$fork_info" >&2
         exit 1
     fi
-    IFS=$'\t' read -r fork_repo _ _ pulls_repo _ github_host <<<"$fork_info"
+    IFS=$'\t' read -r fork_repo _ _ pulls_repo _ github_host _ <<<"$fork_info"
 
     if ! pr_info=$(resolve_merged_pr_info "$pulls_repo" "$branch" "$github_host" "$requested_pr"); then
         exit 1

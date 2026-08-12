@@ -38,11 +38,12 @@ EOF
 get_remote_archive_source_info() {
     local branch="$1"
     local local_sha="$2"
-    local upstream_info remote remote_branch remote_sha
+    local upstream_info remote remote_branch remote_sha source_kind
     local tracked_remote="" tracked_remote_branch=""
-    local remote_ref
-    local candidate_remote
-    local -a matching_remote_refs=()
+    local candidate_remote repo_info repo_name fetch_url canonical_key existing_index candidate_index unique_index
+    local -a candidate_remotes=() candidate_branches=() candidate_shas=() candidate_kinds=()
+    local -a unique_remotes=() unique_branches=() unique_shas=() unique_kinds=() unique_repo_names=() unique_keys=()
+    local -a unavailable_remotes=() unavailable_details=()
 
     if upstream_info=$(get_remote_upstream_info "$branch"); then
         IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
@@ -52,21 +53,43 @@ get_remote_archive_source_info() {
             return 1
         fi
         if [[ -n "$remote_sha" ]]; then
-            printf '%s\t%s\t%s\ttracked\n' "$remote" "$remote_branch" "$remote_sha"
-            return 0
+            candidate_remotes+=("$remote")
+            candidate_branches+=("$remote_branch")
+            candidate_shas+=("$remote_sha")
+            candidate_kinds+=(tracked)
         fi
     fi
 
     while IFS= read -r candidate_remote; do
-        if ! remote_sha=$(get_remote_branch_sha "$candidate_remote" "$branch"); then
-            return 1
+        if [[ "$candidate_remote" == "$tracked_remote" && "$branch" == "$tracked_remote_branch" ]]; then
+            continue
+        fi
+        if ! remote_sha=$(get_remote_branch_sha "$candidate_remote" "$branch" 2>&1); then
+            unavailable_remotes+=("$candidate_remote")
+            unavailable_details+=("$remote_sha")
+            continue
         fi
         if [[ -n "$remote_sha" ]]; then
-            matching_remote_refs+=("$candidate_remote"$'\t'"$branch"$'\t'"$remote_sha")
+            candidate_remotes+=("$candidate_remote")
+            candidate_branches+=("$branch")
+            candidate_shas+=("$remote_sha")
+            candidate_kinds+=(matching-name)
         fi
     done < <(git remote)
 
-    case "${#matching_remote_refs[@]}" in
+    for candidate_index in "${!unavailable_remotes[@]}"; do
+        printf "Warning: could not inspect remote '%s' for branch '%s'; that remote will not be modified.\n" \
+            "${unavailable_remotes[candidate_index]}" "$branch" >&2
+        printf '  %s\n' "${unavailable_details[candidate_index]}" >&2
+    done
+
+    if [[ -z "$tracked_remote" && "${#unavailable_remotes[@]}" -gt 0 ]]; then
+        printf "Error: branch '%s' has no configured remote tracking branch, and not every remote could be inspected.\n" "$branch" >&2
+        echo "Set its upstream to the intended source, or use --local-only explicitly." >&2
+        return 1
+    fi
+
+    case "${#candidate_remotes[@]}" in
     0)
         if [[ -n "$tracked_remote" ]]; then
             printf '%s\t%s\t%s\tmissing-tracked\n' "$tracked_remote" "$tracked_remote_branch" "$local_sha"
@@ -75,28 +98,85 @@ get_remote_archive_source_info() {
         return 2
         ;;
     1)
-        printf '%s\tmatching-name\n' "${matching_remote_refs[0]}"
-        ;;
-    *)
-        printf "Error: branch '%s' does not have a live tracked remote branch, and same-name remote branches exist on multiple remotes:\n" "$branch" >&2
-        for remote_ref in "${matching_remote_refs[@]}"; do
-            IFS=$'\t' read -r remote remote_branch remote_sha <<<"$remote_ref"
-            printf "  %s/%s (%s)\n" "$remote" "$remote_branch" "$remote_sha" >&2
-        done
-        echo "Set the local branch upstream to the intended remote branch, or use --local-only to delete only the local branch." >&2
-        return 1
+        printf '%s\t%s\t%s\t%s\n' \
+            "${candidate_remotes[0]}" \
+            "${candidate_branches[0]}" \
+            "${candidate_shas[0]}" \
+            "${candidate_kinds[0]}"
+        return 0
         ;;
     esac
+
+    for candidate_index in "${!candidate_remotes[@]}"; do
+        remote="${candidate_remotes[candidate_index]}"
+        remote_branch="${candidate_branches[candidate_index]}"
+        remote_sha="${candidate_shas[candidate_index]}"
+        source_kind="${candidate_kinds[candidate_index]}"
+
+        if repo_info=$(get_github_remote_repo_info "$remote" fetch 2>/dev/null); then
+            IFS=$'\t' read -r repo_name _ <<<"$repo_info"
+            canonical_key="github:$repo_name:refs/heads/$remote_branch"
+        elif fetch_url=$(git remote get-url "$remote" 2>/dev/null); then
+            repo_name="$fetch_url"
+            canonical_key="url:$fetch_url:refs/heads/$remote_branch"
+        else
+            repo_name="unknown"
+            canonical_key="remote:$remote:refs/heads/$remote_branch"
+        fi
+
+        existing_index=""
+        for unique_index in "${!unique_keys[@]}"; do
+            if [[ "${unique_keys[unique_index]}" == "$canonical_key" ]]; then
+                existing_index="$unique_index"
+                break
+            fi
+        done
+
+        if [[ -n "$existing_index" && "${unique_shas[existing_index]}" == "$remote_sha" ]]; then
+            if [[ "$source_kind" == tracked ]]; then
+                unique_remotes[existing_index]="$remote"
+                unique_kinds[existing_index]="$source_kind"
+            fi
+            continue
+        fi
+
+        unique_remotes+=("$remote")
+        unique_branches+=("$remote_branch")
+        unique_shas+=("$remote_sha")
+        unique_kinds+=("$source_kind")
+        unique_repo_names+=("$repo_name")
+        unique_keys+=("$canonical_key")
+    done
+
+    if [[ "${#unique_remotes[@]}" -eq 1 ]]; then
+        printf '%s\t%s\t%s\t%s\n' \
+            "${unique_remotes[0]}" \
+            "${unique_branches[0]}" \
+            "${unique_shas[0]}" \
+            "${unique_kinds[0]}"
+        return 0
+    fi
+
+    printf "Error: branch '%s' resolves to multiple live remote branches:\n" "$branch" >&2
+    for candidate_index in "${!unique_remotes[@]}"; do
+        printf "  %s/%s (repository '%s'; SHA '%s')\n" \
+            "${unique_remotes[candidate_index]}" \
+            "${unique_branches[candidate_index]}" \
+            "${unique_repo_names[candidate_index]}" \
+            "${unique_shas[candidate_index]}" >&2
+    done
+    echo "No local or remote changes were made. Resolve the ambiguity explicitly before archiving either remote branch." >&2
+    return 1
 }
 
 print_pr_status_for_remote_branch() {
     local pulls_repo="$1"
-    local head_owner="$2"
+    local head_repo="$2"
     local remote_branch="$3"
     local github_host="$4"
     local pr_info pr_state pr_url is_draft is_merged label
 
-    if ! pr_info=$(query_pr_info_for_remote_branch "$pulls_repo" "$head_owner" "$remote_branch" all "$github_host" 2>/dev/null); then
+    if ! pr_info=$(query_pr_info_for_remote_branch "$pulls_repo" "$head_repo" "$remote_branch" all "$github_host" 2>/dev/null); then
         echo "  PR status: unavailable." >&2
         return
     fi
@@ -186,39 +266,77 @@ print_remote_tracking_branch_classification() {
     local branch="$1"
     local remote="$2"
     local remote_branch="$3"
-    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
+    local source_kind="${4:-tracked}"
+    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host viewer_can_admin
     local is_owned_fork=1
 
-    printf "Local branch '%s' has configured remote tracking branch '%s/%s'.\n" "$branch" "$remote" "$remote_branch" >&2
+    case "$source_kind" in
+    matching-name)
+        printf "Local branch '%s' has detected same-name remote branch '%s/%s'.\n" "$branch" "$remote" "$remote_branch" >&2
+        ;;
+    missing-tracked)
+        printf "Local branch '%s' has missing configured remote tracking branch '%s/%s'.\n" "$branch" "$remote" "$remote_branch" >&2
+        ;;
+    *)
+        printf "Local branch '%s' has configured remote tracking branch '%s/%s'.\n" "$branch" "$remote" "$remote_branch" >&2
+        ;;
+    esac
 
-    if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
+    if ! repo_info=$(get_github_remote_repo_info "$remote" fetch 2>&1); then
         printf "  Classification: unknown; '%s' could not be identified as a GitHub fork or upstream.\n" "$remote" >&2
         return 1
     fi
 
-    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
+    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host viewer_can_admin <<<"$repo_info"
     if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
-        printf "  Classification: your authenticated GitHub fork '%s'.\n" "$repo_name" >&2
+        printf "  Classification: GitHub fork '%s', owned by your authenticated user.\n" "$repo_name" >&2
+        is_owned_fork=0
+    elif [[ "$is_fork" == "true" && "$viewer_can_admin" == "true" ]]; then
+        printf "  Classification: organization-owned GitHub fork '%s', administered by your authenticated user.\n" "$repo_name" >&2
         is_owned_fork=0
     elif [[ "$is_fork" == "true" ]]; then
-        printf "  Classification: someone else's GitHub fork '%s' (owner '%s'; authenticated as '%s').\n" "$repo_name" "$repo_owner" "$viewer_login" >&2
+        printf "  Classification: GitHub fork '%s' not owned or administered by your authenticated user (owner '%s'; authenticated as '%s').\n" "$repo_name" "$repo_owner" "$viewer_login" >&2
     elif [[ "$is_fork" == "false" ]]; then
         printf "  Classification: upstream GitHub repository '%s' (not a fork).\n" "$repo_name" >&2
     else
         printf "  Classification: unknown; GitHub returned an unrecognized fork status for '%s'.\n" "$repo_name" >&2
     fi
 
-    print_pr_status_for_remote_branch "$pulls_repo" "$repo_owner" "$remote_branch" "$repo_host"
+    print_pr_status_for_remote_branch "$pulls_repo" "$repo_name" "$remote_branch" "$repo_host"
     return "$is_owned_fork"
 }
 
 validate_branch_for_deletion() {
     local branch="$1"
-    local current_branch
+    local current_branch worktree_path="" worktree_line
+    local remote_destination remote_host remote_path
 
     if [[ -z "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" && -z "${MY_GIT_BACKTRACKING_INFO_REMOTE:-}" ]]; then
         echo "Error: Neither MY_GIT_BACKTRACKING_INFO_LOCAL nor MY_GIT_BACKTRACKING_INFO_REMOTE is set." >&2
         return 1
+    fi
+
+    if [[ -n "${MY_GIT_BACKTRACKING_INFO_LOCAL:-}" ]]; then
+        if [[ ! -d "$MY_GIT_BACKTRACKING_INFO_LOCAL" ]]; then
+            printf "Error: local backtracking directory does not exist: '%s'.\n" "$MY_GIT_BACKTRACKING_INFO_LOCAL" >&2
+            return 1
+        fi
+        if [[ ! -w "$MY_GIT_BACKTRACKING_INFO_LOCAL" ]]; then
+            printf "Error: local backtracking directory is not writable: '%s'.\n" "$MY_GIT_BACKTRACKING_INFO_LOCAL" >&2
+            return 1
+        fi
+    else
+        remote_destination="${MY_GIT_BACKTRACKING_INFO_REMOTE%/}"
+        if [[ "$remote_destination" != *:* ]]; then
+            printf "Error: MY_GIT_BACKTRACKING_INFO_REMOTE must have HOST:PATH form (got '%s').\n" "$remote_destination" >&2
+            return 1
+        fi
+        remote_host="${remote_destination%%:*}"
+        remote_path="${remote_destination#*:}"
+        if [[ -z "$remote_host" || -z "$remote_path" ]]; then
+            echo "Error: MY_GIT_BACKTRACKING_INFO_REMOTE must have non-empty HOST and PATH components." >&2
+            return 1
+        fi
     fi
 
     if ! git show-ref --verify --quiet "refs/heads/$branch"; then
@@ -232,11 +350,24 @@ validate_branch_for_deletion() {
         return 1
     fi
 
+    while IFS= read -r worktree_line; do
+        case "$worktree_line" in
+        worktree\ *)
+            worktree_path="${worktree_line#worktree }"
+            ;;
+        "branch refs/heads/$branch")
+            printf "Error: branch '%s' is checked out in worktree '%s'.\n" "$branch" "$worktree_path" >&2
+            echo "Remove or switch that worktree before archiving the branch." >&2
+            return 1
+            ;;
+        esac
+    done < <(git worktree list --porcelain)
+
     return 0
 }
 
 preflight_default_mode() {
-    local branch upstream_info remote remote_branch
+    local branch source_info remote remote_branch remote_sha source_kind source_status
     local tracking_branch_found=0
     local remote_archive_choice=archive-tracking
 
@@ -245,13 +376,20 @@ preflight_default_mode() {
     done
 
     for branch in "$@"; do
-        if upstream_info=$(get_remote_upstream_info "$branch"); then
-            IFS=$'\t' read -r remote remote_branch <<<"$upstream_info"
-            if ! print_remote_tracking_branch_classification "$branch" "$remote" "$remote_branch"; then
-                remote_archive_choice=archive-to-remote
+        if source_info=$(get_remote_archive_source_info "$branch" "$(git rev-parse "$branch")"); then
+            IFS=$'\t' read -r remote remote_branch remote_sha source_kind <<<"$source_info"
+        else
+            source_status="$?"
+            if [[ "$source_status" -eq 2 ]]; then
+                continue
             fi
-            tracking_branch_found=1
+            return 1
         fi
+
+        if ! print_remote_tracking_branch_classification "$branch" "$remote" "$remote_branch" "$source_kind"; then
+            remote_archive_choice=archive-to-remote
+        fi
+        tracking_branch_found=1
     done
 
     if [[ "$tracking_branch_found" -eq 1 ]]; then
@@ -294,20 +432,96 @@ build_archive_remote_branch_name() {
     fi
 }
 
+find_remote_archive_branch_for_sha() {
+    local remote="$1"
+    local remote_branch="$2"
+    local expected_sha="$3"
+    local push_url ls_remote_output row archive_sha archive_ref archive_branch suffix prefix
+
+    if ! push_url=$(git remote get-url --push "$remote" 2>/dev/null); then
+        printf "Error: failed to determine the push URL for archive remote '%s'.\n" "$remote" >&2
+        return 1
+    fi
+    if ! ls_remote_output=$(git ls-remote --heads "$push_url" 'refs/heads/archive/*' 2>/dev/null); then
+        printf "Error: failed to query existing archive branches through remote '%s'.\n" "$remote" >&2
+        return 1
+    fi
+
+    suffix="_$remote_branch"
+    while IFS= read -r row; do
+        [[ -n "$row" ]] || continue
+        IFS=$'\t' read -r archive_sha archive_ref <<<"$row"
+        [[ "$archive_sha" == "$expected_sha" ]] || continue
+        archive_branch="${archive_ref#refs/heads/}"
+        [[ "${archive_branch: -${#suffix}}" == "$suffix" ]] || continue
+        prefix="${archive_branch:0:${#archive_branch}-${#suffix}}"
+        if [[ "$prefix" =~ ^archive/(pr[1-9][0-9]*_)?[0-9]{4}-[0-9]{2}-[0-9]{2}\+[0-9]{6}([-+][0-9]{4})?(_retry[1-9][0-9]*)?$ ]]; then
+            printf '%s\n' "$archive_branch"
+            return 0
+        fi
+    done <<<"$ls_remote_output"
+
+    return 2
+}
+
+select_fresh_archive_branch() {
+    local archive_remote="$1"
+    local remote_branch="$2"
+    local expected_sha="$3"
+    local pr_number="$4"
+    local archive_branch archive_sha suffix prefix retry_number candidate
+
+    archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
+    if ! archive_sha=$(get_remote_push_branch_sha "$archive_remote" "$archive_branch"); then
+        return 1
+    fi
+    if [[ -z "$archive_sha" ]]; then
+        printf '%s\n' "$archive_branch"
+        return 0
+    fi
+    if [[ "$archive_sha" != "$expected_sha" ]]; then
+        printf "Error: archive branch '%s/%s' already exists at '%s', not expected SHA '%s'.\n" \
+            "$archive_remote" "$archive_branch" "$archive_sha" "$expected_sha" >&2
+        return 1
+    fi
+
+    suffix="_$remote_branch"
+    prefix="${archive_branch:0:${#archive_branch}-${#suffix}}"
+    for retry_number in {1..100}; do
+        candidate="${prefix}_retry${retry_number}${suffix}"
+        if ! archive_sha=$(get_remote_push_branch_sha "$archive_remote" "$candidate"); then
+            return 1
+        fi
+        if [[ -z "$archive_sha" ]]; then
+            printf "INFO: archive branch '%s/%s' already preserves '%s'; using fresh recovery ref '%s/%s'.\n" \
+                "$archive_remote" "$archive_branch" "$expected_sha" "$archive_remote" "$candidate" >&2
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    printf "Error: could not find an unused recovery archive name after 100 attempts for '%s/%s'.\n" \
+        "$archive_remote" "$remote_branch" >&2
+    return 1
+}
+
 plan_remote_branch_archive() {
     local remote="$1"
     local remote_branch="$2"
     local remote_sha="$3"
     local pr_pulls_repo="${4:-}"
-    local pr_head_owner="${5:-}"
+    local pr_head_repo="${5:-}"
     local pr_lookup_host="${6:-}"
     local require_pr_check="${7:-1}"
     local archive_remote="${8:-$remote}"
+    local source_kind="${9:-tracked}"
+    local source_repo_identity="${10:-$remote}"
+    local archive_repo_identity="${11:-$archive_remote}"
     local open_pr_info pr_info
-    local pr_number="" pr_url="" is_draft="" archive_branch archive_sha
+    local pr_number="" pr_url="" is_draft="" archive_branch
 
-    if [[ -n "$pr_pulls_repo" && -n "$pr_head_owner" ]]; then
-        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_owner" "$remote_branch" open "$pr_lookup_host" 2>&1); then
+    if [[ -n "$pr_pulls_repo" && -n "$pr_head_repo" ]]; then
+        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_repo" "$remote_branch" open "$pr_lookup_host" 2>&1); then
             if [[ "$require_pr_check" -eq 1 ]]; then
                 print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
                 return 1
@@ -323,21 +537,21 @@ plan_remote_branch_archive() {
         printf "Warning: PR state was not checked for '%s/%s'; proceeding because remote archive/delete was explicitly requested.\n" "$remote" "$remote_branch" >&2
     fi
 
-    if [[ -n "$pr_pulls_repo" && -n "$pr_head_owner" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_owner" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
+    if [[ -n "$pr_pulls_repo" && -n "$pr_head_repo" ]] && pr_info=$(query_pr_info_for_remote_branch "$pr_pulls_repo" "$pr_head_repo" "$remote_branch" all "$pr_lookup_host" 2>/dev/null) && [[ -n "$pr_info" ]]; then
         IFS=$'\t' read -r pr_number _ <<<"$pr_info"
     fi
 
-    archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
+    archive_branch=$(select_fresh_archive_branch "$archive_remote" "$remote_branch" "$remote_sha" "$pr_number") || return
 
-    if ! archive_sha=$(get_remote_branch_sha "$archive_remote" "$archive_branch"); then
-        return 1
-    fi
-    if [[ -n "$archive_sha" ]]; then
-        echo "Error: archive branch already exists on remote: '$archive_remote/$archive_branch'." >&2
-        return 1
-    fi
-
-    printf '%s\t%s\t%s\t%s\t%s\n' "$remote" "$remote_branch" "$remote_sha" "$archive_branch" "$archive_remote"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$remote" \
+        "$remote_branch" \
+        "$remote_sha" \
+        "$archive_branch" \
+        "$archive_remote" \
+        "$source_kind" \
+        "$source_repo_identity" \
+        "$archive_repo_identity"
 }
 
 plan_deleted_remote_branch_archive() {
@@ -345,46 +559,72 @@ plan_deleted_remote_branch_archive() {
     local remote_branch="$2"
     local local_sha="$3"
     local pulls_repo="$4"
-    local repo_owner="$5"
+    local source_repo="$5"
     local repo_host="$6"
     local archive_remote="$7"
-    local pr_info pr_number archive_branch archive_sha
+    local archive_repo_identity="${8:-$archive_remote}"
+    local pr_info open_pr_info pr_number="" pr_url is_draft archive_branch previous_archive_branch="" existing_archive_status
 
-    if ! pr_info=$(query_merged_pr_info_for_head_sha "$pulls_repo" "$repo_owner" "$remote_branch" "$local_sha" "$repo_host" 2>&1); then
-        echo "Error: cannot verify whether deleted remote branch '$remote/$remote_branch' was merged at local tip '$local_sha'." >&2
-        printf '%s\n' "$pr_info" >&2
-        echo "The local branch has not been deleted." >&2
-        return 1
-    fi
-    if [[ -z "$pr_info" ]]; then
-        printf "Error: tracked remote branch '%s/%s' no longer exists, and no merged PR was found with head commit '%s'.\n" "$remote" "$remote_branch" "$local_sha" >&2
-        echo "The local branch has not been deleted." >&2
-        return 1
+    if previous_archive_branch=$(find_remote_archive_branch_for_sha "$archive_remote" "$remote_branch" "$local_sha"); then
+        if ! open_pr_info=$(query_pr_info_for_remote_branch "$pulls_repo" "$source_repo" "$remote_branch" open "$repo_host" 2>&1); then
+            print_pr_state_unknown_error "$remote" "$remote_branch" "$open_pr_info"
+            return 1
+        fi
+        if [[ -n "$open_pr_info" ]]; then
+            IFS=$'\t' read -r pr_number _ pr_url is_draft _ <<<"$open_pr_info"
+            print_open_pr_error "$remote" "$remote_branch" "$pr_number" "$pr_url" "$is_draft"
+            return 1
+        fi
+
+        printf "INFO: tracked remote branch '%s/%s' was already deleted, and local tip '%s' is preserved at '%s/%s'.\n" \
+            "$remote" "$remote_branch" "$local_sha" "$archive_remote" "$previous_archive_branch" >&2
+    else
+        existing_archive_status="$?"
+        if [[ "$existing_archive_status" -ne 2 ]]; then
+            return 1
+        fi
+
+        if ! pr_info=$(query_merged_pr_info_for_head_sha "$pulls_repo" "$source_repo" "$remote_branch" "$local_sha" "$repo_host" 2>&1); then
+            echo "Error: cannot verify whether deleted remote branch '$remote/$remote_branch' was merged at local tip '$local_sha'." >&2
+            printf '%s\n' "$pr_info" >&2
+            echo "The local branch has not been deleted." >&2
+            return 1
+        fi
+        if [[ -z "$pr_info" ]]; then
+            printf "Error: tracked remote branch '%s/%s' no longer exists, and no merged PR or existing archive was found with head commit '%s'.\n" \
+                "$remote" "$remote_branch" "$local_sha" >&2
+            echo "The local branch has not been deleted." >&2
+            return 1
+        fi
+
+        IFS=$'\t' read -r pr_number _ <<<"$pr_info"
+        printf "INFO: tracked remote branch '%s/%s' was already deleted, but merged PR #%s still records local tip '%s'.\n" \
+            "$remote" "$remote_branch" "$pr_number" "$local_sha" >&2
     fi
 
-    IFS=$'\t' read -r pr_number _ <<<"$pr_info"
-    archive_branch=$(build_archive_remote_branch_name "$remote_branch" "$pr_number")
-
-    if ! archive_sha=$(get_remote_branch_sha "$archive_remote" "$archive_branch"); then
-        return 1
-    fi
-    if [[ -n "$archive_sha" ]]; then
-        echo "Error: archive branch already exists on remote: '$archive_remote/$archive_branch'." >&2
-        return 1
-    fi
-
-    printf "INFO: tracked remote branch '%s/%s' was already deleted, but merged PR #%s still records local tip '%s'.\n" "$remote" "$remote_branch" "$pr_number" "$local_sha" >&2
+    archive_branch=$(select_fresh_archive_branch "$archive_remote" "$remote_branch" "$local_sha" "$pr_number") || return
     printf "INFO: local branch tip will be archived to '%s/%s' before local deletion.\n" "$archive_remote" "$archive_branch" >&2
-    printf '%s\t%s\t%s\t%s\t%s\tmissing-tracked\n' "$remote" "$remote_branch" "$local_sha" "$archive_branch" "$archive_remote"
+    printf '%s\t%s\t%s\t%s\t%s\tmissing-tracked\t%s\t%s\n' \
+        "$remote" \
+        "$remote_branch" \
+        "$local_sha" \
+        "$archive_branch" \
+        "$archive_remote" \
+        "$source_repo" \
+        "$archive_repo_identity"
 }
 
 plan_remote_tracking_archive() {
     local branch="$1"
     local archive_mode="$2"
     local local_sha="$3"
-    local source_info remote remote_branch remote_sha source_kind repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
+    local source_info remote remote_branch remote_sha source_kind source_repo_info
+    local source_repo_name pulls_repo repo_host
+    local source_push_repo_info source_push_repo_name
+    local archive_repo_info archive_repo_name archive_pulls_repo
     local archive_to_remote=""
-    local pr_pulls_repo="" pr_head_owner="" pr_lookup_host="" require_pr_check=1
+    local pr_pulls_repo="" pr_head_repo="" pr_lookup_host="" require_pr_check=1
+    local source_repo_identity="" archive_repo_identity=""
     local source_status
 
     if source_info=$(get_remote_archive_source_info "$branch" "$local_sha"); then
@@ -416,34 +656,75 @@ plan_remote_tracking_archive() {
             echo "Error: --archive-to-remote requires a remote name." >&2
             return 1
         fi
-        if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
+        if ! source_repo_info=$(get_github_remote_repo_info "$remote" fetch 2>&1); then
             print_explicit_remote_choice_required_error \
                 "$remote" \
                 "$remote_branch" \
-                "Cannot determine whether tracked/detected remote '$remote' is your GitHub fork." \
-                "$repo_info"
+                "Cannot identify the exact GitHub repository for tracked/detected remote '$remote'." \
+                "$source_repo_info"
             return 1
         fi
 
-        IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
+        IFS=$'\t' read -r source_repo_name _ _ pulls_repo _ repo_host _ <<<"$source_repo_info"
+        source_repo_identity="$source_repo_name"
         pr_pulls_repo="$pulls_repo"
-        pr_head_owner="$repo_owner"
+        pr_head_repo="$source_repo_name"
         pr_lookup_host="$repo_host"
+
+        if ! archive_repo_info=$(get_owned_fork_remote_info "$archive_to_remote" 2>&1); then
+            printf '%s\n' "$archive_repo_info" >&2
+            return 1
+        fi
+        IFS=$'\t' read -r archive_repo_name _ _ archive_pulls_repo _ _ _ <<<"$archive_repo_info"
+        archive_repo_identity="$archive_repo_name"
+
+        if [[ "$archive_pulls_repo" != "$pulls_repo" ]]; then
+            printf "Error: archive remote '%s' points to '%s', which is not in the same GitHub fork network as source repository '%s'.\n" \
+                "$archive_to_remote" "$archive_repo_name" "$source_repo_name" >&2
+            printf "Source pull-request repository: '%s'; archive pull-request repository: '%s'.\n" \
+                "$pulls_repo" "$archive_pulls_repo" >&2
+            echo "No local or remote changes were made." >&2
+            return 1
+        fi
+
         if [[ "$source_kind" == "missing-tracked" ]]; then
-            if ! get_owned_fork_remote_info "$archive_to_remote" >/dev/null; then
-                return 1
-            fi
-            plan_deleted_remote_branch_archive "$remote" "$remote_branch" "$local_sha" "$pulls_repo" "$repo_owner" "$repo_host" "$archive_to_remote"
+            plan_deleted_remote_branch_archive \
+                "$remote" \
+                "$remote_branch" \
+                "$local_sha" \
+                "$pulls_repo" \
+                "$source_repo_name" \
+                "$repo_host" \
+                "$archive_to_remote" \
+                "$archive_repo_identity"
             return
         fi
 
-        if [[ "$is_fork" == "true" && "$repo_owner" == "$viewer_login" ]]; then
-            printf "INFO: tracked/detected remote branch '%s/%s' is already on your fork; archiving on that remote.\n" "$remote" "$remote_branch" >&2
+        if ! source_push_repo_info=$(get_github_remote_repo_info "$remote" push 2>&1); then
+            printf "Error: cannot identify the GitHub repository targeted by pushes to source remote '%s'.\n" "$remote" >&2
+            printf '%s\n' "$source_push_repo_info" >&2
+            echo "No local or remote changes were made." >&2
+            return 1
+        fi
+        IFS=$'\t' read -r source_push_repo_name _ <<<"$source_push_repo_info"
+        if [[ "$source_push_repo_name" != "$source_repo_name" ]]; then
+            printf "Error: source remote '%s' fetches from '%s' but pushes to '%s'.\n" \
+                "$remote" "$source_repo_name" "$source_push_repo_name" >&2
+            echo "Deleting the live fetched branch through a different push repository would be unsafe." >&2
+            echo "No local or remote changes were made." >&2
+            return 1
+        fi
+
+        if [[ "$source_repo_name" == "$archive_repo_name" ]]; then
+            printf "INFO: tracked/detected remote branch '%s/%s' is already on selected administered fork '%s'; archiving in that repository.\n" \
+                "$remote" "$remote_branch" "$archive_repo_name" >&2
+            # Use the source remote for both ref updates so Git can make the
+            # archive creation and source deletion atomic, even when the user
+            # selected another remote name for the same repository.
+            archive_to_remote="$remote"
         else
-            if ! get_owned_fork_remote_info "$archive_to_remote" >/dev/null; then
-                return 1
-            fi
-            printf "INFO: tracked/detected remote branch '%s/%s' will be archived to '%s' before deletion from '%s'.\n" "$remote" "$remote_branch" "$archive_to_remote" "$remote" >&2
+            printf "INFO: tracked/detected remote branch '%s/%s' from '%s' will be archived to '%s' before deletion from '%s'.\n" \
+                "$remote" "$remote_branch" "$source_repo_name" "$archive_repo_name" "$source_repo_name" >&2
         fi
         ;;
     archive-tracking)
@@ -453,13 +734,31 @@ plan_remote_tracking_archive() {
             return 1
         fi
 
-        if repo_info=$(get_github_remote_repo_info "$remote" 2>/dev/null); then
-            IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
+        if source_repo_info=$(get_github_remote_repo_info "$remote" fetch 2>/dev/null); then
+            IFS=$'\t' read -r source_repo_name _ _ pulls_repo _ repo_host _ <<<"$source_repo_info"
+            source_repo_identity="$source_repo_name"
+            archive_repo_identity="$source_repo_name"
             pr_pulls_repo="$pulls_repo"
-            pr_head_owner="$repo_owner"
+            pr_head_repo="$source_repo_name"
             pr_lookup_host="$repo_host"
+
+            if ! source_push_repo_info=$(get_github_remote_repo_info "$remote" push 2>&1); then
+                printf "Error: cannot identify the GitHub repository targeted by pushes to source remote '%s'.\n" "$remote" >&2
+                printf '%s\n' "$source_push_repo_info" >&2
+                echo "No local or remote changes were made." >&2
+                return 1
+            fi
+            IFS=$'\t' read -r source_push_repo_name _ <<<"$source_push_repo_info"
+            if [[ "$source_push_repo_name" != "$source_repo_name" ]]; then
+                printf "Error: source remote '%s' fetches from '%s' but pushes to '%s'.\n" \
+                    "$remote" "$source_repo_name" "$source_push_repo_name" >&2
+                echo "No local or remote changes were made." >&2
+                return 1
+            fi
         else
             require_pr_check=0
+            source_repo_identity=$(git remote get-url "$remote" 2>/dev/null || printf 'remote:%s' "$remote")
+            archive_repo_identity=$(git remote get-url --push "$remote" 2>/dev/null || printf 'remote:%s' "$remote")
         fi
         ;;
     *)
@@ -468,10 +767,32 @@ plan_remote_tracking_archive() {
         ;;
     esac
 
-    if [[ -n "$archive_to_remote" && ! ("$is_fork" == "true" && "$repo_owner" == "$viewer_login") ]]; then
-        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_pulls_repo" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check" "$archive_to_remote"
+    if [[ -n "$archive_to_remote" ]]; then
+        plan_remote_branch_archive \
+            "$remote" \
+            "$remote_branch" \
+            "$remote_sha" \
+            "$pr_pulls_repo" \
+            "$pr_head_repo" \
+            "$pr_lookup_host" \
+            "$require_pr_check" \
+            "$archive_to_remote" \
+            "$source_kind" \
+            "$source_repo_identity" \
+            "$archive_repo_identity"
     else
-        plan_remote_branch_archive "$remote" "$remote_branch" "$remote_sha" "$pr_pulls_repo" "$pr_head_owner" "$pr_lookup_host" "$require_pr_check"
+        plan_remote_branch_archive \
+            "$remote" \
+            "$remote_branch" \
+            "$remote_sha" \
+            "$pr_pulls_repo" \
+            "$pr_head_repo" \
+            "$pr_lookup_host" \
+            "$require_pr_check" \
+            "$remote" \
+            "$source_kind" \
+            "$source_repo_identity" \
+            "$archive_repo_identity"
     fi
 }
 
@@ -482,21 +803,32 @@ rename_remote_upstream_branch() {
     local archive_branch="$4"
     local archive_remote="${5:-$remote}"
     local source_kind="${6:-tracked}"
+    local archive_ref="refs/heads/$archive_branch"
+    local source_ref="refs/heads/$remote_branch"
     local push_output
 
     if [[ "$source_kind" == "missing-tracked" ]]; then
-        if ! push_output=$(git push "$archive_remote" "$remote_sha:refs/heads/$archive_branch" 2>&1); then
+        if ! push_output=$(git push \
+            --force-with-lease="$archive_ref:" \
+            "$archive_remote" \
+            "$remote_sha:$archive_ref" 2>&1); then
             echo "Error: failed to archive local branch tip for deleted remote branch '$remote/$remote_branch' to '$archive_remote/$archive_branch'." >&2
             printf '%s\n' "$push_output" >&2
             return 1
         fi
 
-        printf 'INFO: local branch tip for deleted remote branch %s/%s archived to %s/%s\n' "$remote" "$remote_branch" "$archive_remote" "$archive_branch"
+        printf 'INFO: local branch tip for deleted remote branch %s/%s is archived at %s/%s\n' "$remote" "$remote_branch" "$archive_remote" "$archive_branch"
         return 0
     fi
 
     if [[ "$archive_remote" == "$remote" ]]; then
-        if ! push_output=$(git push --atomic "$remote" "$remote_sha:refs/heads/$archive_branch" ":refs/heads/$remote_branch" 2>&1); then
+        if ! push_output=$(git push \
+            --atomic \
+            --force-with-lease="$archive_ref:" \
+            --force-with-lease="$source_ref:$remote_sha" \
+            "$remote" \
+            "$remote_sha:$archive_ref" \
+            ":$source_ref" 2>&1); then
             echo "Error: failed to rename remote branch '$remote/$remote_branch' to '$remote/$archive_branch'." >&2
             printf '%s\n' "$push_output" >&2
             return 1
@@ -506,13 +838,19 @@ rename_remote_upstream_branch() {
         return 0
     fi
 
-    if ! push_output=$(git push "$archive_remote" "$remote_sha:refs/heads/$archive_branch" 2>&1); then
+    if ! push_output=$(git push \
+        --force-with-lease="$archive_ref:" \
+        "$archive_remote" \
+        "$remote_sha:$archive_ref" 2>&1); then
         echo "Error: failed to archive remote branch '$remote/$remote_branch' to '$archive_remote/$archive_branch'." >&2
         printf '%s\n' "$push_output" >&2
         return 1
     fi
 
-    if ! push_output=$(git push "$remote" ":refs/heads/$remote_branch" 2>&1); then
+    if ! push_output=$(git push \
+        --force-with-lease="$source_ref:$remote_sha" \
+        "$remote" \
+        ":$source_ref" 2>&1); then
         echo "Error: archived remote branch to '$archive_remote/$archive_branch', but failed to delete '$remote/$remote_branch'." >&2
         printf '%s\n' "$push_output" >&2
         return 1
@@ -544,7 +882,10 @@ back_up_branch_tip() {
     local branch="$1"
     local commit="$2"
     local remote_rename_done="$3"
+    local remote_archive_plan="${4:-}"
     local repo timestamp safe_repo safe_branch infofile backup_output
+    local source_remote source_branch source_sha archive_branch archive_remote source_kind
+    local source_repo_identity archive_repo_identity
 
     repo=$(basename "$(git rev-parse --show-toplevel)")
     timestamp=$(date +%Y-%m-%d+%H%M%S)
@@ -557,6 +898,25 @@ back_up_branch_tip() {
         echo "Current working directory: '$(pwd)'"
         echo "Repository: '$repo'"
         echo "Archiving \`git show --stat --summary\` output before \`git branch -D \"$branch\"\`"
+        if [[ -n "$remote_archive_plan" ]]; then
+            IFS=$'\t' read -r \
+                source_remote \
+                source_branch \
+                source_sha \
+                archive_branch \
+                archive_remote \
+                source_kind \
+                source_repo_identity \
+                archive_repo_identity <<<"$remote_archive_plan"
+            echo
+            echo "Source repository: '$source_repo_identity'"
+            echo "Source remote/ref: '$source_remote/refs/heads/$source_branch'"
+            echo "Source SHA: '$source_sha'"
+            echo "Source state at preflight: '$source_kind'"
+            echo "Archive repository: '$archive_repo_identity'"
+            echo "Archive remote/ref: '$archive_remote/refs/heads/$archive_branch'"
+            echo "Remote archive/delete step completed: '$remote_rename_done'"
+        fi
         echo
         git show --stat --summary "$commit"
     } 2>&1 >"$infofile"); then
@@ -582,40 +942,53 @@ back_up_branch_tip() {
 archive_branch_tip_and_delete() (
     set -euo pipefail
 
-    if [[ $# -ne 2 ]]; then
-        echo "ASSERTION FAILURE: archive_branch_tip_and_delete requires exactly 2 arguments (got $#)" >&2
+    if [[ $# -ne 3 ]]; then
+        echo "ASSERTION FAILURE: archive_branch_tip_and_delete requires exactly 3 arguments (got $#)" >&2
         return 1
     fi
 
-    local archive_mode="$1"
-    local branch="$2"
+    local branch="$1"
+    local expected_commit="$2"
+    local remote_archive_plan="$3"
     local commit
     local remote_rename_done=0
-    local remote_archive_plan remote remote_branch remote_sha archive_branch archive_remote source_kind
+    local remote remote_branch remote_sha archive_branch archive_remote source_kind
 
     validate_branch_for_deletion "$branch" || return
 
     commit=$(git rev-parse "$branch")
-
-    if [[ "$archive_mode" != "local-only" ]]; then
-        remote_archive_plan=$(plan_remote_tracking_archive "$branch" "$archive_mode" "$commit") || return
+    if [[ "$commit" != "$expected_commit" ]]; then
+        printf "Error: local branch '%s' moved from '%s' to '%s' after preflight.\n" \
+            "$branch" "$expected_commit" "$commit" >&2
+        echo "No changes were made for this branch. Rerun the command to refresh the plan." >&2
+        return 1
     fi
 
     if [[ -n "${remote_archive_plan:-}" ]]; then
-        IFS=$'\t' read -r remote remote_branch remote_sha archive_branch archive_remote source_kind <<<"$remote_archive_plan"
-        rename_remote_upstream_branch "$remote" "$remote_branch" "$remote_sha" "$archive_branch" "${archive_remote:-$remote}" "${source_kind:-tracked}" || return
+        IFS=$'\t' read -r remote remote_branch remote_sha archive_branch archive_remote source_kind _ _ <<<"$remote_archive_plan"
+        rename_remote_upstream_branch \
+            "$remote" \
+            "$remote_branch" \
+            "$remote_sha" \
+            "$archive_branch" \
+            "${archive_remote:-$remote}" \
+            "${source_kind:-tracked}" || return
         remote_rename_done=1
     fi
 
-    back_up_branch_tip "$branch" "$commit" "$remote_rename_done" || return
+    back_up_branch_tip "$branch" "$commit" "$remote_rename_done" "$remote_archive_plan" || return
 
     git branch -D "$branch"
 )
 
 main() {
     local archive_mode=unspecified
-    local arg
-    local -a branches=()
+    local arg branch_index earlier_index remote_archive_plan
+    local plan_remote plan_remote_branch plan_archive_branch plan_archive_remote
+    local plan_source_repo_identity plan_archive_repo_identity
+    local source_plan_key archive_plan_key
+    local -a branches=() branch_commits=() remote_archive_plans=()
+    local -a source_plan_keys=() archive_plan_keys=()
 
     if [[ $# -eq 0 ]]; then
         usage
@@ -679,13 +1052,68 @@ main() {
         exit 1
     fi
 
+    for branch_index in "${!branches[@]}"; do
+        for earlier_index in "${!branches[@]}"; do
+            [[ "$earlier_index" -lt "$branch_index" ]] || break
+            if [[ "${branches[earlier_index]}" == "${branches[branch_index]}" ]]; then
+                printf "Error: branch '%s' was requested more than once.\n" "${branches[branch_index]}" >&2
+                echo "No local or remote changes were made." >&2
+                exit 1
+            fi
+        done
+    done
+
     if [[ "$archive_mode" == "unspecified" ]]; then
         preflight_default_mode "${branches[@]}" || exit 1
         archive_mode=local-only
     fi
 
     for arg in "${branches[@]}"; do
-        archive_branch_tip_and_delete "$archive_mode" "$arg"
+        validate_branch_for_deletion "$arg" || exit 1
+        branch_commits+=("$(git rev-parse "$arg")")
+    done
+
+    for branch_index in "${!branches[@]}"; do
+        remote_archive_plan=""
+        if [[ "$archive_mode" != "local-only" ]]; then
+            remote_archive_plan=$(plan_remote_tracking_archive \
+                "${branches[branch_index]}" \
+                "$archive_mode" \
+                "${branch_commits[branch_index]}") || exit 1
+        fi
+
+        if [[ -n "$remote_archive_plan" ]]; then
+            IFS=$'\t' read -r plan_remote plan_remote_branch _ plan_archive_branch plan_archive_remote _ plan_source_repo_identity plan_archive_repo_identity <<<"$remote_archive_plan"
+            source_plan_key="${plan_source_repo_identity:-$plan_remote}:refs/heads/$plan_remote_branch"
+            archive_plan_key="${plan_archive_repo_identity:-${plan_archive_remote:-$plan_remote}}:refs/heads/$plan_archive_branch"
+            for earlier_index in "${!source_plan_keys[@]}"; do
+                if [[ "${source_plan_keys[earlier_index]}" == "$source_plan_key" ]]; then
+                    printf "Error: branches '%s' and '%s' would both mutate source ref '%s'.\n" \
+                        "${branches[earlier_index]}" "${branches[branch_index]}" "$source_plan_key" >&2
+                    echo "No local or remote changes were made." >&2
+                    exit 1
+                fi
+                if [[ "${archive_plan_keys[earlier_index]}" == "$archive_plan_key" ]]; then
+                    printf "Error: branches '%s' and '%s' would both create archive ref '%s'.\n" \
+                        "${branches[earlier_index]}" "${branches[branch_index]}" "$archive_plan_key" >&2
+                    echo "No local or remote changes were made." >&2
+                    exit 1
+                fi
+            done
+            source_plan_keys[branch_index]="$source_plan_key"
+            archive_plan_keys[branch_index]="$archive_plan_key"
+        else
+            source_plan_keys[branch_index]=""
+            archive_plan_keys[branch_index]=""
+        fi
+        remote_archive_plans[branch_index]="$remote_archive_plan"
+    done
+
+    for branch_index in "${!branches[@]}"; do
+        archive_branch_tip_and_delete \
+            "${branches[branch_index]}" \
+            "${branch_commits[branch_index]}" \
+            "${remote_archive_plans[branch_index]}"
     done
 }
 

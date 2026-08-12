@@ -57,15 +57,35 @@ get_remote_push_branch_sha() {
 
 get_github_remote_repo_info() {
     local remote="$1"
-    local remote_url gh_output repo_metadata viewer_login repo_url repo_host repo_name is_fork repo_owner pulls_repo
+    local url_kind="${2:-push}"
+    local remote_url gh_output repo_metadata viewer_login repo_url repo_host repo_name is_fork repo_owner pulls_repo viewer_can_admin
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
         return 1
     fi
 
-    if ! remote_url=$(git remote get-url --push "$remote" 2>&1); then
-        printf '%s\n' "$remote_url" >&2
+    case "$url_kind" in
+    fetch)
+        if ! remote_url=$(git remote get-url "$remote" 2>&1); then
+            printf '%s\n' "$remote_url" >&2
+            return 1
+        fi
+        ;;
+    push)
+        if ! remote_url=$(git remote get-url --push "$remote" 2>&1); then
+            printf '%s\n' "$remote_url" >&2
+            return 1
+        fi
+        ;;
+    *)
+        printf "Error: unknown Git remote URL kind '%s'.\n" "$url_kind" >&2
+        return 1
+        ;;
+    esac
+
+    if [[ -z "$remote_url" ]]; then
+        printf "Error: remote '%s' has no %s URL.\n" "$remote" "$url_kind" >&2
         return 1
     fi
 
@@ -85,12 +105,12 @@ get_github_remote_repo_info() {
     fi
 
     if ! repo_metadata=$(GH_HOST="$repo_host" gh api "repos/$repo_name" \
-        --jq '[.fork, .owner.login, (if .fork then (.source.full_name // .parent.full_name // "") else .full_name end)] | @tsv' 2>&1); then
+        --jq '[.fork, .owner.login, (if .fork then (.source.full_name // .parent.full_name // "") else .full_name end), (.permissions.admin // false)] | @tsv' 2>&1); then
         printf '%s\n' "$repo_metadata" >&2
         return 1
     fi
 
-    IFS=$'\t' read -r is_fork repo_owner pulls_repo <<<"$repo_metadata"
+    IFS=$'\t' read -r is_fork repo_owner pulls_repo viewer_can_admin <<<"$repo_metadata"
     if [[ -z "$pulls_repo" ]]; then
         printf "Error: cannot determine the pull-request base repository for fork '%s'.\n" "$repo_name" >&2
         return 1
@@ -101,27 +121,45 @@ get_github_remote_repo_info() {
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$pulls_repo" "$viewer_login" "$repo_host"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$repo_name" \
+        "$is_fork" \
+        "$repo_owner" \
+        "$pulls_repo" \
+        "$viewer_login" \
+        "$repo_host" \
+        "${viewer_can_admin:-false}"
 }
 
 get_owned_fork_remote_info() {
     local remote="$1"
-    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host
+    local repo_info repo_name is_fork repo_owner pulls_repo viewer_login repo_host viewer_can_admin
 
-    if ! repo_info=$(get_github_remote_repo_info "$remote" 2>&1); then
-        printf "Error: cannot determine whether archive remote '%s' is your GitHub fork.\n" "$remote" >&2
+    if ! repo_info=$(get_github_remote_repo_info "$remote" push 2>&1); then
+        printf "Error: cannot determine whether archive remote '%s' is a GitHub fork owned or administered by you.\n" "$remote" >&2
         printf '%s\n' "$repo_info" >&2
         return 1
     fi
 
-    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host <<<"$repo_info"
-    if [[ "$is_fork" != "true" || "$repo_owner" != "$viewer_login" ]]; then
-        printf "Error: archive remote '%s' points to '%s', which is not your authenticated GitHub fork.\n" "$remote" "$repo_name" >&2
-        printf "Authenticated GitHub user: '%s'; repository owner: '%s'; is fork: '%s'.\n" "$viewer_login" "$repo_owner" "$is_fork" >&2
+    IFS=$'\t' read -r repo_name is_fork repo_owner pulls_repo viewer_login repo_host viewer_can_admin <<<"$repo_info"
+    # Push permission is intentionally insufficient here: organization members
+    # can push to colleagues' forks. ADMIN is the ownership-equivalent signal
+    # for an organization-owned fork selected as an archive destination.
+    if [[ "$is_fork" != "true" || ("$repo_owner" != "$viewer_login" && "$viewer_can_admin" != "true") ]]; then
+        printf "Error: archive remote '%s' points to '%s', which is not a GitHub fork owned or administered by your authenticated user.\n" "$remote" "$repo_name" >&2
+        printf "Authenticated GitHub user: '%s'; repository owner: '%s'; is fork: '%s'; viewer can administer: '%s'.\n" \
+            "$viewer_login" "$repo_owner" "$is_fork" "${viewer_can_admin:-false}" >&2
         return 1
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo_name" "$is_fork" "$repo_owner" "$pulls_repo" "$viewer_login" "$repo_host"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$repo_name" \
+        "$is_fork" \
+        "$repo_owner" \
+        "$pulls_repo" \
+        "$viewer_login" \
+        "$repo_host" \
+        "${viewer_can_admin:-false}"
 }
 
 find_owned_fork_remote_name() {
@@ -139,24 +177,32 @@ find_owned_fork_remote_name() {
 
 query_pr_info_for_remote_branch() {
     local pulls_repo="$1"
-    local head_owner="$2"
+    local head_repo="$2"
     local remote_branch="$3"
     local pr_state_filter="${4:-all}"
     local github_host="${5:-}"
-    local gh_output
+    local head_owner gh_output row candidate_head_repo candidate_head_ref
+    local pr_number pr_state pr_url is_draft is_merged
     local -a gh_args=(
         api "repos/$pulls_repo/pulls"
         --method GET
+        --paginate
         -f "state=$pr_state_filter"
-        -f "head=$head_owner:$remote_branch"
         -f per_page=100
-        --jq 'first(.[] | [.number, .state, .html_url, .draft, (.merged_at != null)] | @tsv) // empty'
+        --jq '.[] | [(.head.repo.full_name // "NONE"), (.head.ref // "NONE"), .number, .state, .html_url, .draft, (.merged_at != null)] | @tsv'
     )
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
         return 1
     fi
+    if [[ "$head_repo" != */* ]]; then
+        printf "Error: invalid GitHub head repository name '%s'.\n" "$head_repo" >&2
+        return 1
+    fi
+
+    head_owner="${head_repo%%/*}"
+    gh_args+=(-f "head=$head_owner:$remote_branch")
 
     if [[ -n "$github_host" ]]; then
         gh_output=$(GH_HOST="$github_host" gh "${gh_args[@]}" 2>&1) || {
@@ -168,32 +214,44 @@ query_pr_info_for_remote_branch() {
         return 1
     fi
 
-    printf '%s\n' "$gh_output"
+    while IFS= read -r row; do
+        [[ -n "$row" ]] || continue
+        IFS=$'\t' read -r candidate_head_repo candidate_head_ref pr_number pr_state pr_url is_draft is_merged <<<"$row"
+        if [[ "$candidate_head_repo" == "$head_repo" && "$candidate_head_ref" == "$remote_branch" ]]; then
+            printf '%s\t%s\t%s\t%s\t%s\n' "$pr_number" "$pr_state" "$pr_url" "$is_draft" "$is_merged"
+            return 0
+        fi
+    done <<<"$gh_output"
 }
 
 query_merged_pr_info_for_head_sha() {
     local repo_name="$1"
-    local head_owner="$2"
+    local head_repo="$2"
     local remote_branch="$3"
     local head_sha="$4"
     local github_host="${5:-}"
-    local gh_output
-    local jq_filter
+    local head_owner gh_output row candidate_head_repo candidate_head_ref candidate_head_sha
+    local pr_number pr_url merged_at
     local -a gh_args=(
         api "repos/$repo_name/pulls"
         --method GET
+        --paginate
         -f state=all
-        -f "head=$head_owner:$remote_branch"
         -f per_page=100
+        --jq '.[] | [(.head.repo.full_name // "NONE"), (.head.ref // "NONE"), (.head.sha // "NONE"), .number, .html_url, (.merged_at // "NONE")] | @tsv'
     )
-
-    jq_filter="first(.[] | select(.head.sha == \"$head_sha\" and .merged_at != null) | [.number, \"MERGED\", .html_url, .head.sha] | @tsv) // empty"
-    gh_args+=(--jq "$jq_filter")
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: 'gh' is not installed or not on PATH." >&2
         return 1
     fi
+    if [[ "$head_repo" != */* ]]; then
+        printf "Error: invalid GitHub head repository name '%s'.\n" "$head_repo" >&2
+        return 1
+    fi
+
+    head_owner="${head_repo%%/*}"
+    gh_args+=(-f "head=$head_owner:$remote_branch")
 
     if [[ -n "$github_host" ]]; then
         gh_output=$(GH_HOST="$github_host" gh "${gh_args[@]}" 2>&1) || {
@@ -205,7 +263,17 @@ query_merged_pr_info_for_head_sha() {
         return 1
     fi
 
-    printf '%s\n' "$gh_output"
+    while IFS= read -r row; do
+        [[ -n "$row" ]] || continue
+        IFS=$'\t' read -r candidate_head_repo candidate_head_ref candidate_head_sha pr_number pr_url merged_at <<<"$row"
+        if [[ "$candidate_head_repo" == "$head_repo" &&
+            "$candidate_head_ref" == "$remote_branch" &&
+            "$candidate_head_sha" == "$head_sha" &&
+            "$merged_at" != "NONE" ]]; then
+            printf '%s\tMERGED\t%s\t%s\n' "$pr_number" "$pr_url" "$candidate_head_sha"
+            return 0
+        fi
+    done <<<"$gh_output"
 }
 
 query_merged_pr_details_for_branch() {
