@@ -128,8 +128,9 @@ histsync() {
 }
 
 rebash() {
-    set -x
-    exec bash -l
+    builtin history -a
+    unset W O L Z C F P CF WW WL WZ WC WF WP
+    exec "$BASH" -l
 }
 
 export FIGNORE=".o:.so:.a:.pyc"
