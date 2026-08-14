@@ -760,6 +760,7 @@ loggrep() (
 
 alias gb='git branch'
 alias gg='git grep'
+alias gp='git_update_branch.sh'
 alias gs='git status'
 alias gsi='git status --ignored'
 alias gcd='cd "$(git rev-parse --show-toplevel)"'
