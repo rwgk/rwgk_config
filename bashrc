@@ -778,7 +778,7 @@ gcx() (
     git clean --force -d -x \
         --exclude '/.agents/' \
         --exclude '/.codex/' \
-        --exclude '/.lycheecache/'
+        --exclude '/.lycheecache'
 )
 
 git_show_upstream_for_branch() {
