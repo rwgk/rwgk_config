@@ -822,6 +822,54 @@ git_show_upstream_for_branch() {
     return "$rc"
 }
 
+git_mkwt() {
+    if [[ $# -lt 1 || $# -gt 2 ]]; then
+        echo "Usage: git_mkwt <new-branch> [base-branch]" >&2
+        return 1
+    fi
+
+    local target_branch="$1"
+    local base_branch=main
+    local repo_root
+    local worktree_path="../$target_branch"
+    if [[ $# -eq 2 ]]; then
+        base_branch="$2"
+    fi
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "git_mkwt: not inside a git work tree" >&2
+        return 1
+    fi
+    repo_root=$(git rev-parse --show-toplevel) || return
+
+    if ! git check-ref-format --branch "$target_branch" >/dev/null 2>&1; then
+        echo "git_mkwt: invalid branch name: $target_branch" >&2
+        return 1
+    fi
+
+    if git show-ref --verify --quiet "refs/heads/$target_branch"; then
+        echo "git_mkwt: target branch already exists: $target_branch" >&2
+        return 1
+    fi
+
+    if ! git check-ref-format --branch "$base_branch" >/dev/null 2>&1; then
+        echo "git_mkwt: invalid base branch name: $base_branch" >&2
+        return 1
+    fi
+
+    if ! git show-ref --verify --quiet "refs/heads/$base_branch"; then
+        echo "git_mkwt: base branch does not exist: $base_branch" >&2
+        return 1
+    fi
+
+    (
+        cd -- "$repo_root" || exit
+        set -x
+        git worktree add -b "$target_branch" "$worktree_path" "$base_branch"
+    ) || return
+    cd -- "$repo_root/$worktree_path" || return
+}
+
 git_swnc() (
     set -euo pipefail
 
