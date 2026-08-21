@@ -1,15 +1,14 @@
-# shellcheck shell=bash
+#!/usr/bin/env bash
 
-# This file is sourced by bashrc so git_swrp can change the calling shell's
-# directory. Keep shell options and other top-level state unchanged.
+set -euo pipefail
 
 _git_swrp_usage() {
     cat <<'EOF'
 Usage: git_swrp <PR-number>
 
 Create a sibling worktree named pr<PR-number> for a pull request in the
-repository configured as the current Git repository's 'upstream' remote, then
-change the calling shell to that worktree.
+repository configured as the current Git repository's 'upstream' remote.
+The absolute worktree path is printed to stdout on success.
 EOF
 }
 
@@ -264,7 +263,7 @@ _git_swrp_validate_registered_worktree() {
     fi
 }
 
-git_swrp() {
+main() {
     if [[ $# -eq 1 && ("$1" == -h || "$1" == --help) ]]; then
         _git_swrp_usage
         return 0
@@ -317,6 +316,19 @@ git_swrp() {
     [[ -n "$repo_parent" ]] || repo_parent=/
 
     destination="$repo_parent/pr$pr_number"
+    case "$destination" in
+    /* | [A-Za-z]:/*) ;;
+    *)
+        printf "git_swrp: computed non-absolute worktree directory '%s'.\n" "$destination" >&2
+        return 1
+        ;;
+    esac
+    if [[ "$destination" == *$'\n'* ]]; then
+        printf "git_swrp: worktree directory cannot be represented by the output protocol: '%s'.\n" \
+            "$destination" >&2
+        return 1
+    fi
+
     if ! upstream_repo=$(_git_swrp_upstream_repo); then
         return 1
     fi
@@ -421,17 +433,17 @@ git_swrp() {
     fi
 
     if [[ "$existing_remote" -eq 0 ]]; then
-        printf "Adding remote '%s' for '%s'...\n" "$head_owner" "$expected_head_repo"
-        if ! git remote add "$head_owner" "$expected_remote_url"; then
+        printf "Adding remote '%s' for '%s'...\n" "$head_owner" "$expected_head_repo" >&2
+        if ! git remote add "$head_owner" "$expected_remote_url" 1>&2; then
             printf "git_swrp: failed to add remote '%s' with URL '%s'.\n" "$head_owner" "$expected_remote_url" >&2
             return 1
         fi
     fi
 
-    printf "Fetching PR #%s head '%s' from remote '%s'...\n" "$pr_number" "$head_branch" "$head_owner"
+    printf "Fetching PR #%s head '%s' from remote '%s'...\n" "$pr_number" "$head_branch" "$head_owner" >&2
     # Remote-tracking refs are disposable mirrors. Allow a PR author's
     # force-push while never forcing, resetting, or moving a local branch.
-    if ! git fetch --no-tags "$head_owner" "+refs/heads/$head_branch:$remote_tracking_ref"; then
+    if ! git fetch --no-tags "$head_owner" "+refs/heads/$head_branch:$remote_tracking_ref" 1>&2; then
         printf "git_swrp: failed to fetch live head branch '%s/%s' for PR #%s.\n" \
             "$head_owner" "$head_branch" "$pr_number" >&2
         if [[ "$existing_remote" -eq 0 ]]; then
@@ -454,7 +466,7 @@ git_swrp() {
             echo "git_swrp: the existing worktree changed while the PR head was being fetched." >&2
             return 1
         fi
-        printf "Using existing worktree '%s'; local branch '%s' was not moved.\n" "$destination" "$local_branch"
+        printf "Using existing worktree '%s'; local branch '%s' was not moved.\n" "$destination" "$local_branch" >&2
     else
         if [[ "$_git_swrp_path_registered" -eq 1 || -e "$destination" || -L "$destination" ]]; then
             printf "git_swrp: destination '%s' appeared while the PR head was being fetched; refusing to overwrite it.\n" \
@@ -472,8 +484,8 @@ git_swrp() {
         fi
 
         printf "Creating worktree '%s' with local branch '%s' tracking '%s'...\n" \
-            "$destination" "$local_branch" "$expected_upstream"
-        if ! git worktree add --track -b "$local_branch" "$destination" "$remote_tracking_ref"; then
+            "$destination" "$local_branch" "$expected_upstream" >&2
+        if ! git worktree add --track -b "$local_branch" "$destination" "$remote_tracking_ref" 1>&2; then
             printf "git_swrp: failed to create worktree '%s'.\n" "$destination" >&2
             echo "git_swrp: inspect 'git worktree list' and local branches for any partial state." >&2
             return 1
@@ -498,14 +510,8 @@ git_swrp() {
         fi
     fi
 
-    if ! builtin cd -- "$destination"; then
-        printf "git_swrp: worktree is ready, but could not change directory to '%s'.\n" "$destination" >&2
-        return 1
-    fi
-    printf "Now in worktree '%s' for PR #%s (%s).\n" "$destination" "$pr_number" "$pr_state"
+    printf "Worktree ready for PR #%s (%s): %s\n" "$pr_number" "$pr_state" "$destination" >&2
+    printf '%s\n' "$destination"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    echo "git_swrp.sh defines a shell function and must be sourced; use 'git_swrp <PR-number>' from an initialized shell." >&2
-    exit 1
-fi
+main "$@"

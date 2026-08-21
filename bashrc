@@ -1139,9 +1139,62 @@ git_remote_add() {
     git remote add -f "$owner" "https://github.com/$owner/$repo"
 }
 
-if [[ -f "$HOME/rwgk_config/bin/git_swrp.sh" ]]; then
-    . "$HOME/rwgk_config/bin/git_swrp.sh"
-fi
+git_swrp() {
+    local helper="$HOME/rwgk_config/libexec/git_swrp.sh"
+    local worktree_dir
+    local status
+
+    if [[ ! -e "$helper" ]]; then
+        printf "git_swrp: helper is missing: '%s'\n" "$helper" >&2
+        return 127
+    fi
+    if [[ ! -x "$helper" ]]; then
+        printf "git_swrp: helper is not executable: '%s'\n" "$helper" >&2
+        return 126
+    fi
+
+    if [[ $# -eq 1 && ("$1" == -h || "$1" == --help) ]]; then
+        if "$helper" "$@"; then
+            return 0
+        else
+            status=$?
+            return "$status"
+        fi
+    fi
+
+    if worktree_dir=$("$helper" "$@"); then
+        :
+    else
+        status=$?
+        return "$status"
+    fi
+
+    if [[ -z "$worktree_dir" || "$worktree_dir" == *$'\n'* ]]; then
+        printf "git_swrp: helper returned an invalid worktree directory: '%s'\n" "$worktree_dir" >&2
+        return 1
+    fi
+    case "$worktree_dir" in
+    /* | [A-Za-z]:/*) ;;
+    *)
+        printf "git_swrp: helper returned a non-absolute worktree directory: '%s'\n" "$worktree_dir" >&2
+        return 1
+        ;;
+    esac
+    if [[ -L "$worktree_dir" || ! -d "$worktree_dir" ]]; then
+        printf "git_swrp: helper returned a missing or unsafe worktree directory: '%s'\n" \
+            "$worktree_dir" >&2
+        return 1
+    fi
+
+    if builtin cd -- "$worktree_dir"; then
+        return 0
+    else
+        status=$?
+        printf "git_swrp: worktree is ready, but could not change directory to '%s'.\n" \
+            "$worktree_dir" >&2
+        return "$status"
+    fi
+}
 
 git_show_merge_commits() {
     # Require exactly one argument
