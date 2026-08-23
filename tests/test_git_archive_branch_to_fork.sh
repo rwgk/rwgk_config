@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root=$(
     CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P
 )
-archive_command="$repo_root/bin/archive_branch_to_fork.sh"
+archive_command="$repo_root/bin/git_archive_branch_to_fork.sh"
 delete_command="$repo_root/bin/git_branch_D_track_hash"
 
 fail() {
@@ -23,7 +23,7 @@ assert_contains() {
     fi
 }
 
-test_root=$(mktemp -d /tmp/archive_branch_to_fork_test.XXXXXX)
+test_root=$(mktemp -d /tmp/git_archive_branch_to_fork_test.XXXXXX)
 trap 'rm -rf -- "$test_root"' EXIT
 
 work_repo="$test_root/work"
@@ -367,4 +367,4 @@ fi
 compgen -G "$backtracking_dir/work_delete-me_*.txt" >/dev/null ||
     fail "git_branch_D_track_hash did not create its backtracking record."
 
-echo "PASS: archive_branch_to_fork.sh integration checks"
+echo "PASS: git_archive_branch_to_fork.sh integration checks"
