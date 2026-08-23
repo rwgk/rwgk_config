@@ -15,9 +15,12 @@ Archive the exact local branch tip to the authenticated user's GitHub fork.
 The local branch, its tracking configuration, and its source branch are left
 unchanged.
 
+A git_swrp branch named OWNER→HEAD_BRANCH is matched to the GitHub PR head
+OWNER/HEAD_BRANCH when it tracks that remote branch.
+
 Options:
   --pr NUMBER             Use this merged PR instead of discovering it from
-                          the base repository and exact branch name.
+                          the base repository and PR head branch.
   --fork-remote REMOTE    Fork remote you own or administer (default: origin).
   -h, --help              Show this help.
 EOF
@@ -52,7 +55,8 @@ resolve_merged_pr_info() {
     local branch="$2"
     local github_host="$3"
     local requested_pr="$4"
-    local query_output row
+    local expected_head_owner="${5:-}"
+    local query_output row row_head_ref row_head_owner
     local -a rows=()
 
     if [[ -n "$requested_pr" ]]; then
@@ -72,13 +76,23 @@ resolve_merged_pr_info() {
     fi
     if [[ -n "$query_output" ]]; then
         while IFS= read -r row; do
+            IFS=$'\t' read -r _ _ _ _ row_head_ref row_head_owner _ <<<"$row"
+            [[ "$row_head_ref" == "$branch" ]] || continue
+            if [[ -n "$expected_head_owner" && "$row_head_owner" != "$expected_head_owner" ]]; then
+                continue
+            fi
             rows+=("$row")
         done <<<"$query_output"
     fi
 
     case "${#rows[@]}" in
     0)
-        printf "Error: no merged PR in '%s' was found for head branch '%s'.\n" "$pulls_repo" "$branch" >&2
+        if [[ -n "$expected_head_owner" ]]; then
+            printf "Error: no merged PR in '%s' was found for head branch '%s' owned by '%s'.\n" \
+                "$pulls_repo" "$branch" "$expected_head_owner" >&2
+        else
+            printf "Error: no merged PR in '%s' was found for head branch '%s'.\n" "$pulls_repo" "$branch" >&2
+        fi
         echo "Use --pr NUMBER if the PR cannot be discovered from its former head branch." >&2
         return 1
         ;;
@@ -88,7 +102,12 @@ resolve_merged_pr_info() {
         ;;
     esac
 
-    printf "Error: multiple merged PRs in '%s' use former head branch '%s'.\n" "$pulls_repo" "$branch" >&2
+    if [[ -n "$expected_head_owner" ]]; then
+        printf "Error: multiple merged PRs in '%s' use former head branch '%s' owned by '%s'.\n" \
+            "$pulls_repo" "$branch" "$expected_head_owner" >&2
+    else
+        printf "Error: multiple merged PRs in '%s' use former head branch '%s'.\n" "$pulls_repo" "$branch" >&2
+    fi
     echo "Use --pr NUMBER to select the intended PR." >&2
     return 1
 }
@@ -251,6 +270,7 @@ main() {
     local requested_pr=""
     local arg branch local_ref local_sha current_branch dirty_warning=""
     local fork_info fork_repo pulls_repo github_host
+    local pr_lookup_branch expected_pr_head_owner="" expected_composite_branch
     local pr_info pr_number pr_url merged_at pr_head_sha pr_head_ref pr_head_owner
     local base_ref base_sha merge_commit_sha archive_timestamp
     local archive_branch archive_ref existing_archive_sha verified_archive_sha push_output
@@ -325,20 +345,45 @@ main() {
         die "backtracking information directory does not exist: '$MY_GIT_BACKTRACKING_INFO_LOCAL'."
     fi
 
+    if upstream_info=$(get_remote_upstream_info "$branch"); then
+        IFS=$'\t' read -r tracking_remote tracking_branch <<<"$upstream_info"
+        tracking_ref=$(git for-each-ref --format='%(upstream)' "$local_ref")
+        cached_tracking_sha=$(git rev-parse --verify "${tracking_ref}^{commit}" 2>/dev/null || true)
+        if ! live_tracking_sha=$(get_remote_branch_sha "$tracking_remote" "$tracking_branch" 2>&1); then
+            tracking_lookup_note="$live_tracking_sha"
+            live_tracking_sha=""
+        fi
+    fi
+
+    pr_lookup_branch="$branch"
+    if [[ -n "$tracking_remote" && "$branch" == "${tracking_remote}→${tracking_branch}" ]]; then
+        expected_pr_head_owner="$tracking_remote"
+        pr_lookup_branch="$tracking_branch"
+    fi
+
     if ! fork_info=$(get_owned_fork_remote_info "$fork_remote" 2>&1); then
         printf '%s\n' "$fork_info" >&2
         exit 1
     fi
     IFS=$'\t' read -r fork_repo _ _ pulls_repo _ github_host _ <<<"$fork_info"
 
-    if ! pr_info=$(resolve_merged_pr_info "$pulls_repo" "$branch" "$github_host" "$requested_pr"); then
+    if ! pr_info=$(resolve_merged_pr_info \
+        "$pulls_repo" "$pr_lookup_branch" "$github_host" "$requested_pr" "$expected_pr_head_owner"); then
         exit 1
     fi
     IFS=$'\t' read -r pr_number pr_url merged_at pr_head_sha pr_head_ref pr_head_owner base_ref base_sha merge_commit_sha <<<"$pr_info"
 
     [[ "$merged_at" != NONE ]] || die "PR #$pr_number is not merged."
-    [[ "$pr_head_ref" == "$branch" ]] ||
-        die "PR #$pr_number head branch '$pr_head_ref' does not match local branch '$branch'."
+    expected_composite_branch="${pr_head_owner}→${pr_head_ref}"
+    if [[ "$branch" == "$pr_head_ref" ]]; then
+        :
+    elif [[ "$branch" == "$expected_composite_branch" ]]; then
+        if [[ "$tracking_remote" != "$pr_head_owner" || "$tracking_branch" != "$pr_head_ref" ]]; then
+            die "local branch '$branch' must track '$pr_head_owner/$pr_head_ref' to match PR #$pr_number."
+        fi
+    else
+        die "PR #$pr_number head '$pr_head_owner/$pr_head_ref' does not match local branch '$branch'."
+    fi
     archive_timestamp=$(format_github_timestamp_in_pacific "$merged_at")
 
     archive_branch="archive/pr${pr_number}_${archive_timestamp}_${branch}"
@@ -350,16 +395,6 @@ main() {
     if [[ "$current_branch" == "$branch" ]] && [[ -n "$(git status --porcelain)" ]]; then
         dirty_warning="WARNING: the current worktree was dirty; uncommitted changes were not archived."
         printf '%s\n' "$dirty_warning" >&2
-    fi
-
-    if upstream_info=$(get_remote_upstream_info "$branch"); then
-        IFS=$'\t' read -r tracking_remote tracking_branch <<<"$upstream_info"
-        tracking_ref=$(git for-each-ref --format='%(upstream)' "$local_ref")
-        cached_tracking_sha=$(git rev-parse --verify "${tracking_ref}^{commit}" 2>/dev/null || true)
-        if ! live_tracking_sha=$(get_remote_branch_sha "$tracking_remote" "$tracking_branch" 2>&1); then
-            tracking_lookup_note="$live_tracking_sha"
-            live_tracking_sha=""
-        fi
     fi
 
     if [[ -n "$live_tracking_sha" ]]; then

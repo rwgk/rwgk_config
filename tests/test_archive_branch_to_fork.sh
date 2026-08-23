@@ -45,6 +45,7 @@ base_sha=$(git -C "$work_repo" rev-parse HEAD)
 git -c init.defaultBranch=main init --bare -q "$upstream_repo"
 git -c init.defaultBranch=main init --bare -q "$fork_repo"
 git -C "$work_repo" remote add upstream "$upstream_repo"
+git -C "$work_repo" remote add upstream-owner "$upstream_repo"
 git -C "$work_repo" remote add origin "$upstream_repo"
 git -C "$work_repo" remote set-url --push origin "$fork_repo"
 git -C "$work_repo" push -q upstream main
@@ -80,8 +81,16 @@ if [[ "$1" == repo && "$2" == view ]]; then
 fi
 
 if [[ "$1" == pr && "$2" == list ]]; then
+    if [[ "$*" != *'--head feature/test'* ]]; then
+        echo "Unexpected PR head filter: $*" >&2
+        exit 1
+    fi
     printf '42\thttps://github.com/upstream/project/pull/42\t2026-08-06T04:01:15Z\t%s\tfeature/test\tupstream-owner\tmain\t%s\t%s\n' \
         "$TEST_REMOTE_SHA" "$TEST_BASE_SHA" "$TEST_BASE_SHA"
+    if [[ -n "${TEST_OTHER_OWNER_PR:-}" ]]; then
+        printf '43\thttps://github.com/upstream/project/pull/43\t2026-08-04T04:01:15Z\t%s\tfeature/test\tother-owner\tmain\t%s\t%s\n' \
+            "$TEST_REMOTE_SHA" "$TEST_BASE_SHA" "$TEST_BASE_SHA"
+    fi
     if [[ -n "${TEST_MULTIPLE_PRS:-}" ]]; then
         printf '41\thttps://github.com/upstream/project/pull/41\t2026-08-05T04:01:15Z\t%s\tfeature/test\tupstream-owner\tmain\t%s\t%s\n' \
             "$TEST_REMOTE_SHA" "$TEST_BASE_SHA" "$TEST_BASE_SHA"
@@ -194,6 +203,75 @@ second_stdout="$test_root/second.stdout"
 ) >"$second_stdout" 2>"$test_root/second.stderr"
 assert_contains "Archive ref already exists at the local tip: 'origin/$archive_branch'." "$second_stdout"
 assert_contains "Backtracking information already exists: '$record'" "$second_stdout"
+
+composite_branch='upstream-owner→feature/test'
+git -C "$work_repo" fetch -q upstream-owner feature/test
+git -C "$work_repo" switch -q -c "$composite_branch"
+printf 'additional local work\n' >>"$work_repo/content.txt"
+git -C "$work_repo" commit -am "additional local work" >/dev/null
+composite_sha=$(git -C "$work_repo" rev-parse HEAD)
+git -C "$work_repo" branch --set-upstream-to=upstream-owner/feature/test "$composite_branch" >/dev/null
+
+export TEST_OTHER_OWNER_PR=1
+(
+    cd "$work_repo"
+    "$archive_command" "$composite_branch"
+) >"$test_root/composite.stdout" 2>"$test_root/composite.stderr"
+unset TEST_OTHER_OWNER_PR
+
+composite_archive_branch="archive/pr42_2026-08-05+210115_$composite_branch"
+composite_archive_ref="refs/heads/$composite_archive_branch"
+[[ "$(git --git-dir="$fork_repo" rev-parse "$composite_archive_ref")" == "$composite_sha" ]] ||
+    fail "composite archive ref does not preserve the exact local tip."
+[[ "$(git --git-dir="$upstream_repo" rev-parse refs/heads/feature/test)" == "$remote_sha" ]] ||
+    fail "composite archive changed the source branch."
+[[ "$(git -C "$work_repo" rev-parse "refs/heads/$composite_branch")" == "$composite_sha" ]] ||
+    fail "composite archive changed the local branch."
+[[ "$(git -C "$work_repo" for-each-ref --format='%(upstream:short)' "refs/heads/$composite_branch")" == upstream-owner/feature/test ]] || fail "composite archive changed the tracking configuration."
+[[ "$(git -C "$work_repo" hash-object "$work_repo/.git/gh-stack/archive-test")" == "$stack_checksum" ]] ||
+    fail "composite archive changed .git/gh-stack."
+
+composite_record="$backtracking_dir/work_upstream-owner_feature_test_pr42_2026-08-05+210115.txt"
+[[ -f "$composite_record" ]] || fail "composite backtracking record was not created."
+assert_contains "Local branch: '$composite_branch'" "$composite_record"
+assert_contains "Local branch HEAD SHA: '$composite_sha'" "$composite_record"
+assert_contains "PR head branch: 'upstream-owner/feature/test'" "$composite_record"
+assert_contains "Configured remote-tracking ref: 'refs/remotes/upstream-owner/feature/test'" "$composite_record"
+
+(
+    cd "$work_repo"
+    "$archive_command" --pr 42 "$composite_branch"
+) >"$test_root/composite-explicit.stdout" 2>"$test_root/composite-explicit.stderr"
+assert_contains "Archive ref already exists at the local tip: 'origin/$composite_archive_branch'." \
+    "$test_root/composite-explicit.stdout"
+assert_contains "Backtracking information already exists: '$composite_record'" \
+    "$test_root/composite-explicit.stdout"
+
+git -C "$work_repo" branch --unset-upstream "$composite_branch"
+if (
+    cd "$work_repo"
+    "$archive_command" --pr 42 "$composite_branch"
+) >"$test_root/composite-untracked.stdout" 2>"$test_root/composite-untracked.stderr"; then
+    fail "untracked composite branch unexpectedly archived."
+fi
+assert_contains "Error: local branch '$composite_branch' must track 'upstream-owner/feature/test' to match PR #42." \
+    "$test_root/composite-untracked.stderr"
+git -C "$work_repo" branch --set-upstream-to=upstream-owner/feature/test "$composite_branch" >/dev/null
+
+wrong_owner_branch='other-owner→feature/test'
+git -C "$work_repo" branch "$wrong_owner_branch" "$composite_sha"
+if (
+    cd "$work_repo"
+    "$archive_command" --pr 42 "$wrong_owner_branch"
+) >"$test_root/wrong-owner.stdout" 2>"$test_root/wrong-owner.stderr"; then
+    fail "owner-mismatched composite branch unexpectedly archived."
+fi
+assert_contains "Error: PR #42 head 'upstream-owner/feature/test' does not match local branch '$wrong_owner_branch'." \
+    "$test_root/wrong-owner.stderr"
+if git --git-dir="$fork_repo" show-ref --verify --quiet \
+    "refs/heads/archive/pr42_2026-08-05+210115_$wrong_owner_branch"; then
+    fail "owner-mismatched composite branch created an archive ref."
+fi
 
 export TEST_MULTIPLE_PRS=1
 if (
