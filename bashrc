@@ -177,6 +177,22 @@ DisableScreenshotFloatingThumbnail() {
     killall SystemUIServer
 }
 
+i2t() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: i2t (no arguments allowed)" >&2
+        return 1
+    fi
+    iterm2setsize.sh 140 35
+}
+
+i2b() {
+    if [[ $# -ne 0 ]]; then
+        echo "Usage: i2b (no arguments allowed)" >&2
+        return 1
+    fi
+    iterm2setsize.sh 140 14
+}
+
 # pbff: PasteBoard From File
 # Copy the contents of a file into the pasteboard (clipboard).
 pbff() {
