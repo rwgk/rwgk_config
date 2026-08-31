@@ -72,6 +72,30 @@ Create:
 
 This is the equivalent of iTerm2's built-in `Cmd-Shift-Enter`.
 
+### Custom iTerm2 shortcut: F10 = Show / hide all windows
+
+Use iTerm2's built-in system-wide hotkey to activate iTerm2 from any other
+application, including Chrome.
+
+Configured in:
+
+`iTerm2 -> Settings -> Keys -> Hotkey`
+
+Enable:
+
+`Show/hide all windows with a system-wide hotkey`
+
+Click the hotkey field. When it shows `Recording`, press `F10`.
+
+This makes the following workflow possible without first clicking an iTerm2
+window:
+
+1. Press `F10` to bring the existing iTerm2 windows to the foreground.
+2. Press `Cmd-1` through `Cmd-9` to select the desired iTerm2 window.
+
+When iTerm2 is already in the foreground, `F10` hides its windows instead.
+This uses the normal iTerm2 windows; it is not a dedicated hotkey window.
+
 ## iTerm2 saved arrangements
 
 Saved arrangements are useful for recreating the normal collection of iTerm2 windows/tabs/panes after starting iTerm2 fresh.
