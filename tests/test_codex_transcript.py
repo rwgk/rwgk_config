@@ -12,7 +12,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -31,6 +31,8 @@ EXPORTED_AT = "2026-08-28 12:34 PDT"
 SESSION_STARTED_TIMESTAMP = "2026-08-25T21:42:51.000Z"
 LAST_ACTIVITY_TIMESTAMP = "2026-08-27T20:53:04.056Z"
 LAST_ACTIVITY = "2026-08-27 13:53 PDT"
+LAST_ACTIVITY_MOMENT = datetime(2026, 8, 27, 20, 53, 4, 56000, tzinfo=timezone.utc)
+USER_MESSAGE_TIMESTAMP = "2026-08-27T20:51:04.056Z"
 HOSTNAME = "host.example.com"
 
 
@@ -172,9 +174,17 @@ class TranscriptTests(TemporaryCodexHome):
         self.assertEqual(
             transcript.messages,
             (
-                codex_transcript.Message("user", "# Prompt\n\nUnicode: α"),
-                codex_transcript.Message("assistant", "Working on it."),
-                codex_transcript.Message("assistant", "```python\nprint('done')\n```"),
+                codex_transcript.Message(
+                    "user", "# Prompt\n\nUnicode: α", LAST_ACTIVITY_MOMENT
+                ),
+                codex_transcript.Message(
+                    "assistant", "Working on it.", LAST_ACTIVITY_MOMENT
+                ),
+                codex_transcript.Message(
+                    "assistant",
+                    "```python\nprint('done')\n```",
+                    LAST_ACTIVITY_MOMENT,
+                ),
             ),
         )
         rendered = codex_transcript.render_markdown(
@@ -189,10 +199,12 @@ class TranscriptTests(TemporaryCodexHome):
         records = [
             session_metadata(),
             {
+                "timestamp": LAST_ACTIVITY_TIMESTAMP,
                 "type": "event_msg",
                 "payload": {"type": "user_message", "message": "same"},
             },
             {
+                "timestamp": LAST_ACTIVITY_TIMESTAMP,
                 "type": "event_msg",
                 "payload": {
                     "type": "agent_message",
@@ -201,6 +213,7 @@ class TranscriptTests(TemporaryCodexHome):
                 },
             },
             {
+                "timestamp": LAST_ACTIVITY_TIMESTAMP,
                 "type": "event_msg",
                 "payload": {
                     "type": "agent_message",
@@ -215,6 +228,10 @@ class TranscriptTests(TemporaryCodexHome):
 
         self.assertEqual(
             [message.text for message in transcript.messages], ["same"] * 3
+        )
+        self.assertEqual(
+            [message.timestamp for message in transcript.messages],
+            [LAST_ACTIVITY_MOMENT] * 3,
         )
 
     def test_completed_items_are_deduplicated_by_id_not_text(self) -> None:
@@ -295,6 +312,7 @@ class TranscriptTests(TemporaryCodexHome):
         transcript = codex_transcript.read_session(path, SESSION_ID)
 
         self.assertEqual(transcript.last_activity, expected)
+        self.assertIsNone(transcript.messages[0].timestamp)
 
     def test_malformed_interior_line_is_an_error(self) -> None:
         path = self.write_session([session_metadata()])
@@ -355,6 +373,122 @@ class TranscriptTests(TemporaryCodexHome):
             codex_transcript.format_pacific_datetime(summer),
             "2026-08-28 12:34 PDT",
         )
+
+    def test_message_timestamp_includes_offset_and_abbreviation(self) -> None:
+        winter = datetime(2026, 1, 15, 20, 5, 59, tzinfo=timezone.utc)
+        summer = datetime(2026, 8, 28, 19, 34, 59, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            codex_transcript.format_message_datetime(winter),
+            "2026-01-15T12:05:59-08:00 (PST)",
+        )
+        self.assertEqual(
+            codex_transcript.format_message_datetime(summer),
+            "2026-08-28T12:34:59-07:00 (PDT)",
+        )
+
+    def test_elapsed_duration_is_compact(self) -> None:
+        start = datetime(2026, 8, 28, 19, 0, tzinfo=timezone.utc)
+        cases = (
+            (timedelta(0), "<1s"),
+            (timedelta(microseconds=999999), "<1s"),
+            (timedelta(seconds=8), "+8s"),
+            (timedelta(minutes=2, seconds=12), "+2m 12s"),
+            (timedelta(hours=1, minutes=7, seconds=59), "+1h 7m"),
+            (timedelta(days=3, hours=4, minutes=59), "+3d 4h"),
+        )
+
+        for elapsed, expected in cases:
+            with self.subTest(elapsed=elapsed):
+                self.assertEqual(
+                    codex_transcript.format_elapsed_duration(start, start + elapsed),
+                    expected,
+                )
+
+        self.assertIsNone(
+            codex_transcript.format_elapsed_duration(
+                start, start - timedelta(seconds=1)
+            )
+        )
+
+    def test_message_delta_is_correct_across_dst_fallback(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Before fallback",
+                datetime(2026, 11, 1, 8, 59, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "After fallback",
+                datetime(2026, 11, 1, 9, 1, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn(
+            "## User — 2026-11-01T01:59:00-07:00 (PDT)\n",
+            rendered,
+        )
+        self.assertIn(
+            "## Codex — 2026-11-01T01:01:00-08:00 (PST) · +2m after User\n",
+            rendered,
+        )
+
+    def test_missing_timestamp_breaks_the_delta_chain(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Timestamped",
+                datetime(2026, 8, 27, 19, 0, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message("assistant", "No timestamp"),
+            codex_transcript.Message(
+                "user",
+                "Timestamped again",
+                datetime(2026, 8, 27, 19, 5, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Eight seconds later",
+                datetime(2026, 8, 27, 19, 5, 8, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn("## Codex\n\nNo timestamp", rendered)
+        self.assertIn(
+            "## User — 2026-08-27T12:05:00-07:00 (PDT)\n",
+            rendered,
+        )
+        self.assertIn(
+            "## Codex — 2026-08-27T12:05:08-07:00 (PDT) · +8s after User\n",
+            rendered,
+        )
+
+    def test_negative_message_delta_is_omitted(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Later timestamp",
+                datetime(2026, 8, 27, 19, 5, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Earlier timestamp",
+                datetime(2026, 8, 27, 19, 4, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn(
+            "## Codex — 2026-08-27T12:04:00-07:00 (PDT)\n",
+            rendered,
+        )
+        self.assertNotIn("after User", rendered)
 
     def test_hostname_falls_back_when_fqdn_is_unavailable(self) -> None:
         with (
@@ -423,7 +557,12 @@ class CommandLineTests(TemporaryCodexHome):
         session_path = self.write_session(
             [
                 session_metadata(),
-                completed_message("UserMessage", "Question", "user"),
+                completed_message(
+                    "UserMessage",
+                    "Question",
+                    "user",
+                    timestamp=USER_MESSAGE_TIMESTAMP,
+                ),
                 completed_message(
                     "AgentMessage", "Answer", "agent", phase="final_answer"
                 ),
@@ -444,11 +583,11 @@ class CommandLineTests(TemporaryCodexHome):
             f"- Session JSONL (realpath): `{session_path.resolve()}`\n"
             f"- Session ID: `{SESSION_ID}`\n"
             "\n"
-            "## User\n"
+            "## User — 2026-08-27T13:51:04-07:00 (PDT)\n"
             "\n"
             "Question\n"
             "\n"
-            "## Codex\n"
+            "## Codex — 2026-08-27T13:53:04-07:00 (PDT) · +2m after User\n"
             "\n"
             "Answer\n",
         )

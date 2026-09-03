@@ -32,6 +32,7 @@ class SessionFileError(TranscriptError):
 class Message:
     role: str
     text: str
+    timestamp: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +80,35 @@ def codex_home() -> Path:
 
 def format_pacific_datetime(moment: datetime) -> str:
     return moment.astimezone(PACIFIC_TIME_ZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def format_message_datetime(moment: datetime) -> str:
+    local_moment = moment.astimezone(PACIFIC_TIME_ZONE)
+    return f"{local_moment.isoformat(timespec='seconds')} ({local_moment.tzname()})"
+
+
+def format_elapsed_duration(previous: datetime, current: datetime) -> str | None:
+    elapsed = current.astimezone(timezone.utc) - previous.astimezone(timezone.utc)
+    total_seconds = elapsed.total_seconds()
+    if total_seconds < 0:
+        return None
+    if total_seconds < 1:
+        return "<1s"
+
+    remaining_seconds = int(total_seconds)
+    parts: list[str] = []
+    for unit_seconds, suffix in (
+        (24 * 60 * 60, "d"),
+        (60 * 60, "h"),
+        (60, "m"),
+        (1, "s"),
+    ):
+        value, remaining_seconds = divmod(remaining_seconds, unit_seconds)
+        if value:
+            parts.append(f"{value}{suffix}")
+            if len(parts) == 2:
+                break
+    return f"+{' '.join(parts)}"
 
 
 def current_pacific_datetime() -> str:
@@ -212,7 +242,9 @@ def text_from_completed_item(item: dict[str, object]) -> str | None:
 
 
 def decode_visible_message(
-    record: object, seen_completed_item_ids: set[tuple[str, str]]
+    record: object,
+    seen_completed_item_ids: set[tuple[str, str]],
+    timestamp: datetime | None = None,
 ) -> Message | None:
     if not isinstance(record, dict) or record.get("type") != "event_msg":
         return None
@@ -231,7 +263,7 @@ def decode_visible_message(
         if not isinstance(text, str):
             return None
         role = "user" if event_type == "user_message" else "assistant"
-        return Message(role=role, text=text)
+        return Message(role=role, text=text, timestamp=timestamp)
 
     if event_type != "item_completed":
         return None
@@ -259,7 +291,7 @@ def decode_visible_message(
         seen_completed_item_ids.add(item_key)
 
     role = "user" if item_type == "UserMessage" else "assistant"
-    return Message(role=role, text=text)
+    return Message(role=role, text=text, timestamp=timestamp)
 
 
 def read_session(path: Path, expected_session_id: str) -> SessionTranscript:
@@ -287,7 +319,9 @@ def read_session(path: Path, expected_session_id: str) -> SessionTranscript:
         ):
             last_activity = record_timestamp
 
-        message = decode_visible_message(record, seen_completed_item_ids)
+        message = decode_visible_message(
+            record, seen_completed_item_ids, timestamp=record_timestamp
+        )
         if message is not None:
             messages.append(message)
 
@@ -365,10 +399,23 @@ def render_markdown(messages: Sequence[Message], metadata: TranscriptMetadata) -
             f"- Session ID: `{metadata.session_id}`"
         )
     ]
+    previous_message: Message | None = None
     for message in messages:
         heading = "User" if message.role == "user" else "Codex"
+        if message.timestamp is not None:
+            heading = f"{heading} — {format_message_datetime(message.timestamp)}"
+            if previous_message is not None and previous_message.timestamp is not None:
+                elapsed = format_elapsed_duration(
+                    previous_message.timestamp, message.timestamp
+                )
+                if elapsed is not None:
+                    previous_heading = (
+                        "User" if previous_message.role == "user" else "Codex"
+                    )
+                    heading = f"{heading} · {elapsed} after {previous_heading}"
         body = message.text.strip("\r\n")
         sections.append(f"## {heading}\n\n{body}")
+        previous_message = message
     return "\n\n".join(sections) + "\n"
 
 
