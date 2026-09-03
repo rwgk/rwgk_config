@@ -436,6 +436,149 @@ class TranscriptTests(TemporaryCodexHome):
             rendered,
         )
 
+    def test_codex_turn_elapsed_is_cumulative_and_excludes_user_gap(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Question",
+                datetime(2026, 9, 3, 18, 48, 48, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Progress",
+                datetime(2026, 9, 3, 18, 48, 58, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Answer",
+                datetime(2026, 9, 3, 18, 52, 13, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "user",
+                "Follow-up",
+                datetime(2026, 9, 3, 18, 55, 53, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn(
+            "## Codex — 2026-09-03T11:48:58-07:00 (PDT) · +10s after User\n",
+            rendered,
+        )
+        self.assertIn(
+            "## Codex — 2026-09-03T11:52:13-07:00 (PDT) "
+            "· +3m 15s after Codex · +3m 25s since User\n",
+            rendered,
+        )
+        self.assertIn(
+            "## User — 2026-09-03T11:55:53-07:00 (PDT) "
+            "· +3m 40s after Codex · prior Codex turn: 3m 25s\n",
+            rendered,
+        )
+
+    def test_missing_codex_timestamp_can_recover_before_turn_ends(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Question",
+                datetime(2026, 8, 27, 19, 0, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message("assistant", "No timestamp"),
+            codex_transcript.Message(
+                "assistant",
+                "Timestamped answer",
+                datetime(2026, 8, 27, 19, 0, 20, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "user",
+                "Follow-up",
+                datetime(2026, 8, 27, 19, 1, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn(
+            "## Codex — 2026-08-27T12:00:20-07:00 (PDT) · +20s since User\n",
+            rendered,
+        )
+        self.assertIn(
+            "## User — 2026-08-27T12:01:00-07:00 (PDT) "
+            "· +40s after Codex · prior Codex turn: 20s\n",
+            rendered,
+        )
+
+    def test_missing_final_codex_timestamp_omits_turn_summary(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Question",
+                datetime(2026, 8, 27, 19, 0, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Timestamped progress",
+                datetime(2026, 8, 27, 19, 0, 20, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message("assistant", "No final timestamp"),
+            codex_transcript.Message(
+                "user",
+                "Follow-up",
+                datetime(2026, 8, 27, 19, 1, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertNotIn("prior Codex turn", rendered)
+
+    def test_codex_turn_timing_can_recover_after_timestamp_regression(self) -> None:
+        messages = (
+            codex_transcript.Message(
+                "user",
+                "Question",
+                datetime(2026, 8, 27, 19, 0, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Later progress",
+                datetime(2026, 8, 27, 19, 0, 10, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Regressed timestamp",
+                datetime(2026, 8, 27, 19, 0, 5, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "assistant",
+                "Recovered timestamp",
+                datetime(2026, 8, 27, 19, 0, 20, tzinfo=timezone.utc),
+            ),
+            codex_transcript.Message(
+                "user",
+                "Follow-up",
+                datetime(2026, 8, 27, 19, 0, 30, tzinfo=timezone.utc),
+            ),
+        )
+
+        rendered = codex_transcript.render_markdown(messages, transcript_metadata())
+
+        self.assertIn(
+            "## Codex — 2026-08-27T12:00:05-07:00 (PDT)\n",
+            rendered,
+        )
+        self.assertIn(
+            "## Codex — 2026-08-27T12:00:20-07:00 (PDT) "
+            "· +15s after Codex · +20s since User\n",
+            rendered,
+        )
+        self.assertIn(
+            "## User — 2026-08-27T12:00:30-07:00 (PDT) "
+            "· +10s after Codex · prior Codex turn: 20s\n",
+            rendered,
+        )
+
     def test_missing_timestamp_breaks_the_delta_chain(self) -> None:
         messages = (
             codex_transcript.Message(

@@ -400,8 +400,31 @@ def render_markdown(messages: Sequence[Message], metadata: TranscriptMetadata) -
         )
     ]
     previous_message: Message | None = None
+    turn_started_at: datetime | None = None
+    codex_messages_in_turn = 0
+    last_codex_timestamp: datetime | None = None
+    latest_known_codex_timestamp: datetime | None = None
     for message in messages:
-        heading = "User" if message.role == "user" else "Codex"
+        is_user = message.role == "user"
+        heading = "User" if is_user else "Codex"
+        turn_elapsed: str | None = None
+        if not is_user:
+            last_codex_timestamp = None
+            if message.timestamp is not None and turn_started_at is not None:
+                turn_elapsed = format_elapsed_duration(
+                    turn_started_at, message.timestamp
+                )
+                timestamp_regressed = (
+                    latest_known_codex_timestamp is not None
+                    and format_elapsed_duration(
+                        latest_known_codex_timestamp, message.timestamp
+                    )
+                    is None
+                )
+                if turn_elapsed is not None and not timestamp_regressed:
+                    last_codex_timestamp = message.timestamp
+                    latest_known_codex_timestamp = message.timestamp
+
         if message.timestamp is not None:
             heading = f"{heading} — {format_message_datetime(message.timestamp)}"
             if previous_message is not None and previous_message.timestamp is not None:
@@ -413,8 +436,32 @@ def render_markdown(messages: Sequence[Message], metadata: TranscriptMetadata) -
                         "User" if previous_message.role == "user" else "Codex"
                     )
                     heading = f"{heading} · {elapsed} after {previous_heading}"
+            if is_user:
+                if turn_started_at is not None and last_codex_timestamp is not None:
+                    prior_turn_elapsed = format_elapsed_duration(
+                        turn_started_at, last_codex_timestamp
+                    )
+                    if prior_turn_elapsed is not None:
+                        heading = (
+                            f"{heading} · prior Codex turn: "
+                            f"{prior_turn_elapsed.removeprefix('+')}"
+                        )
+            elif (
+                codex_messages_in_turn > 0
+                and turn_elapsed is not None
+                and last_codex_timestamp is not None
+            ):
+                heading = f"{heading} · {turn_elapsed} since User"
         body = message.text.strip("\r\n")
         sections.append(f"## {heading}\n\n{body}")
+
+        if is_user:
+            turn_started_at = message.timestamp
+            codex_messages_in_turn = 0
+            last_codex_timestamp = None
+            latest_known_codex_timestamp = None
+        else:
+            codex_messages_in_turn += 1
         previous_message = message
     return "\n\n".join(sections) + "\n"
 
