@@ -96,6 +96,24 @@ window:
 When iTerm2 is already in the foreground, `F10` hides its windows instead.
 This uses the normal iTerm2 windows; it is not a dedicated hotkey window.
 
+### Custom iTerm2 shortcut: Shift-Enter = Newline in Claude Code
+
+To make `Shift-Enter` insert a newline in Claude Code without submitting the
+prompt, configure a key binding for the iTerm2 profile used to run Claude Code.
+
+Configured in:
+
+`iTerm2 -> Settings -> Profiles -> Keys -> Key Bindings`
+
+Click `+`, then add:
+
+- Keyboard Shortcut: `Shift-Enter`
+- Action: `Send Text with "vim" Special Chars`
+- Text: `\n`
+
+This keeps normal `Enter` for submitting the prompt while making multiline
+prompts convenient.
+
 ## iTerm2 saved arrangements
 
 Saved arrangements are useful for recreating the normal collection of iTerm2 windows/tabs/panes after starting iTerm2 fresh.
