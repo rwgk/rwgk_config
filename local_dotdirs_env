@@ -174,6 +174,7 @@ rwgk_set_local_dotdir_paths() {
     export RWGK_DOTDIRS_NV="$RWGK_DOTDIRS/nv"
     export RWGK_DOTDIRS_CUDA_CACHE="$RWGK_DOTDIRS_NV/ComputeCache"
     export RWGK_DOTDIRS_ANSIBLE="$RWGK_DOTDIRS/ansible"
+    export RWGK_DOTDIRS_CLAUDE="$RWGK_DOTDIRS/claude"
     export RWGK_DOTDIRS_CODEX="$RWGK_DOTDIRS/codex"
 }
 
@@ -190,8 +191,10 @@ rwgk_mkdir_local_dotdirs() {
         "$RWGK_DOTDIRS_PIP_CACHE" \
         "$RWGK_DOTDIRS_CUDA_CACHE" \
         "$RWGK_DOTDIRS_ANSIBLE" \
+        "$RWGK_DOTDIRS_CLAUDE" \
         "$RWGK_DOTDIRS_CODEX" 2>/dev/null
     [ ! -d "$RWGK_DOTDIRS_ANSIBLE" ] || chmod 700 "$RWGK_DOTDIRS_ANSIBLE" 2>/dev/null || true
+    [ ! -d "$RWGK_DOTDIRS_CLAUDE" ] || chmod 700 "$RWGK_DOTDIRS_CLAUDE" 2>/dev/null || true
 }
 
 rwgk_ensure_dotdir_symlink() {
@@ -230,6 +233,7 @@ rwgk_ensure_local_dotdir_symlinks() {
     rwgk_ensure_dotdir_symlink "$HOME/.local/share" "$RWGK_DOTDIRS_DATA" || return
     rwgk_ensure_dotdir_symlink "$HOME/.local/state" "$RWGK_DOTDIRS_STATE" || return
     rwgk_ensure_dotdir_symlink "$HOME/.ansible" "$RWGK_DOTDIRS_ANSIBLE" || return
+    rwgk_ensure_dotdir_symlink "$HOME/.claude" "$RWGK_DOTDIRS_CLAUDE" || return
     rwgk_ensure_dotdir_symlink "$HOME/.codex" "$RWGK_DOTDIRS_CODEX" || return
 }
 
@@ -267,6 +271,7 @@ show_local_dotdirs() {
     echo "TMPDIR=${TMPDIR:-}"
     echo "CUDA_CACHE_PATH=${CUDA_CACHE_PATH:-}"
     echo "RWGK_DOTDIRS_ANSIBLE=${RWGK_DOTDIRS_ANSIBLE:-}"
+    echo "RWGK_DOTDIRS_CLAUDE=${RWGK_DOTDIRS_CLAUDE:-}"
     echo "RWGK_DOTDIRS_CODEX=${RWGK_DOTDIRS_CODEX:-}"
 }
 
