@@ -480,7 +480,11 @@ wipe_pycache() {
     rm -f "$tmp"
 }
 
-alias rrelpath='realpath --relative-to=.'
+if [ X$(uname) == XDarwin ]; then
+    alias rrelpath='grealpath --relative-to=.'
+else
+    alias rrelpath='realpath --relative-to=.'
+fi
 alias dirs_here_xargs='find . -maxdepth 1 -type d \! -name . -print0 | xargs -0'
 
 xattr_clear_recursive() {
