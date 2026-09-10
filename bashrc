@@ -480,6 +480,7 @@ wipe_pycache() {
     rm -f "$tmp"
 }
 
+alias rrelpath='realpath --relative-to=.'
 alias dirs_here_xargs='find . -maxdepth 1 -type d \! -name . -print0 | xargs -0'
 
 xattr_clear_recursive() {
