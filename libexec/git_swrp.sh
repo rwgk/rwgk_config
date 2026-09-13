@@ -225,6 +225,55 @@ _git_swrp_remote_exists() {
     return 1
 }
 
+_git_swrp_find_matching_remote() {
+    local expected_repo="$1"
+    local normalized_expected
+    local remotes
+    local remote
+    local remote_url
+    local actual_repo
+    local normalized_actual
+    local -a matching_remotes=()
+    local -a matching_urls=()
+    local index
+
+    _git_swrp_matching_remote=
+    normalized_expected=$(_git_swrp_normalize_github_repo "$expected_repo") || return 2
+    if ! remotes=$(git remote); then
+        echo "git_swrp: could not inspect configured Git remotes." >&2
+        return 2
+    fi
+
+    while IFS= read -r remote; do
+        [[ -n "$remote" ]] || continue
+        if ! remote_url=$(git config --get "remote.$remote.url"); then
+            continue
+        fi
+        if ! actual_repo=$(_git_swrp_github_repo_from_url "$remote_url"); then
+            continue
+        fi
+        normalized_actual=$(_git_swrp_normalize_github_repo "$actual_repo") || return 2
+        if [[ "$normalized_actual" == "$normalized_expected" ]]; then
+            matching_remotes+=("$remote")
+            matching_urls+=("$remote_url")
+        fi
+    done <<<"$remotes"
+
+    if [[ "${#matching_remotes[@]}" -eq 0 ]]; then
+        return 1
+    fi
+    if [[ "${#matching_remotes[@]}" -gt 1 ]]; then
+        printf "git_swrp: multiple remotes match PR head repository '%s'; refusing to choose one:\n" \
+            "$expected_repo" >&2
+        for ((index = 0; index < ${#matching_remotes[@]}; index++)); do
+            printf "  %s\t%s\n" "${matching_remotes[index]}" "${matching_urls[index]}" >&2
+        done
+        return 2
+    fi
+
+    _git_swrp_matching_remote="${matching_remotes[0]}"
+}
+
 _git_swrp_validate_registered_worktree() {
     local destination="$1"
     local local_branch="$2"
@@ -284,12 +333,14 @@ main() {
     local existing_remote=0
     local initial_existing_worktree=0
     local remote_exists_status
+    local remote
     local remote_query_target
     local live_head_output live_head
     local fetched_head
     local actual_branch actual_upstream actual_head
     local lookup_status
     local _git_swrp_path_registered _git_swrp_path_branch _git_swrp_branch_worktree
+    local _git_swrp_matching_remote
 
     if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
         printf "git_swrp: expected a positive PR number, got '%s'.\n" "$pr_number" >&2
@@ -342,10 +393,39 @@ main() {
 
     local_branch="${head_owner}→${head_branch}"
     local_branch_ref="refs/heads/$local_branch"
-    remote_tracking_ref="refs/remotes/$head_owner/$head_branch"
-    expected_upstream="$head_owner/$head_branch"
     expected_head_repo="$head_owner/$head_repo"
     expected_remote_url="https://github.com/$expected_head_repo"
+
+    if _git_swrp_find_matching_remote "$expected_head_repo"; then
+        existing_remote=1
+        remote="$_git_swrp_matching_remote"
+        if ! _git_swrp_validate_existing_remote "$remote" "$expected_head_repo"; then
+            return 1
+        fi
+        remote_query_target="$remote"
+    else
+        remote_exists_status=$?
+        if [[ "$remote_exists_status" -eq 2 ]]; then
+            return 1
+        fi
+        remote="$head_owner"
+        if _git_swrp_remote_exists "$remote"; then
+            if ! _git_swrp_validate_existing_remote "$remote" "$expected_head_repo"; then
+                return 1
+            fi
+            echo "git_swrp: internal error: matching remote was not selected." >&2
+            return 1
+        else
+            remote_exists_status=$?
+            if [[ "$remote_exists_status" -eq 2 ]]; then
+                return 1
+            fi
+        fi
+        remote_query_target="$expected_remote_url"
+    fi
+
+    remote_tracking_ref="refs/remotes/$remote/$head_branch"
+    expected_upstream="$remote/$head_branch"
 
     if ! git check-ref-format --branch "$local_branch" >/dev/null 2>&1; then
         printf "git_swrp: PR #%s produces invalid local branch name '%s'.\n" "$pr_number" "$local_branch" >&2
@@ -354,7 +434,7 @@ main() {
     if ! git check-ref-format "refs/heads/$head_branch" >/dev/null 2>&1 ||
         ! git check-ref-format "$remote_tracking_ref" >/dev/null 2>&1; then
         printf "git_swrp: PR #%s reports invalid head branch '%s' for remote '%s'.\n" \
-            "$pr_number" "$head_branch" "$head_owner" >&2
+            "$pr_number" "$head_branch" "$remote" >&2
         return 1
     fi
 
@@ -405,20 +485,6 @@ main() {
         return 1
     fi
 
-    if _git_swrp_remote_exists "$head_owner"; then
-        existing_remote=1
-        if ! _git_swrp_validate_existing_remote "$head_owner" "$expected_head_repo"; then
-            return 1
-        fi
-        remote_query_target="$head_owner"
-    else
-        remote_exists_status=$?
-        if [[ "$remote_exists_status" -eq 2 ]]; then
-            return 1
-        fi
-        remote_query_target="$expected_remote_url"
-    fi
-
     if ! live_head_output=$(git ls-remote --exit-code --heads \
         "$remote_query_target" "refs/heads/$head_branch"); then
         printf "git_swrp: PR #%s exists, but live head branch '%s/%s' is unavailable or could not be read.\n" \
@@ -433,21 +499,21 @@ main() {
     fi
 
     if [[ "$existing_remote" -eq 0 ]]; then
-        printf "Adding remote '%s' for '%s'...\n" "$head_owner" "$expected_head_repo" >&2
-        if ! git remote add "$head_owner" "$expected_remote_url" 1>&2; then
-            printf "git_swrp: failed to add remote '%s' with URL '%s'.\n" "$head_owner" "$expected_remote_url" >&2
+        printf "Adding remote '%s' for '%s'...\n" "$remote" "$expected_head_repo" >&2
+        if ! git remote add "$remote" "$expected_remote_url" 1>&2; then
+            printf "git_swrp: failed to add remote '%s' with URL '%s'.\n" "$remote" "$expected_remote_url" >&2
             return 1
         fi
     fi
 
-    printf "Fetching PR #%s head '%s' from remote '%s'...\n" "$pr_number" "$head_branch" "$head_owner" >&2
+    printf "Fetching PR #%s head '%s' from remote '%s'...\n" "$pr_number" "$head_branch" "$remote" >&2
     # Remote-tracking refs are disposable mirrors. Allow a PR author's
     # force-push while never forcing, resetting, or moving a local branch.
-    if ! git fetch --no-tags "$head_owner" "+refs/heads/$head_branch:$remote_tracking_ref" 1>&2; then
+    if ! git fetch --no-tags "$remote" "+refs/heads/$head_branch:$remote_tracking_ref" 1>&2; then
         printf "git_swrp: failed to fetch live head branch '%s/%s' for PR #%s.\n" \
             "$head_owner" "$head_branch" "$pr_number" >&2
         if [[ "$existing_remote" -eq 0 ]]; then
-            printf "git_swrp: remote '%s' was added successfully and has been left in place.\n" "$head_owner" >&2
+            printf "git_swrp: remote '%s' was added successfully and has been left in place.\n" "$remote" >&2
         fi
         return 1
     fi

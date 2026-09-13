@@ -559,6 +559,31 @@ run_wrapper_success "$wrapper_new_stdout" "$wrapper_new_stderr" 2680
 assert_empty "$wrapper_new_stdout"
 assert_equal "$destination" "$run_pwd" "working directory after wrapper reuse"
 
+# A PR branch hosted in the upstream repository reuses that remote by repository
+# identity. It does not add a redundant remote named after the repository owner.
+new_fixture head-repository-is-upstream
+export TEST_HEAD_OWNER=NVIDIA
+export TEST_HEAD_BRANCH=main
+upstream_head_sha=$("$real_git" --git-dir="$upstream_repo" rev-parse refs/heads/main)
+upstream_head_stdout="$fixture/upstream-head.stdout"
+upstream_head_stderr="$fixture/upstream-head.stderr"
+run_helper_success "$upstream_head_stdout" "$upstream_head_stderr" 2680
+assert_exact_line "$destination" "$upstream_head_stdout"
+assert_equal "NVIDIA→main" "$("$real_git" -C "$destination" branch --show-current)" \
+    "upstream-hosted PR branch"
+assert_equal "upstream/main" \
+    "$("$real_git" -C "$destination" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" \
+    "upstream-hosted PR branch upstream"
+assert_equal "$upstream_head_sha" "$("$real_git" -C "$destination" rev-parse HEAD)" \
+    "upstream-hosted PR HEAD"
+assert_contains "from remote 'upstream'" "$upstream_head_stderr"
+assert_not_contains "Adding remote 'NVIDIA'" "$upstream_head_stderr"
+if "$real_git" -C "$work_repo" config --get remote.NVIDIA.url >/dev/null; then
+    fail "upstream-hosted PR unexpectedly added remote 'NVIDIA'."
+fi
+export TEST_HEAD_OWNER=DEKHTIARJonathan
+export TEST_HEAD_BRANCH=feature/cudnn-ncll
+
 # An already configured remote with the expected GitHub repository is reused.
 new_fixture existing-remote
 "$real_git" -C "$work_repo" remote add DEKHTIARJonathan \
@@ -660,6 +685,28 @@ assert_equal "$missing_before" "$(repository_snapshot "$work_repo")" \
     "repository after missing PR head branch"
 assert_path_absent "$destination"
 export TEST_HEAD_BRANCH=feature/cudnn-ncll
+
+# More than one remote for the head repository is ambiguous. Enumerate every
+# match and stop before fetching, adding a remote, or creating a worktree.
+new_fixture ambiguous-matching-remotes
+"$real_git" -C "$work_repo" remote add contributor-one \
+    https://github.com/DEKHTIARJonathan/project.git
+"$real_git" -C "$work_repo" remote add contributor-two \
+    git@github.com:dekhtiarjonathan/project
+ambiguous_before=$(repository_snapshot "$work_repo")
+ambiguous_stdout="$fixture/ambiguous.stdout"
+ambiguous_stderr="$fixture/ambiguous.stderr"
+run_helper_failure "$ambiguous_stdout" "$ambiguous_stderr" 2680
+assert_empty "$ambiguous_stdout"
+assert_contains "multiple remotes match PR head repository 'DEKHTIARJonathan/project'" \
+    "$ambiguous_stderr"
+assert_contains $'contributor-one\thttps://github.com/DEKHTIARJonathan/project.git' \
+    "$ambiguous_stderr"
+assert_contains $'contributor-two\tgit@github.com:dekhtiarjonathan/project' \
+    "$ambiguous_stderr"
+assert_equal "$ambiguous_before" "$(repository_snapshot "$work_repo")" \
+    "repository after ambiguous matching remotes"
+assert_path_absent "$destination"
 
 # A same-named remote for another GitHub repository is never rewritten or
 # fetched, and all other local state remains unchanged.
