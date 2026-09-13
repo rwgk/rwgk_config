@@ -15,8 +15,8 @@ Archive the exact local branch tip to the authenticated user's GitHub fork.
 The local branch, its tracking configuration, and its source branch are left
 unchanged.
 
-A git_swrp branch named OWNER→HEAD_BRANCH is matched to the GitHub PR head
-OWNER/HEAD_BRANCH when it tracks that remote branch.
+A git_swrp branch named REMOTE→HEAD_BRANCH is matched to the GitHub PR head
+repository configured for REMOTE when it tracks that remote branch.
 
 Options:
   --pr NUMBER             Use this merged PR instead of discovering it from
@@ -270,6 +270,7 @@ main() {
     local requested_pr=""
     local arg branch local_ref local_sha current_branch dirty_warning=""
     local fork_info fork_repo pulls_repo github_host
+    local tracking_repo_info tracking_repo_owner=""
     local pr_lookup_branch expected_pr_head_owner="" expected_composite_branch
     local pr_info pr_number pr_url merged_at pr_head_sha pr_head_ref pr_head_owner
     local base_ref base_sha merge_commit_sha archive_timestamp
@@ -357,7 +358,14 @@ main() {
 
     pr_lookup_branch="$branch"
     if [[ -n "$tracking_remote" && "$branch" == "${tracking_remote}→${tracking_branch}" ]]; then
-        expected_pr_head_owner="$tracking_remote"
+        if ! tracking_repo_info=$(get_github_remote_repo_info "$tracking_remote" fetch 2>&1); then
+            printf "Error: cannot identify the GitHub repository for tracking remote '%s'.\n" \
+                "$tracking_remote" >&2
+            printf '%s\n' "$tracking_repo_info" >&2
+            exit 1
+        fi
+        IFS=$'\t' read -r _ _ tracking_repo_owner _ _ _ _ <<<"$tracking_repo_info"
+        expected_pr_head_owner="$tracking_repo_owner"
         pr_lookup_branch="$tracking_branch"
     fi
 
@@ -374,12 +382,15 @@ main() {
     IFS=$'\t' read -r pr_number pr_url merged_at pr_head_sha pr_head_ref pr_head_owner base_ref base_sha merge_commit_sha <<<"$pr_info"
 
     [[ "$merged_at" != NONE ]] || die "PR #$pr_number is not merged."
-    expected_composite_branch="${pr_head_owner}→${pr_head_ref}"
+    expected_composite_branch="${tracking_remote}→${pr_head_ref}"
     if [[ "$branch" == "$pr_head_ref" ]]; then
         :
-    elif [[ "$branch" == "$expected_composite_branch" ]]; then
-        if [[ "$tracking_remote" != "$pr_head_owner" || "$tracking_branch" != "$pr_head_ref" ]]; then
-            die "local branch '$branch' must track '$pr_head_owner/$pr_head_ref' to match PR #$pr_number."
+    elif [[ -n "$tracking_remote" && "$branch" == "$expected_composite_branch" ]]; then
+        if [[ "$tracking_branch" != "$pr_head_ref" ]]; then
+            die "local branch '$branch' must track '$tracking_remote/$pr_head_ref' to match PR #$pr_number."
+        fi
+        if [[ "$tracking_repo_owner" != "$pr_head_owner" ]]; then
+            die "tracking remote '$tracking_remote' belongs to '$tracking_repo_owner', not PR #$pr_number head owner '$pr_head_owner'."
         fi
     else
         die "PR #$pr_number head '$pr_head_owner/$pr_head_ref' does not match local branch '$branch'."

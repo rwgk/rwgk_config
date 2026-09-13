@@ -391,8 +391,6 @@ main() {
     fi
     IFS=$'\t' read -r head_owner head_repo head_branch pr_state <<<"$pr_info"
 
-    local_branch="${head_owner}→${head_branch}"
-    local_branch_ref="refs/heads/$local_branch"
     expected_head_repo="$head_owner/$head_repo"
     expected_remote_url="https://github.com/$expected_head_repo"
 
@@ -424,6 +422,8 @@ main() {
         remote_query_target="$expected_remote_url"
     fi
 
+    local_branch="${remote}→${head_branch}"
+    local_branch_ref="refs/heads/$local_branch"
     remote_tracking_ref="refs/remotes/$remote/$head_branch"
     expected_upstream="$remote/$head_branch"
 

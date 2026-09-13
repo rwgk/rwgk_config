@@ -569,7 +569,7 @@ upstream_head_stdout="$fixture/upstream-head.stdout"
 upstream_head_stderr="$fixture/upstream-head.stderr"
 run_helper_success "$upstream_head_stdout" "$upstream_head_stderr" 2680
 assert_exact_line "$destination" "$upstream_head_stdout"
-assert_equal "NVIDIA→main" "$("$real_git" -C "$destination" branch --show-current)" \
+assert_equal "upstream→main" "$("$real_git" -C "$destination" branch --show-current)" \
     "upstream-hosted PR branch"
 assert_equal "upstream/main" \
     "$("$real_git" -C "$destination" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" \

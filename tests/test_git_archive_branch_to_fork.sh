@@ -76,7 +76,14 @@ cat >"$fake_bin/gh" <<'EOF'
 set -euo pipefail
 
 if [[ "$1" == repo && "$2" == view ]]; then
-    printf 'https://github.com/tester/project\ttester/project\n'
+    case "$3" in
+    "$TEST_UPSTREAM_REPO")
+        printf 'https://github.com/upstream-owner/project\tupstream-owner/project\n'
+        ;;
+    *)
+        printf 'https://github.com/tester/project\ttester/project\n'
+        ;;
+    esac
     exit
 fi
 
@@ -121,6 +128,9 @@ user)
 repos/tester/project)
     printf 'true\ttester\tupstream/project\n'
     ;;
+repos/upstream-owner/project)
+    printf 'false\tupstream-owner\tupstream/project\ttrue\n'
+    ;;
 repos/upstream/project/pulls | repos/upstream/project/pulls/42)
     if [[ "$*" == *'.draft'* ]]; then
         printf '42\tclosed\thttps://github.com/upstream/project/pull/42\tfalse\ttrue\n'
@@ -163,6 +173,7 @@ chmod 755 "$fake_bin/ssh"
 
 export TEST_BASE_SHA="$base_sha"
 export TEST_REMOTE_SHA="$remote_sha"
+export TEST_UPSTREAM_REPO="$upstream_repo"
 export MY_GIT_BACKTRACKING_INFO_LOCAL="$backtracking_dir"
 unset MY_GIT_BACKTRACKING_INFO_REMOTE
 export PATH="$fake_bin:$PATH"
@@ -204,13 +215,13 @@ second_stdout="$test_root/second.stdout"
 assert_contains "Archive ref already exists at the local tip: 'origin/$archive_branch'." "$second_stdout"
 assert_contains "Backtracking information already exists: '$record'" "$second_stdout"
 
-composite_branch='upstream-owner→feature/test'
-git -C "$work_repo" fetch -q upstream-owner feature/test
+composite_branch='upstream→feature/test'
+git -C "$work_repo" fetch -q upstream feature/test
 git -C "$work_repo" switch -q -c "$composite_branch"
 printf 'additional local work\n' >>"$work_repo/content.txt"
 git -C "$work_repo" commit -am "additional local work" >/dev/null
 composite_sha=$(git -C "$work_repo" rev-parse HEAD)
-git -C "$work_repo" branch --set-upstream-to=upstream-owner/feature/test "$composite_branch" >/dev/null
+git -C "$work_repo" branch --set-upstream-to=upstream/feature/test "$composite_branch" >/dev/null
 
 export TEST_OTHER_OWNER_PR=1
 (
@@ -227,16 +238,16 @@ composite_archive_ref="refs/heads/$composite_archive_branch"
     fail "composite archive changed the source branch."
 [[ "$(git -C "$work_repo" rev-parse "refs/heads/$composite_branch")" == "$composite_sha" ]] ||
     fail "composite archive changed the local branch."
-[[ "$(git -C "$work_repo" for-each-ref --format='%(upstream:short)' "refs/heads/$composite_branch")" == upstream-owner/feature/test ]] || fail "composite archive changed the tracking configuration."
+[[ "$(git -C "$work_repo" for-each-ref --format='%(upstream:short)' "refs/heads/$composite_branch")" == upstream/feature/test ]] || fail "composite archive changed the tracking configuration."
 [[ "$(git -C "$work_repo" hash-object "$work_repo/.git/gh-stack/archive-test")" == "$stack_checksum" ]] ||
     fail "composite archive changed .git/gh-stack."
 
-composite_record="$backtracking_dir/work_upstream-owner_feature_test_pr42_2026-08-05+210115.txt"
+composite_record="$backtracking_dir/work_upstream_feature_test_pr42_2026-08-05+210115.txt"
 [[ -f "$composite_record" ]] || fail "composite backtracking record was not created."
 assert_contains "Local branch: '$composite_branch'" "$composite_record"
 assert_contains "Local branch HEAD SHA: '$composite_sha'" "$composite_record"
 assert_contains "PR head branch: 'upstream-owner/feature/test'" "$composite_record"
-assert_contains "Configured remote-tracking ref: 'refs/remotes/upstream-owner/feature/test'" "$composite_record"
+assert_contains "Configured remote-tracking ref: 'refs/remotes/upstream/feature/test'" "$composite_record"
 
 (
     cd "$work_repo"
@@ -254,9 +265,9 @@ if (
 ) >"$test_root/composite-untracked.stdout" 2>"$test_root/composite-untracked.stderr"; then
     fail "untracked composite branch unexpectedly archived."
 fi
-assert_contains "Error: local branch '$composite_branch' must track 'upstream-owner/feature/test' to match PR #42." \
+assert_contains "Error: PR #42 head 'upstream-owner/feature/test' does not match local branch '$composite_branch'." \
     "$test_root/composite-untracked.stderr"
-git -C "$work_repo" branch --set-upstream-to=upstream-owner/feature/test "$composite_branch" >/dev/null
+git -C "$work_repo" branch --set-upstream-to=upstream/feature/test "$composite_branch" >/dev/null
 
 wrong_owner_branch='other-owner→feature/test'
 git -C "$work_repo" branch "$wrong_owner_branch" "$composite_sha"
