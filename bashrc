@@ -779,7 +779,7 @@ loggrep() (
     tr -d '\000' <"$@" | sed 's/\r$//' | grep -E "$pattern"
 )
 
-alias gb='git branch'
+alias gb='git branch --format="%(if)%(HEAD)%(then)* %(else)%(if)%(worktreepath)%(then)+ %(else)  %(end)%(end)%(refname:short)%(if)%(worktreepath)%(then) @ %(worktreepath)%(end)"'
 alias gg='git grep'
 alias gp='git_update_branch.sh'
 alias gs='git status'
