@@ -832,11 +832,16 @@ git_show_upstream_for_branch() {
             continue
         fi
 
-        result=$(git rev-parse --abbrev-ref --symbolic-full-name "${branch}@{upstream}" 2>&1)
+        result=$(git for-each-ref --format='%(upstream:short)' "refs/heads/$branch" 2>&1)
         status=$?
-        printf "%s → %s\n" "$branch" "$result"
         if [[ $status -ne 0 ]]; then
+            printf "%s → %s\n" "$branch" "$result"
             rc=1
+        elif [[ -z "$result" ]]; then
+            printf "%s → (no upstream)\n" "$branch"
+            rc=1
+        else
+            printf "%s → %s\n" "$branch" "$result"
         fi
     done
 
