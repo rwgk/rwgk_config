@@ -45,7 +45,7 @@ function Capture-Text {
 Capture-Text "windows.txt" {
     Get-CimInstance Win32_OperatingSystem |
         Format-List Caption, Version, BuildNumber, LastBootUpTime,
-                    LocalDateTime, OSArchitecture
+        LocalDateTime, OSArchitecture
 }
 
 Capture-Text "uptime.txt" {
@@ -53,10 +53,10 @@ Capture-Text "uptime.txt" {
     $uptime = (Get-Date) - $os.LastBootUpTime
 
     [pscustomobject]@{
-        Now          = Get-Date
-        LastBoot     = $os.LastBootUpTime
-        Uptime       = $uptime
-        UptimeHours  = [math]::Round($uptime.TotalHours, 2)
+        Now         = Get-Date
+        LastBoot    = $os.LastBootUpTime
+        Uptime      = $uptime
+        UptimeHours = [math]::Round($uptime.TotalHours, 2)
     } | Format-List
 }
 
@@ -81,20 +81,20 @@ Capture-Text "processes-wsl-hyperv.txt" {
     Get-Process |
         Where-Object {
             $_.ProcessName -match
-                '^(wsl|wslservice|wslrelay|wslhost|vmmem|vmmemWSL|vmcompute|vmwp|hns)$'
+            '^(wsl|wslservice|wslrelay|wslhost|vmmem|vmmemWSL|vmcompute|vmwp|hns)$'
         } |
         Sort-Object ProcessName, Id |
         Format-Table ProcessName, Id, StartTime, CPU,
-                     @{n='WorkingSetMB';e={[math]::Round($_.WorkingSet64 / 1MB, 1)}},
-                     Path -AutoSize
+        @{n = 'WorkingSetMB'; e = { [math]::Round($_.WorkingSet64 / 1MB, 1) } },
+        Path -AutoSize
 }
 
 Capture-Text "all-processes.txt" {
     Get-Process |
         Sort-Object ProcessName, Id |
         Format-Table ProcessName, Id, StartTime, CPU,
-                     @{n='WorkingSetMB';e={[math]::Round($_.WorkingSet64 / 1MB, 1)}} `
-                     -AutoSize
+        @{n = 'WorkingSetMB'; e = { [math]::Round($_.WorkingSet64 / 1MB, 1) } } `
+            -AutoSize
 }
 
 
@@ -122,7 +122,7 @@ Capture-Text "network-adapters.txt" {
     Get-NetAdapter -IncludeHidden |
         Sort-Object Name |
         Format-Table Name, InterfaceDescription, Status,
-                     MacAddress, LinkSpeed, ifIndex -AutoSize
+        MacAddress, LinkSpeed, ifIndex -AutoSize
 }
 
 Capture-Text "network-ipconfig.txt" {
@@ -133,7 +133,7 @@ Capture-Text "network-routes.txt" {
     Get-NetRoute |
         Sort-Object InterfaceIndex, DestinationPrefix |
         Format-Table InterfaceIndex, DestinationPrefix,
-                     NextHop, RouteMetric, State -AutoSize
+        NextHop, RouteMetric, State -AutoSize
 }
 
 
@@ -178,7 +178,7 @@ foreach ($log in $logs) {
             StartTime = $since
         } -ErrorAction Stop |
             Select-Object TimeCreated, Id, LevelDisplayName,
-                          ProviderName, ProcessId, ThreadId, Message |
+            ProviderName, ProcessId, ThreadId, Message |
             Format-List |
             Out-String -Width 300 |
             Set-Content -Encoding UTF8 $path
@@ -201,10 +201,10 @@ Capture-Text "events-power.txt" {
     } -ErrorAction SilentlyContinue |
         Where-Object {
             $_.ProviderName -match
-                'Kernel-Power|Power-Troubleshooter|Kernel-General'
+            'Kernel-Power|Power-Troubleshooter|Kernel-General'
         } |
         Select-Object TimeCreated, Id, LevelDisplayName,
-                      ProviderName, Message |
+        ProviderName, Message |
         Format-List
 }
 
@@ -226,7 +226,7 @@ Capture-Text "events-system-errors.txt" {
             )
         } |
         Select-Object TimeCreated, Id, LevelDisplayName,
-                      ProviderName, Message |
+        ProviderName, Message |
         Format-List
 }
 
