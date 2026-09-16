@@ -219,13 +219,10 @@ Capture-Text "events-system-errors.txt" {
         StartTime = $since
     } -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.LevelDisplayName -in @('Critical', 'Error', 'Warning') -and
+            ($_.LevelDisplayName -in @('Critical', 'Error', 'Warning')) -and
             (
-                $_.ProviderName -match
-                    'Hyper-V|HvHost|HNS|Host.Network|Lxss|WSL|Virtual'
-                -or
-                $_.Message -match
-                    'WSL|Linux|Hyper-V|virtual machine|hvsocket|VMBus'
+                ($_.ProviderName -match 'Hyper-V|HvHost|HNS|Host.Network|Lxss|WSL|Virtual') -or
+                ($_.Message -match 'WSL|Linux|Hyper-V|virtual machine|hvsocket|VMBus')
             )
         } |
         Select-Object TimeCreated, Id, LevelDisplayName,
