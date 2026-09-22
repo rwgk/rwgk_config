@@ -697,20 +697,20 @@ apt_gh_setup() {
     local keyring_file="/usr/share/keyrings/githubcli-archive-keyring.gpg"
     local sources_file="/etc/apt/sources.list.d/github-cli.list"
 
-    # Check if setup is already done
-    if [[ -f "$keyring_file" && -f "$sources_file" ]]; then
-        echo "GitHub CLI repository already configured, skipping setup steps."
+    # Check if the repository is already configured
+    if [[ -f "$sources_file" ]]; then
+        echo "GitHub CLI repository already configured, skipping repository setup."
     else
         # Remove existing gh package if present
         sudo apt remove -y gh
 
-        # Download and install keyring
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of="$keyring_file"
-        sudo chmod go+r "$keyring_file"
-
         # Add repository to sources
         echo "deb [arch=$(dpkg --print-architecture) signed-by=$keyring_file] https://cli.github.com/packages stable main" | sudo tee "$sources_file"
     fi
+
+    # Refresh the keyring in case GitHub rotated its package-signing key.
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of="$keyring_file"
+    sudo chmod go+r "$keyring_file"
 
     # Always update and install
     sudo apt update
