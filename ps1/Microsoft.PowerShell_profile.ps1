@@ -89,6 +89,147 @@ function Lock-Workstation {
     rundll32.exe user32.dll, LockWorkStation
 }
 
+function check-fallbackadmin-secpol-prerequisites {
+    <#
+    .SYNOPSIS
+        Explains whether network logon policy may block fallbackadmin SSH access.
+    #>
+    $user = Get-LocalUser -Name 'fallbackadmin' -ErrorAction Stop
+    $adminGroup = Get-LocalGroup -SID ([System.Security.Principal.SecurityIdentifier]'S-1-5-32-544') -ErrorAction Stop
+    $isAdmin = @(
+        Get-LocalGroupMember -Group $adminGroup -ErrorAction Stop |
+            Where-Object { $_.SID.Value -eq $user.SID.Value }
+    ).Count -gt 0
+
+    $rightsFile = [System.IO.Path]::GetTempFileName()
+    try {
+        & secedit.exe /export /areas USER_RIGHTS /cfg $rightsFile | Out-Null
+        if ($LASTEXITCODE -eq 740) {
+            throw 'Run this check in an elevated PowerShell window (Run as administrator).'
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "secedit export failed with exit code $LASTEXITCODE."
+        }
+
+        $rights = @{}
+        foreach ($line in (Get-Content -LiteralPath $rightsFile -Encoding Unicode -ErrorAction Stop)) {
+            if ($line -match '^(SeNetworkLogonRight|SeDenyNetworkLogonRight)\s*=\s*(.*)$') {
+                $rights[$Matches[1]] = @($Matches[2] -split ',' | ForEach-Object { $_.Trim().TrimStart('*') } | Where-Object { $_ })
+            }
+        }
+        if (-not $rights.ContainsKey('SeNetworkLogonRight') -or -not $rights.ContainsKey('SeDenyNetworkLogonRight')) {
+            throw 'The security policy export did not contain both network logon rights.'
+        }
+
+        $userSids = @($user.SID.Value, 'S-1-5-113')
+        if ($isAdmin) {
+            $userSids += 'S-1-5-32-544', 'S-1-5-114'
+        }
+
+        $denied = @($rights['SeDenyNetworkLogonRight'] | Where-Object { $userSids -contains $_ })
+        $allowed = @($rights['SeNetworkLogonRight'] | Where-Object { $userSids -contains $_ })
+
+        foreach ($name in 'SeNetworkLogonRight', 'SeDenyNetworkLogonRight') {
+            Write-Output "${name}:"
+            if ($rights[$name].Count -eq 0) {
+                Write-Output '  (none)'
+                continue
+            }
+
+            foreach ($sid in $rights[$name]) {
+                try {
+                    $account = ([System.Security.Principal.SecurityIdentifier]$sid).Translate([System.Security.Principal.NTAccount]).Value
+                    Write-Output "  $account ($sid)"
+                }
+                catch {
+                    Write-Output "  $sid"
+                }
+            }
+        }
+
+        Write-Output ''
+        if ($denied.Count -gt 0) {
+            Write-Output 'Blocked:'
+            Write-Output '* A deny rule matches fallbackadmin. Deny overrides allow.'
+            if ($denied -contains 'S-1-5-113') {
+                Write-Output '* In secpol.msc, remove Local account from "Deny access to this computer from the network"; keep Guests.'
+            }
+        }
+        elseif ($allowed.Count -eq 0) {
+            Write-Output 'Needs Attention:'
+            Write-Output '* No allow rule matches fallbackadmin or its local/administrator identities.'
+        }
+        else {
+            Write-Output 'Looking Good:'
+            Write-Output '* No deny rule matches fallbackadmin or its local/administrator identities.'
+            Write-Output '* A matching allow rule is present.'
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $rightsFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function check-fallbackadmin-login-prerequisites {
+    <#
+    .SYNOPSIS
+        Shows fallbackadmin account status and flags login blockers.
+    #>
+    $netOutput = & net.exe user fallbackadmin 2>&1
+    $netOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "net user fallbackadmin failed with exit code $LASTEXITCODE."
+    }
+
+    $user = Get-LocalUser -Name 'fallbackadmin' -ErrorAction Stop
+    $now = Get-Date
+    $passwordExpires = $user.PasswordExpires
+    $accountExpires = $user.AccountExpires
+    $passwordIssue = $null -ne $passwordExpires
+    $accountIssue = $null -ne $accountExpires
+
+    Write-Output ''
+    if (-not $user.Enabled -or $passwordIssue -or $accountIssue) {
+        Write-Output 'Needs Attention:'
+        if (-not $user.Enabled) {
+            Write-Output '* The account is disabled. Open PowerShell as administrator and run:'
+            Write-Output '  Enable-LocalUser -Name "fallbackadmin"'
+        }
+        if ($passwordIssue) {
+            if ($passwordExpires -le $now) {
+                Write-Output '* The password has expired.'
+            }
+            else {
+                Write-Output "* The password will expire on $($passwordExpires.ToString('yyyy-MM-dd HH:mm'))."
+            }
+            Write-Output '  Open PowerShell as administrator and run:'
+            Write-Output '  Set-LocalUser -Name "fallbackadmin" -PasswordNeverExpires $true'
+        }
+        if ($accountIssue) {
+            if ($accountExpires -le $now) {
+                Write-Output '* The account has expired.'
+            }
+            else {
+                Write-Output "* The account will expire on $($accountExpires.ToString('yyyy-MM-dd HH:mm'))."
+            }
+            Write-Output '  Open PowerShell as administrator and run:'
+            Write-Output '  Set-LocalUser -Name "fallbackadmin" -AccountNeverExpires'
+        }
+    }
+    else {
+        Write-Output 'Looking Good:'
+        Write-Output '* The account is active.'
+        Write-Output '* The password does not expire.'
+        Write-Output '* The account does not expire.'
+    }
+}
+
+function check-fallbackadmin-prerequisites {
+    check-fallbackadmin-secpol-prerequisites
+    Write-Output ''
+    check-fallbackadmin-login-prerequisites
+}
+
 function df {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
