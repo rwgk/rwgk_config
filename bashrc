@@ -1933,16 +1933,16 @@ pixiinsthere() (
 )
 
 pixipath() {
-    if [ -d "/wrk/.pixi/bin" ]; then
-        echo "Using /wrk/.pixi/bin"
-        export PATH="/wrk/.pixi/bin:$PATH"
-    elif [ -d "$HOME/.pixi/bin" ]; then
-        echo "Using \$HOME/.pixi/bin"
-        export PATH="$HOME/.pixi/bin:$PATH"
-    else
-        echo "Error: Neither /wrk/.pixi/bin nor \$HOME/.pixi/bin exists." >&2
+    if [[ -z ${W:-} ]]; then
+        echo 'pixipath: $W is not set' >&2
         return 1
     fi
+    if [[ ! -d "$W/.pixi/bin" ]]; then
+        echo "pixipath: $W/.pixi/bin does not exist" >&2
+        return 1
+    fi
+    echo "Using $W/.pixi/bin"
+    export PATH="$W/.pixi/bin:$PATH"
     export PATH="$(clean_path .:"$PATH")"
 }
 
