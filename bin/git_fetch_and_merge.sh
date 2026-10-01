@@ -12,8 +12,8 @@ into the currently checked-out local branch.
 REMOTE_BRANCH defaults to the current local branch name.
 
 Example:
-  git_fetch_and_merge.sh mmc:/wrk/forked/pybind11
-  git_fetch_and_merge.sh mmc:/wrk/forked/pybind11 remote-branch-name
+  git_fetch_and_merge.sh HOST:/wrk/forked/pybind11
+  git_fetch_and_merge.sh HOST:/wrk/forked/pybind11 remote-branch-name
 EOF
 }
 

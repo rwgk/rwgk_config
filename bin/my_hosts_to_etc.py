@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import shutil
-from datetime import datetime
+import subprocess
+import sys
+from datetime import datetime, timezone
 
 MY_HOSTS_ENV = "MY_HOSTS"
 HOSTS_PATH = "/etc/hosts"
@@ -26,7 +27,7 @@ def backup_hosts_file(now):
         backup_name = f"/tmp/etc_hosts_mtime{mtime}_@{now}"
         shutil.copy2(HOSTS_PATH, backup_name)
         print(f"Backup created: {backup_name}")
-    except Exception as e:
+    except OSError as e:
         error(f"Failed to create backup: {e}")
 
 
@@ -60,7 +61,7 @@ def strip_generated_by(lines):
 
 
 def main():
-    now = datetime.now().strftime("%Y%m%d+%H%M%S")
+    now = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d+%H%M%S")
     tmp_path = f"/tmp/my_hosts_to_etc_@{now}"
 
     my_hosts_path = os.environ.get(MY_HOSTS_ENV)
@@ -93,7 +94,10 @@ def main():
     backup_hosts_file(now)
 
     print(f"Updating {HOSTS_PATH} with sudo...")
-    os.system(f"sudo cp {tmp_path} {HOSTS_PATH}")
+    try:
+        subprocess.run(["sudo", "cp", tmp_path, HOSTS_PATH], check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        error(f"Failed to update {HOSTS_PATH}: {exc}")
     print("Done.")
 
 
