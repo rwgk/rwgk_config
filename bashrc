@@ -1075,6 +1075,14 @@ complete -o bashdefault -o default -F _complete_git_archive_branch_to_fork git_a
 complete -o bashdefault -o default -F _complete_local_git_branches git_show_upstream_for_branch
 complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch
 
+git_divergence() {
+    if [[ $# -ne 2 ]]; then
+        echo "Usage: git_divergence REF1 REF2" >&2
+        return 2
+    fi
+    git rev-list --left-right --count "$1...$2" --
+}
+
 git_log_between() {
     if [ "$#" -lt 2 ]; then
         echo "Usage: git_log_between <from> <to> [path...]" >&2
