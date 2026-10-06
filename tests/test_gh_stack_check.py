@@ -180,15 +180,18 @@ class StackCheckTests(unittest.TestCase):
             f"Missing {level} diagnostic containing {substring!r}: {issues}",
         )
 
-    def snapshot(self) -> dict[str, tuple[int, int, str]]:
+    def snapshot(
+        self, *, worktree: Path | None = None
+    ) -> dict[str, tuple[int, int, str]]:
         """Include refs, objects, config, index, metadata, and working files."""
+        selected = worktree or self.repo
         return {
-            str(path.relative_to(self.repo)): (
+            str(path.relative_to(selected)): (
                 path.stat().st_mode,
                 path.stat().st_mtime_ns,
                 hashlib.sha256(path.read_bytes()).hexdigest(),
             )
-            for path in self.repo.rglob("*")
+            for path in selected.rglob("*")
             if path.is_file()
         }
 
@@ -227,6 +230,7 @@ class StackCheckTests(unittest.TestCase):
     def test_clean_two_layer_stack_passes(self) -> None:
         report = self.check(expected=0)
         self.assertEqual(len(report["layers"]), 2)
+        self.assertEqual(report["supported_metadata"], "gh-stack v0.2.0 / schema 1")
         self.check("--expect-synced", expected=0)
 
     def test_ordinary_local_commit_requires_allow_ahead_and_reports_refresh(
@@ -289,6 +293,14 @@ class StackCheckTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 report = self.check(*mode, expected=1)
                 self.assert_issue(report, "violation", "base")
+
+    def test_remote_trunk_base_requires_local_alignment_for_handoff(self) -> None:
+        self.git("branch", "--force", "main", self.initial)
+        report = self.check(expected=1)
+        self.assertEqual(report["trunk"]["remote_tip"], self.main)
+        self.assertEqual(report["trunk"]["local_tip"], self.initial)
+        self.assert_issue(report, "violation", "handoff policy")
+        self.assert_issue(report, "info", "trunk differs")
 
     def test_child_must_contain_current_parent(self) -> None:
         self.git("checkout", "--quiet", "layer/one")
@@ -549,13 +561,18 @@ class StackCheckTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_persistent_gh_stack_lock_file_does_not_block_verification(self) -> None:
-        self.git_path("gh-stack.lock").write_text("persistent extension lock file\n")
+        for name in ("gh-stack.lock", "gh-stack-operation.lock"):
+            self.git_path(name).write_text("persistent extension lock file\n")
         before = self.snapshot()
         self.check(expected=0)
         self.assertEqual(self.snapshot(), before)
 
     def test_extension_recovery_state_is_a_violation(self) -> None:
-        for name in ("gh-stack-rebase-state", "gh-stack-modify-state"):
+        for name in (
+            "gh-stack-rebase-state",
+            "gh-stack-modify-state",
+            "gh-stack-migration",
+        ):
             with self.subTest(name=name):
                 path = self.git_path(name)
                 path.write_text("{}\n")
@@ -642,8 +659,7 @@ class StackCheckTests(unittest.TestCase):
         self.assertTrue(sentinel.exists())
         self.assert_issue(report, "incomplete", "concurrent")
 
-    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
-    def test_linked_worktree_uses_its_own_metadata(self) -> None:
+    def linked_worktree(self) -> Path:
         root = Path(WORKTREE_ROOT)
         root.mkdir(parents=True, exist_ok=True)
         temporary = tempfile.TemporaryDirectory(prefix="fixture-", dir=root)
@@ -652,13 +668,107 @@ class StackCheckTests(unittest.TestCase):
         self.git("checkout", "--quiet", "main")
         self.git("worktree", "add", "--quiet", str(selected), "layer/two")
         self.addCleanup(self.git, "worktree", "remove", "--force", str(selected))
+        return selected
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_linked_worktree_uses_common_catalog_and_selected_head(self) -> None:
+        selected = self.linked_worktree()
         selected_metadata = self.git_path("gh-stack", worktree=selected)
         self.assertNotEqual(selected_metadata, self.metadata_path)
-        self.write_metadata(path=selected_metadata)
-        self.metadata_path.write_text("This common-gitdir metadata must not be read.\n")
-        before = self.snapshot()
+        self.assertFalse(selected_metadata.exists())
+        before = self.snapshot(), self.snapshot(worktree=selected)
+        report = self.check(expected=0, worktree=selected)
+        self.assertEqual(
+            Path(report["metadata_path"]).resolve(), self.metadata_path.resolve()
+        )
+        self.assertEqual(
+            Path(report["common_git_dir"]).resolve(), (self.repo / ".git").resolve()
+        )
+        self.assertEqual(report["current_branch"], "layer/two")
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_linked_worktree_does_not_fall_back_to_private_catalog(self) -> None:
+        selected = self.linked_worktree()
+        self.write_metadata(path=self.git_path("gh-stack", worktree=selected))
+        self.metadata_path.unlink()
+        before = self.snapshot(), self.snapshot(worktree=selected)
+        report = self.check(expected=2, worktree=selected)
+        self.assert_issue(report, "incomplete", "missing common-directory")
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_linked_worktree_detects_shared_gh_stack_journals(self) -> None:
+        selected = self.linked_worktree()
+        for name in (
+            "gh-stack-rebase-state",
+            "gh-stack-modify-state",
+            "gh-stack-migration",
+        ):
+            with self.subTest(name=name):
+                path = self.git_path(name)
+                self.assertNotEqual(path, self.git_path(name, worktree=selected))
+                path.write_text("{}\n")
+                try:
+                    before = self.snapshot(), self.snapshot(worktree=selected)
+                    report = self.check(expected=1, worktree=selected)
+                    self.assert_issue(report, "violation", name)
+                    self.assertTrue(
+                        any(issue["scope"] == "stack" for issue in report["issues"])
+                    )
+                    self.assertEqual(
+                        (self.snapshot(), self.snapshot(worktree=selected)), before
+                    )
+                finally:
+                    path.unlink()
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_git_operations_are_specific_to_selected_worktree(self) -> None:
+        selected = self.linked_worktree()
+        self.git_path("MERGE_HEAD").write_text(self.initial + "\n")
+        before = self.snapshot(), self.snapshot(worktree=selected)
         self.check(expected=0, worktree=selected)
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+
+        selected_merge = self.git_path("MERGE_HEAD", worktree=selected)
+        selected_merge.write_text(self.initial + "\n")
+        before = self.snapshot(), self.snapshot(worktree=selected)
+        report = self.check(expected=1, worktree=selected)
+        self.assert_issue(report, "violation", "MERGE_HEAD")
+        self.assertTrue(any(issue["scope"] == "worktree" for issue in report["issues"]))
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_linked_worktree_reports_its_pending_changes_and_detached_head(
+        self,
+    ) -> None:
+        selected = self.linked_worktree()
+        (selected / "tracked.txt").write_text("selected worktree changes\n")
+        (selected / "untracked.txt").write_text("unrelated file\n")
+        before = self.snapshot(), self.snapshot(worktree=selected)
+        report = self.check(expected=0, worktree=selected)
+        self.assert_issue(report, "info", "pending local changes")
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+        self.run_git("checkout", "--quiet", "--detach", cwd=selected)
+        before = self.snapshot(), self.snapshot(worktree=selected)
+        report = self.check("--stack", "stack-one", expected=1, worktree=selected)
+        self.assertIsNone(report["current_branch"])
+        self.assert_issue(report, "violation", "detached HEAD")
+        self.assertEqual((self.snapshot(), self.snapshot(worktree=selected)), before)
+
+    @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
+    def test_linked_worktree_detects_shared_journal_created_during_observation(
+        self,
+    ) -> None:
+        selected = self.linked_worktree()
+        journal = self.git_path("gh-stack-rebase-state")
+        env, sentinel = self.concurrent_change_env(
+            f"pathlib.Path({str(journal)!r}).write_text('{{}}\\n')"
+        )
+        report = self.check(expected=2, worktree=selected, env=env)
+        self.assertTrue(sentinel.exists())
+        self.assert_issue(report, "incomplete", "concurrent")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Read-only Git/metadata checkpoint verification for gh-stack v0.1.1, schema 1.
+"""Read-only Git/metadata checkpoint verification for gh-stack v0.2.0, schema 1.
 
 GitHub stack membership, PR bases/status, and merge queues require separate API
 checks. No gh-stack commands, fetches (including lazy fetches), or repairs run.
+The catalog and gh-stack journals are shared; Git operation state is worktree-local.
+Handoff policy requires saved bases to match local parent tips, including the
+trunk. gh-stack may legitimately use a remote trunk; align the local trunk before
+expecting this check to pass.
 """
 
 import argparse
@@ -15,7 +19,7 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-OPERATIONS = (
+GIT_OPERATIONS = (
     "rebase-merge",
     "rebase-apply",
     "sequencer",
@@ -23,8 +27,11 @@ OPERATIONS = (
     "CHERRY_PICK_HEAD",
     "REVERT_HEAD",
     "BISECT_LOG",
+)
+STACK_OPERATIONS = (
     "gh-stack-rebase-state",
     "gh-stack-modify-state",
+    "gh-stack-migration",
 )
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
@@ -122,7 +129,7 @@ def load_metadata(raw, git):
     require(type(data) is dict, "top level must be an object")
     if type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1:
         raise Incomplete(
-            "unsupported metadata schema; only schemaVersion 1 (gh-stack v0.1.1) is audited"
+            "unsupported metadata schema; only schemaVersion 1 (gh-stack v0.2.0) is audited"
         )
     optional_types(data, {"repository": str})
     require(type(data.get("stacks")) is list, "stacks array required")
@@ -164,7 +171,7 @@ class Checker:
             "worktree": str(self.worktree),
             "remote": args.remote,
             "mode": "allow-local-ahead" if args.allow_local_ahead else "expect-synced",
-            "supported_metadata": "gh-stack v0.1.1 / schema 1",
+            "supported_metadata": "gh-stack v0.2.0 / schema 1",
             "github_verified": False,
             "layers": [],
             "issues": [],
@@ -335,7 +342,7 @@ class Checker:
     def inspect(self, snapshot):
         raw = snapshot[4]
         if raw is None:
-            raise Incomplete("missing worktree gh-stack metadata")
+            raise Incomplete("missing common-directory gh-stack metadata")
         data = load_metadata(raw, self.git)
         current = snapshot[2].removeprefix("refs/heads/")
         self.report["current_branch"] = current or None
@@ -370,7 +377,8 @@ class Checker:
             )
         for name, path in self.operation_paths.items():
             if path.exists():
-                self.issue("violation", "worktree", f"unfinished operation: {name}")
+                scope = "stack" if name in STACK_OPERATIONS else "worktree"
+                self.issue("violation", scope, f"unfinished operation: {name}")
         if snapshot[6]:
             self.issue(
                 "info",
@@ -530,7 +538,11 @@ class Checker:
                 self.issue(
                     "violation",
                     name,
-                    "saved base differs from effective parent tip; aligned replay boundary required",
+                    (
+                        "saved base differs from local trunk tip; handoff policy requires local trunk alignment (gh-stack may use a remote trunk)"
+                        if parent_name == trunk
+                        else "saved base differs from effective parent tip; aligned replay boundary required"
+                    ),
                 )
             if local and parent_tip:
                 contained = self.ancestry(parent_tip, local, name, "effective parent")
@@ -562,9 +574,18 @@ class Checker:
                 raise Incomplete(
                     "partial clone requires Git with --no-lazy-fetch support; refusing object reads/status to avoid fetching"
                 )
-            self.metadata_path = self.path("gh-stack")
+            common_dir = Path(
+                self.git(
+                    "rev-parse", "--path-format=absolute", "--git-common-dir"
+                ).stdout.strip()
+            )
+            self.report["common_git_dir"] = str(common_dir)
+            self.metadata_path = common_dir / "gh-stack"
             self.report["metadata_path"] = str(self.metadata_path)
-            self.operation_paths = {name: self.path(name) for name in OPERATIONS}
+            self.operation_paths = {
+                **{name: self.path(name) for name in GIT_OPERATIONS},
+                **{name: common_dir / name for name in STACK_OPERATIONS},
+            }
             self.watch_paths = [
                 self.metadata_path,
                 self.path("HEAD"),
