@@ -189,6 +189,10 @@ catalog() {
 13.4.1	linux-arm64	cuda_13.4.1_linux_sbsa.run	22499618afa3a4d54021fdec2c644006	4149643845	https://developer.download.nvidia.com/compute/cuda/13.4.1/local_installers/cuda_13.4.1_linux_sbsa.run
 13.4.1	windows-amd64	cuda_13.4.1_windows_x86_64.exe	76d3e0a1a99e38a8fcb5bf8aa54c8d20	3750931600	https://developer.download.nvidia.com/compute/cuda/13.4.1/local_installers/cuda_13.4.1_windows_x86_64.exe
 13.4.1	windows-arm64	cuda_13.4.1_windows_arm64.exe	d5b6e3bdd4b570fdbb2c00b3a20b40bf	3711598920	https://developer.download.nvidia.com/compute/cuda/13.4.1/local_installers/cuda_13.4.1_windows_arm64.exe
+13.4.2	linux-amd64	cuda_13.4.2_linux.run	b712b790dfb5ca988d38cbed4d236488	4191001977	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_linux.run
+13.4.2	linux-arm64	cuda_13.4.2_linux_sbsa.run	a3e8528b87d2fba6e2ce526fe0dc5632	4164724139	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_linux_sbsa.run
+13.4.2	windows-amd64	cuda_13.4.2_windows_x86_64.exe	51f1ee37b2cc75ae46c55d113aa741c6	3917283152	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_windows_x86_64.exe
+13.4.2	windows-arm64	cuda_13.4.2_windows_arm64.exe	984ef5c650d23689d2b32c1c8aabc672	3877020040	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_windows_arm64.exe
 CATALOG
 }
 
