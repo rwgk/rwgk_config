@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "GitHub Attention Tabs",
+  "version": "0.1.1",
+  "description": "Green/red queue indicators for your open individual review requests and unread mention notifications.",
+  "minimum_chrome_version": "120",
+  "permissions": ["alarms", "storage"],
+  "host_permissions": ["https://github.com/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {
+    "default_title": "GitHub Attention Tabs",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [{
+    "matches": ["https://github.com/search*", "https://github.com/notifications*"],
+    "js": ["core.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["icons/*.svg"],
+    "matches": ["https://github.com/*"]
+  }],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

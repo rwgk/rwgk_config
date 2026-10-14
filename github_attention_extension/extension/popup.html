@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GitHub Attention</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="core.js" defer></script>
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <h1>GitHub Attention</h1>
+    <p class="legend">🟢 Watching, empty · 🔴 Nonempty queue · 🟡 Not verified</p>
+    <section aria-labelledby="reviews-label">
+      <h2 id="reviews-label"><a id="reviews-link" href="#">Review requests</a></h2>
+      <p id="reviews-status" class="status" aria-live="polite">Not checked</p>
+      <p id="reviews-detail" class="detail"></p>
+    </section>
+    <section aria-labelledby="mentions-label">
+      <h2 id="mentions-label"><a id="mentions-link" href="#">Unread mentions</a></h2>
+      <p id="mentions-status" class="status" aria-live="polite">Not checked</p>
+      <p id="mentions-detail" class="detail"></p>
+    </section>
+    <button id="check-now" type="button" title="Reload both watched tabs, including an active one">Check now</button>
+    <p id="operation" aria-live="polite"></p>
+    <p class="note">Keep these two tabs open. Inactive tabs reload about every 2 minutes; active tabs are left alone. Status describes the loaded page, not a separate API check.</p>
+    <p class="note">GitHub's mention queue can include later updates to older mentions. This extension does not mark anything read.</p>
+  </body>
+</html>

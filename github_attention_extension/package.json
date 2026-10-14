@@ -1,0 +1,13 @@
+{
+  "name": "github-attention-tabs",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Local Chrome favicon indicators for personal GitHub review requests and unread mentions",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check.js"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.12"
+  }
+}
