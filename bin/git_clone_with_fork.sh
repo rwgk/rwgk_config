@@ -8,6 +8,11 @@ usage() {
     cat <<EOF
 Usage:
   $SCRIPT_NAME <upstream-git-url> [fork-git-url] [--branch <branch-name>] [--clone-dir <directory>]
+      [-- <git-clone-options>...]
+
+Clone options:
+  -- <git-clone-options>...        Pass all remaining arguments unchanged to git clone.
+                                  Put URLs and helper options before '--'.
 
 Examples:
   $SCRIPT_NAME https://github.com/pybind/pybind11.git
@@ -15,6 +20,7 @@ Examples:
   $SCRIPT_NAME https://github.com/pybind/pybind11.git --branch specific-upstream-branch
   $SCRIPT_NAME https://github.com/pybind/pybind11.git https://github.com/rwgk/pybind11.git --branch specific-upstream-branch
   $SCRIPT_NAME https://gitlab-master.nvidia.com/kpilch/ansible.git https://gitlab-master.nvidia.com/rgrossekunst/kpilch-ansible.git --clone-dir kpilch-ansible
+  $SCRIPT_NAME https://github.com/NVIDIA/cuda-python.git -- --config core.symlinks=true --config submodule.recurse=true --recurse-submodules
 EOF
 }
 
@@ -23,8 +29,9 @@ UPSTREAM_URL=""
 FORK_URL=""
 BRANCH_NAME=""
 CLONE_DIR=""
+CLONE_COMMAND=(git clone)
 
-# Collect at most two positionals (upstream, optional fork) and handle flags anywhere.
+# Collect at most two positionals and handle helper flags before '--'.
 positional_count=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -52,21 +59,10 @@ while [[ $# -gt 0 ]]; do
         usage
         exit 0
         ;;
-    --) # end of options
+    --) # pass the remaining arguments directly to git clone
         shift
-        while [[ $# -gt 0 ]]; do
-            if [[ $positional_count -eq 0 ]]; then
-                UPSTREAM_URL="$1"
-            elif [[ $positional_count -eq 1 ]]; then
-                FORK_URL="$1"
-            else
-                echo "Error: too many positional arguments"
-                usage
-                exit 1
-            fi
-            positional_count=$((positional_count + 1))
-            shift
-        done
+        CLONE_COMMAND+=("$@")
+        break
         ;;
     -*)
         echo "Error: unknown option: $1"
@@ -121,10 +117,9 @@ fi
 echo "Cloning upstream: $UPSTREAM_URL"
 if [[ -n "$BRANCH_NAME" ]]; then
     echo "Using branch: $BRANCH_NAME"
-    git clone --branch "$BRANCH_NAME" "$UPSTREAM_URL" "$CLONE_DIR"
-else
-    git clone "$UPSTREAM_URL" "$CLONE_DIR"
+    CLONE_COMMAND+=(--branch "$BRANCH_NAME")
 fi
+"${CLONE_COMMAND[@]}" "$UPSTREAM_URL" "$CLONE_DIR"
 cd "$CLONE_DIR"
 
 echo "Renaming 'origin' to 'upstream'"
