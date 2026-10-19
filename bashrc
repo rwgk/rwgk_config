@@ -1714,6 +1714,8 @@ find_pr_for_commit() {
         { grep . || echo "No associated PR found"; }
 }
 
+alias codey="codex -m gpt-6.1-sol -c 'model_reasoning_effort=\"ultra\"'"
+
 vscode_settings_dir="$HOME/Library/Application Support/Code/User/"
 alias cd_vscode_settings_dir='cd "$vscode_settings_dir"'
 
