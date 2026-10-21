@@ -4,9 +4,11 @@
 GitHub stack membership, PR bases/status, and merge queues require separate API
 checks. No gh-stack commands, fetches (including lazy fetches), or repairs run.
 The catalog and gh-stack journals are shared; Git operation state is worktree-local.
-Handoff policy requires saved bases to match local parent tips, including the
-trunk. gh-stack may legitimately use a remote trunk; align the local trunk before
-expecting this check to pass.
+By default, handoff policy requires saved bases to match local parent tips,
+including the trunk. --allow-stale-trunk accepts the first effective layer's unique
+merge-base with local trunk as its replay boundary and reports a needed rebase.
+Later layer boundaries remain strict. gh-stack may legitimately use a remote trunk;
+align the local trunk before expecting the default check to pass.
 """
 
 import argparse
@@ -32,6 +34,7 @@ STACK_OPERATIONS = (
     "gh-stack-rebase-state",
     "gh-stack-modify-state",
     "gh-stack-migration",
+    "gh-stack-adopt-state",
 )
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
@@ -167,10 +170,11 @@ class Checker:
         ):
             self.env.pop(key, None)
         self.report = {
-            "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "observed_at": datetime.datetime.now(datetime.UTC).isoformat(),
             "worktree": str(self.worktree),
             "remote": args.remote,
             "mode": "allow-local-ahead" if args.allow_local_ahead else "expect-synced",
+            "allow_stale_trunk": args.allow_stale_trunk,
             "supported_metadata": "gh-stack v0.2.0 / schema 1",
             "github_verified": False,
             "layers": [],
@@ -278,6 +282,27 @@ class Checker:
             )
             return None
         return result.returncode == 0
+
+    def trunk_replay_base(self, trunk_tip, layer_tip, scope):
+        contained = self.ancestry(trunk_tip, layer_tip, scope, "effective trunk parent")
+        if contained is None:
+            return None
+        if contained:
+            return trunk_tip
+        bases = self.git(
+            "merge-base", "--all", trunk_tip, layer_tip, ok=(0, 1)
+        ).stdout.splitlines()
+        if len(bases) != 1:
+            self.issue(
+                "violation",
+                scope,
+                "unique trunk merge-base required for a stale-trunk replay boundary",
+            )
+            return None
+        self.issue(
+            "info", scope, "needs rebase: local trunk advanced beyond the replay base"
+        )
+        return bases[0]
 
     def urls(self, remote, push=False):
         args = ["remote", "get-url", "--all"]
@@ -530,21 +555,28 @@ class Checker:
                             name,
                             "saved metadata head pending refresh (verified ancestor)",
                         )
+            allow_stale_trunk = self.args.allow_stale_trunk and parent_name == trunk
+            replay_base = parent_tip
+            if allow_stale_trunk and local and parent_tip:
+                replay_base = self.trunk_replay_base(parent_tip, local, name)
+            layer["replay_base"] = replay_base
             if not saved.get("base"):
                 self.issue("incomplete", name, "missing saved metadata base")
             elif not SHA.fullmatch(saved["base"]):
                 self.issue("incomplete", name, "malformed saved metadata base SHA")
-            elif parent_tip and saved["base"] != parent_tip:
+            elif replay_base and saved["base"] != replay_base:
                 self.issue(
                     "violation",
                     name,
                     (
-                        "saved base differs from local trunk tip; handoff policy requires local trunk alignment (gh-stack may use a remote trunk)"
+                        "saved base differs from unique trunk merge-base; aligned replay boundary required"
+                        if allow_stale_trunk
+                        else "saved base differs from local trunk tip; handoff policy requires local trunk alignment (gh-stack may use a remote trunk)"
                         if parent_name == trunk
                         else "saved base differs from effective parent tip; aligned replay boundary required"
                     ),
                 )
-            if local and parent_tip:
+            if local and parent_tip and not allow_stale_trunk:
                 contained = self.ancestry(parent_tip, local, name, "effective parent")
                 if contained is False:
                     self.issue(
@@ -696,6 +728,11 @@ def main(argv=None):
         "--allow-local-ahead",
         action="store_true",
         help="also allow proven local-ahead tips and ancestral saved heads",
+    )
+    parser.add_argument(
+        "--allow-stale-trunk",
+        action="store_true",
+        help="allow the first effective layer's saved base to equal its unique merge-base with local trunk; later layers remain strict",
     )
     parser.add_argument(
         "--stack", help="local metadata stack id; required for ambiguous current branch"

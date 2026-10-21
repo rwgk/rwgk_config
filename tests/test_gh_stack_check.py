@@ -302,6 +302,98 @@ class StackCheckTests(unittest.TestCase):
         self.assert_issue(report, "violation", "handoff policy")
         self.assert_issue(report, "info", "trunk differs")
 
+    def advance_trunk(self) -> str:
+        self.git("checkout", "--quiet", "main")
+        advanced = self.commit("Trunk advanced independently")
+        self.git("push", "--quiet", "upstream", "main")
+        self.git("checkout", "--quiet", "layer/two")
+        return advanced
+
+    def test_stale_trunk_opt_in_accepts_actual_replay_base(self) -> None:
+        advanced = self.advance_trunk()
+        before = self.snapshot()
+        report = self.check("--allow-stale-trunk", expected=0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertIs(report["allow_stale_trunk"], True)
+        self.assertEqual(report["layers"][0]["parent_tip"], advanced)
+        self.assertEqual(report["layers"][0]["saved_base"], self.main)
+        self.assertEqual(report["layers"][0]["replay_base"], self.main)
+        self.assertEqual(report["layers"][1]["replay_base"], self.one)
+        self.assert_issue(report, "info", "needs rebase")
+
+    def test_stale_trunk_is_rejected_by_default(self) -> None:
+        self.advance_trunk()
+        for mode in ((), ("--expect-synced",), ("--allow-local-ahead",)):
+            with self.subTest(mode=mode):
+                report = self.check(*mode, expected=1)
+                self.assertIs(report["allow_stale_trunk"], False)
+                self.assert_issue(report, "violation", "local trunk tip")
+
+    def test_stale_trunk_opt_in_rejects_base_older_than_actual_merge_base(self) -> None:
+        self.advance_trunk()
+        self.metadata["stacks"][0]["branches"][0]["base"] = self.initial
+        self.write_metadata()
+        report = self.check("--allow-stale-trunk", expected=1)
+        self.assertEqual(report["layers"][0]["replay_base"], self.main)
+        self.assert_issue(
+            report, "violation", "saved base differs from unique trunk merge-base"
+        )
+
+    def test_stale_trunk_opt_in_keeps_later_layer_boundaries_strict(self) -> None:
+        self.advance_trunk()
+        self.metadata["stacks"][0]["branches"][1]["base"] = self.main
+        self.write_metadata()
+        report = self.check("--allow-stale-trunk", expected=1)
+        self.assert_issue(report, "violation", "effective parent tip")
+        self.assertEqual(report["layers"][0]["status"], "pass")
+        self.assertEqual(report["layers"][1]["status"], "violation")
+
+    def test_stale_trunk_opt_in_applies_after_skipped_merged_layers(self) -> None:
+        self.advance_trunk()
+        branches = self.metadata["stacks"][0]["branches"]
+        branches[0]["pullRequest"]["merged"] = True
+        branches[1]["base"] = self.main
+        self.write_metadata()
+        report = self.check("--allow-stale-trunk", expected=0)
+        self.assertEqual(report["layers"][0]["status"], "skipped-merged")
+        self.assertEqual(report["layers"][1]["parent"], "main")
+        self.assertEqual(report["layers"][1]["replay_base"], self.main)
+        self.assert_issue(report, "info", "needs rebase")
+
+    def test_stale_trunk_opt_in_does_not_allow_unpublished_heads(self) -> None:
+        self.advance_trunk()
+        self.commit("Unpublished upper commit")
+        report = self.check("--allow-stale-trunk", expected=1)
+        self.assert_issue(report, "violation", "tips differ")
+        self.check("--allow-stale-trunk", "--allow-local-ahead", expected=0)
+
+    def test_stale_trunk_opt_in_rejects_multiple_merge_bases(self) -> None:
+        tree = f"{self.main}^{{tree}}"
+        left = self.git("commit-tree", tree, "-p", self.main, input="Left branch\n")
+        right = self.git("commit-tree", tree, "-p", self.main, input="Right branch\n")
+        trunk = self.git(
+            "commit-tree", tree, "-p", left, "-p", right, input="Trunk merge\n"
+        )
+        one = self.git(
+            "commit-tree", tree, "-p", right, "-p", left, input="Layer merge\n"
+        )
+        two = self.git("commit-tree", tree, "-p", one, input="Upper layer\n")
+        for branch, sha in (("main", trunk), ("layer/one", one), ("layer/two", two)):
+            self.git("update-ref", f"refs/heads/{branch}", sha)
+        self.git(
+            "push", "--quiet", "--force", "upstream", "main", "layer/one", "layer/two"
+        )
+        branches = self.metadata["stacks"][0]["branches"]
+        branches[0].update(head=one, base=left)
+        branches[1].update(head=two, base=one)
+        self.write_metadata()
+        self.assertEqual(
+            set(self.git("merge-base", "--all", trunk, one).splitlines()), {left, right}
+        )
+        report = self.check("--allow-stale-trunk", expected=1)
+        self.assertIsNone(report["layers"][0]["replay_base"])
+        self.assert_issue(report, "violation", "unique trunk merge-base required")
+
     def test_child_must_contain_current_parent(self) -> None:
         self.git("checkout", "--quiet", "layer/one")
         self.one = self.commit("Lower layer changed")
@@ -572,6 +664,7 @@ class StackCheckTests(unittest.TestCase):
             "gh-stack-rebase-state",
             "gh-stack-modify-state",
             "gh-stack-migration",
+            "gh-stack-adopt-state",
         ):
             with self.subTest(name=name):
                 path = self.git_path(name)
@@ -705,6 +798,7 @@ class StackCheckTests(unittest.TestCase):
             "gh-stack-rebase-state",
             "gh-stack-modify-state",
             "gh-stack-migration",
+            "gh-stack-adopt-state",
         ):
             with self.subTest(name=name):
                 path = self.git_path(name)
