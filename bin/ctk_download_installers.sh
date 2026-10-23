@@ -11,11 +11,15 @@
 #   ctk_download_installers.sh 12.8.2 linux-arm64
 #   ctk_download_installers.sh list 13.4.1
 #   ctk_download_installers.sh url 13.4.1 windows-arm64
-#   ctk_download_installers.sh sync --purge
+#   ctk_download_installers.sh fast-sync --purge
+#   ctk_download_installers.sh full-sync
 #
-# "sync" selects the numerically latest patch release in every CUDA 12/13
-# major.minor line. With --purge, and only after every wanted file verifies,
-# it removes obsolete top-level cuda_12*.run/.exe and cuda_13*.run/.exe files.
+# Both sync modes select the latest patch release in every CUDA 12/13
+# major.minor line. fast-sync checks existing installers by filename and size;
+# full-sync also checks their MD5. Both always verify checksums for new downloads
+# and completed .part files. With --purge, only after every wanted file passes
+# the selected checks, they remove obsolete cuda_12*.run/.exe and cuda_13*.run/.exe
+# files from the current directory.
 # It never removes subdirectories, unrelated files, or .part downloads.
 #
 # Agent maintenance instructions:
@@ -46,10 +50,10 @@
 #    Preserve developer-preview URLs if publicly archived; these sometimes use
 #    packages.nvidia.com/prerelease rather than developer.download.nvidia.com.
 # 4. Copy version, filename, md5sum, byte size, and exact URL from NVIDIA's
-#    release payload. Keep rows sorted by version (-V) and platform. The sync
-#    policy derives latest patches automatically; do not mark them manually.
-# 5. Validate catalog changes without downloading installers or running sync
-#    (sync hashes existing installers). Use:
+#    release payload. Keep rows sorted by version (-V) and platform. Both sync
+#    modes derive latest patches automatically; do not mark them manually.
+# 5. Validate catalog changes without downloading installers or running either
+#    sync mode (full-sync hashes existing installers). Use:
 #      ctk_download_installers.sh list
 #      ctk_download_installers.sh list VERSION
 #      ctk_download_installers.sh url VERSION PLATFORM
@@ -68,10 +72,17 @@ Usage:
   $PROGRAM list [VERSION [PLATFORM]]
   $PROGRAM url VERSION PLATFORM
   $PROGRAM VERSION [PLATFORM]
-  $PROGRAM sync [--purge]
+  $PROGRAM fast-sync [--purge]
+  $PROGRAM full-sync [--purge]
 
 PLATFORM is linux-amd64, linux-arm64, windows-amd64, windows-arm64,
 or all (the default). Downloads always go to the current directory.
+
+Both sync modes select the latest patch in each CUDA 12/13 major.minor line.
+fast-sync checks existing installers by filename and size, skipping MD5.
+full-sync also verifies their MD5. New downloads and completed .part files
+always receive full checksum verification. --purge removes obsolete installers
+only after every wanted file passes the selected checks.
 EOF
 }
 
@@ -250,11 +261,13 @@ verify_file() {
     local path="$1"
     local expected_md5="$2"
     local expected_size="$3"
+    local mode="${4:-full}"
     local actual_size actual_md5
 
     [[ -f "$path" ]] || return 1
     actual_size=$(stat -c %s -- "$path")
     [[ "$actual_size" == "$expected_size" ]] || return 1
+    [[ "$mode" != fast ]] || return 0
     actual_md5=$(md5sum -- "$path")
     actual_md5=${actual_md5%% *}
     [[ "$actual_md5" == "$expected_md5" ]]
@@ -262,6 +275,7 @@ verify_file() {
 
 download_records() {
     local directory="$1"
+    local mode="${2:-full}"
     local count=0
     local version platform filename expected_md5 expected_size url
     local final_path part_path
@@ -273,8 +287,12 @@ download_records() {
         final_path="$directory/$filename"
         part_path="$final_path.part"
 
-        if verify_file "$final_path" "$expected_md5" "$expected_size"; then
-            echo "verified  $filename"
+        if verify_file "$final_path" "$expected_md5" "$expected_size" "$mode"; then
+            if [[ "$mode" == fast ]]; then
+                echo "size OK   $filename"
+            else
+                echo "verified  $filename"
+            fi
             continue
         fi
         if [[ -e "$final_path" ]]; then
@@ -359,6 +377,8 @@ command_download() {
 }
 
 command_sync() {
+    local mode="$1"
+    shift
     local purge=false
     local directory=.
     local records_file
@@ -370,11 +390,11 @@ command_sync() {
         purge=true
         shift
     fi
-    (($# == 0)) || die "sync accepts only the optional --purge flag"
+    (($# == 0)) || die "${mode}-sync accepts only the optional --purge flag"
     records_file=$(mktemp)
     latest_catalog >"$records_file"
     preflight_space "$directory" "$records_file"
-    download_records "$directory" <"$records_file"
+    download_records "$directory" "$mode" <"$records_file"
 
     if [[ "$purge" == true ]]; then
         while IFS=$'\t' read -r version platform filename expected_md5 expected_size url; do
@@ -383,6 +403,7 @@ command_sync() {
         shopt -s nullglob
         for path in "$directory"/cuda_12*.run "$directory"/cuda_12*.exe \
             "$directory"/cuda_13*.run "$directory"/cuda_13*.exe; do
+            [[ -f "$path" ]] || continue
             if [[ -z "${keep[${path##*/}]:-}" ]]; then
                 rm -- "$path"
                 echo "removed   ${path##*/}"
@@ -403,7 +424,8 @@ main() {
     case "$command" in
     list) command_list "$@" ;;
     url) command_url "$@" ;;
-    sync) command_sync "$@" ;;
+    fast-sync) command_sync fast "$@" ;;
+    full-sync) command_sync full "$@" ;;
     -h | --help | help) usage ;;
     [0-9]*.[0-9]*.[0-9]*) command_download "$command" "$@" ;;
     *) die "unknown command or CUDA version: $command (try --help)" ;;
