@@ -21,13 +21,19 @@
 # Agent maintenance instructions:
 # 1. Treat NVIDIA's CUDA Toolkit Archive as authoritative:
 #      https://developer.nvidia.com/cuda-toolkit-archive
-#    Discover machine-readable versions with:
+#    Fetch that index and the machine-readable version index once each:
 #      curl -fsSL https://developer.download.nvidia.com/compute/cuda/redist/ |
 #          ctk_versions_list.py
+#    Compare the complete published version set with this script's list output
+#    to find new major, minor, and patch releases, including older minor lines.
 #    Note: ctk_versions_list.py intentionally reads piped stdin. In a
 #    non-interactive agent shell, invoking it without the pipe may return no
 #    output because stdin is not a TTY.
-# 2. For each new CUDA 12.x or 13.x version, fetch:
+# 2. Only fetch individual release pages and check installer metadata/URLs for
+#    versions absent from the catalog. Trust existing cataloged patch releases
+#    with matching installer filenames under /wrk/ctk_mirror/: do not re-fetch
+#    their release pages, probe their URLs, or re-hash their files.
+#    For each new CUDA 12.x or 13.x version, fetch:
 #      https://developer.nvidia.com/cuda-X-Y-Z-download-archive
 #    The current release may also be at https://developer.nvidia.com/cuda-downloads.
 #    Parse the NestedOptionSelector data-react-props payload; do not guess names.
@@ -42,7 +48,8 @@
 # 4. Copy version, filename, md5sum, byte size, and exact URL from NVIDIA's
 #    release payload. Keep rows sorted by version (-V) and platform. The sync
 #    policy derives latest patches automatically; do not mark them manually.
-# 5. Validate changes with:
+# 5. Validate catalog changes without downloading installers or running sync
+#    (sync hashes existing installers). Use:
 #      ctk_download_installers.sh list
 #      ctk_download_installers.sh list VERSION
 #      ctk_download_installers.sh url VERSION PLATFORM
@@ -193,6 +200,10 @@ catalog() {
 13.4.2	linux-arm64	cuda_13.4.2_linux_sbsa.run	a3e8528b87d2fba6e2ce526fe0dc5632	4164724139	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_linux_sbsa.run
 13.4.2	windows-amd64	cuda_13.4.2_windows_x86_64.exe	51f1ee37b2cc75ae46c55d113aa741c6	3917283152	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_windows_x86_64.exe
 13.4.2	windows-arm64	cuda_13.4.2_windows_arm64.exe	984ef5c650d23689d2b32c1c8aabc672	3877020040	https://developer.download.nvidia.com/compute/cuda/13.4.2/local_installers/cuda_13.4.2_windows_arm64.exe
+13.4.3	linux-amd64	cuda_13.4.3_linux.run	d79b49d3ab39f5d45d48d91b31275de4	4191013652	https://developer.download.nvidia.com/compute/cuda/13.4.3/local_installers/cuda_13.4.3_linux.run
+13.4.3	linux-arm64	cuda_13.4.3_linux_sbsa.run	a785e5305dc104b21c1b8f231a19e79c	4164743533	https://developer.download.nvidia.com/compute/cuda/13.4.3/local_installers/cuda_13.4.3_linux_sbsa.run
+13.4.3	windows-amd64	cuda_13.4.3_windows_x86_64.exe	b37e0f7cf3f37cda02d0b0a2ef7e4fad	3728394240	https://developer.download.nvidia.com/compute/cuda/13.4.3/local_installers/cuda_13.4.3_windows_x86_64.exe
+13.4.3	windows-arm64	cuda_13.4.3_windows_arm64.exe	d06297dbafea315be2c39c4c13121154	3723020480	https://developer.download.nvidia.com/compute/cuda/13.4.3/local_installers/cuda_13.4.3_windows_arm64.exe
 CATALOG
 }
 
