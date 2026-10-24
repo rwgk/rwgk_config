@@ -1,6 +1,6 @@
 {
   "name": "github-attention-tabs",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Local Chrome queue-letter favicons with count badges for GitHub review requests, approved PRs, mentions, and notifications",
   "scripts": {
