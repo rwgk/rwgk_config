@@ -12,6 +12,12 @@ const search = (overrides = {}, legacy = false) => {
 const notificationKinds = ["reviews", "mentions", "notifications"];
 const rows = (count) => '<li class="notifications-list-item"></li>'.repeat(count);
 
+test("one-minute active-tab idleness is independent of two-minute polling and six-minute verification staleness", () => {
+  assert.equal(core.ACTIVE_IDLE_MS, 60_000);
+  assert.equal(core.REFRESH_MINUTES, 2);
+  assert.equal(core.STALE_MS, 6 * 60_000);
+});
+
 test("matches the four exact semantic queues in priority order", () => {
   assert.deepEqual(core.KINDS, ["reviews", "approved", "mentions", "notifications"]);
   for (const kind of core.KINDS) assert.equal(core.classifyUrl(core.URLS[kind]), kind);

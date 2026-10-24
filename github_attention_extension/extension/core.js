@@ -11,7 +11,7 @@
   };
   const REFRESH_MINUTES = 2;
   const STALE_MS = 6 * 60 * 1000;
-  const ACTIVE_IDLE_MS = 6 * 60 * 1000;
+  const ACTIVE_IDLE_MS = 60 * 1000;
 
   function sameTokens(query, expected) {
     const tokens = String(query || "").trim().toLowerCase().split(/\s+/).sort();

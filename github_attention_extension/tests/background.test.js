@@ -678,12 +678,12 @@ test("already loading tabs are not repeatedly restarted by an alarm", async () =
   assert.deepEqual(app.reloads, []);
 });
 
-test("an active queue becomes automatically refreshable at the six-minute no-click boundary", async () => {
+test("an active queue becomes automatically refreshable at exactly one minute without a mouse press", async () => {
   const app = setup({ tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }] });
   await app.idle();
   const baseline = app.clock.now();
   assert.equal(app.session.attentionActivity[1], baseline);
-  await app.clock.advance(core.ACTIVE_IDLE_MS - 1);
+  await app.clock.advance(59_999);
   app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
   await app.idle();
   assert.deepEqual(app.reloads, []);
@@ -695,6 +695,24 @@ test("an active queue becomes automatically refreshable at the six-minute no-cli
   assert.deepEqual(app.activityRequests[0], {
     tabId: 1, message: { type: "attention:activity-state", kind: "reviews" }, frameOptions: { frameId: 0 },
   });
+});
+
+test("automatic refresh does not reset idleness before the next two-minute refresh cycle", async () => {
+  const app = setup({ tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }] });
+  await app.idle();
+  const baseline = app.clock.now();
+  assert.equal(app.alarms.get("attention:refresh").periodInMinutes, 2);
+  await app.clock.advance(60_000);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, [1]);
+  assert.equal(app.session.attentionActivity[1], baseline);
+  await app.clock.advance(120_000);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, [1, 1]);
+  assert.equal(app.session.attentionActivity[1], baseline);
+  assert.equal(app.reloadTimes[1] - app.reloadTimes[0], 120_000);
 });
 
 test("idle active queues join the same priority wave and five-second stagger", async () => {
@@ -717,7 +735,7 @@ test("a click restarts the active-tab grace period without refreshing queue veri
   const app = setup({ tabs: [tab] });
   await app.message(report("reviews", 4), { tab });
   const verified = structuredClone(app.storage.attentionQueuesV2.reviews);
-  await app.clock.advance(120000);
+  await app.clock.advance(30_000);
   const clickedAt = app.clock.now();
   assert.equal((await app.message(click(clickedAt), { tab, frameId: 0 })).accepted, true);
   assert.deepEqual(app.storage.attentionQueuesV2.reviews, verified);
