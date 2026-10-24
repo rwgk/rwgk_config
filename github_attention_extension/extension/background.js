@@ -3,7 +3,7 @@
 
 importScripts("core.js");
 
-const { KINDS, classifyUrl, REFRESH_MINUTES } = globalThis.GitHubAttention;
+const { KINDS, classifyUrl, REFRESH_MINUTES, ACTIVE_IDLE_MS } = globalThis.GitHubAttention;
 const REFRESH_ALARM = "attention:refresh";
 const TIMEOUT_ALARM = "attention:timeout";
 // v0.1 watched current review requests and unread mentions. Those counts must
@@ -11,13 +11,19 @@ const TIMEOUT_ALARM = "attention:timeout";
 const STORAGE_KEY = "attentionQueuesV2";
 const CHECK_TIMEOUT_MS = 60_000;
 const RELOAD_GAP_MS = 5_000;
+const ACTIVITY_KEY = "attentionActivity";
+const ACTIVITY_TIMEOUT_MS = 1_000;
 const trackedTabs = new Map();
+const activityByTab = new Map();
+let activityRevision = 0;
+let savedActivityRevision = -1;
+let activityStorageHealthy = false;
 let queues = Object.fromEntries(KINDS.map((kind) => [kind, emptyQueue()]));
 let operations = Promise.resolve();
 let automaticWave = null;
 let automaticTimer = null;
 // A previous worker could have dispatched a reload just before shutting down.
-// This startup guard preserves spacing without persisting browser tab IDs.
+// This startup guard preserves spacing without persisting the reload plan.
 let nextAutomaticReloadAt = Date.now() + RELOAD_GAP_MS;
 
 function emptyQueue() {
@@ -57,6 +63,71 @@ async function watchedTabs() {
   return tabs.map((tab) => ({ tab, kind: classifyUrl(tab.url) })).filter(({ kind }) => kind !== null);
 }
 
+function validActivityTime(value, ceiling = Date.now()) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= ceiling;
+}
+
+function noteActivity(tabId, lastClickAt = null) {
+  // Unknown history starts a full grace period. Loading/reloading a known tab
+  // must not change its timestamp: only a genuine mouse press can do that.
+  const previous = activityByTab.get(tabId);
+  const baseline = validActivityTime(previous) ? previous : Date.now();
+  const next = lastClickAt === null ? baseline : Math.max(baseline, lastClickAt);
+  if (next !== previous) {
+    activityByTab.set(tabId, next);
+    activityRevision++;
+  }
+}
+
+function forgetActivity(tabId) {
+  if (activityByTab.delete(tabId)) activityRevision++;
+}
+
+async function saveActivity() {
+  if (activityStorageHealthy && activityRevision === savedActivityRevision) return true;
+  const revision = activityRevision;
+  try {
+    // Session storage survives worker restarts, not browser/extension restarts.
+    // No URL, click target, page text, or pointer coordinates are retained.
+    await chrome.storage.session.set({ [ACTIVITY_KEY]: Object.fromEntries(activityByTab) });
+    savedActivityRevision = revision;
+    activityStorageHealthy = true;
+    return true;
+  } catch {
+    // Never discard a document's only click history by auto-reloading while
+    // its session checkpoint is unavailable. A later cycle can retry.
+    activityStorageHealthy = false;
+    return false;
+  }
+}
+
+function locallyIdle(tabId) {
+  const lastActivityAt = activityByTab.get(tabId);
+  return validActivityTime(lastActivityAt) && Date.now() - lastActivityAt >= ACTIVE_IDLE_MS;
+}
+
+async function activeTabIsIdle(tabId, kind) {
+  const requestedAt = Date.now();
+  let timeout;
+  let reply;
+  try {
+    reply = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: "attention:activity-state", kind }, { frameId: 0 }),
+      new Promise((resolve) => { timeout = setTimeout(() => resolve(null), ACTIVITY_TIMEOUT_MS); }),
+    ]);
+  } catch {
+    return false;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+  if (!reply || reply.kind !== kind || !validActivityTime(reply.observedAt) ||
+      reply.observedAt < requestedAt ||
+      (reply.lastClickAt !== null && !validActivityTime(reply.lastClickAt, reply.observedAt))) return false;
+  noteActivity(tabId, reply.lastClickAt);
+  if (!await saveActivity()) return false;
+  return locallyIdle(tabId);
+}
+
 function cancelAutomaticReloads() {
   if (automaticTimer !== null) clearTimeout(automaticTimer);
   automaticTimer = null;
@@ -78,9 +149,24 @@ async function reloadWatchedTab(tabId, kind, reloadActive) {
     await save();
     return false;
   }
+  if (tab.status === "loading") return false;
+  if (!reloadActive) {
+    if (!await saveActivity()) return false;
+    let idleApproved = false;
+    if (tab.active) {
+      idleApproved = await activeTabIsIdle(tabId, kind);
+      if (!idleApproved) return false;
+    }
+    // Storage and the live activity check are asynchronous. Re-read browser
+    // state before dispatch; newly active tabs without idle approval stay put.
+    try { tab = await chrome.tabs.get(tabId); } catch { return false; }
+    if (classifyUrl(tab.url) !== kind || tab.status === "loading" ||
+        (tab.active && (!idleApproved || !locallyIdle(tabId))) ||
+        activityRevision !== savedActivityRevision) return false;
+  }
   // Recheck immediately before dispatch, not when a delayed wave is planned.
   // No await may appear between this check and the reload call.
-  if ((!reloadActive && tab.active) || tab.status === "loading") return false;
+  if (tab.status === "loading") return false;
   setUnknown(kind, "loading", "Checking this GitHub view…");
   try {
     await chrome.tabs.reload(tab.id);
@@ -136,7 +222,7 @@ async function startAutomaticReloads(matches) {
   // A delayed alarm must not duplicate or restart a partially completed wave.
   if (automaticWave !== null) return;
   const pending = matches
-    .filter(({ tab }) => !tab.active && tab.status !== "loading")
+    .filter(({ tab }) => tab.status !== "loading")
     .sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.tab.id - b.tab.id)
     .map(({ tab, kind }) => ({ tabId: tab.id, kind }));
   if (!pending.length) return;
@@ -160,6 +246,11 @@ async function reconcileTabs(reloadActive = false, reload = false) {
 
   const present = new Set(matches.map(({ kind }) => kind));
   const presentIds = new Set(matches.map(({ tab }) => tab.id));
+  for (const tabId of activityByTab.keys()) {
+    if (!presentIds.has(tabId)) forgetActivity(tabId);
+  }
+  for (const { tab } of matches) noteActivity(tab.id);
+  await saveActivity();
   for (const [tabId] of trackedTabs) {
     if (!presentIds.has(tabId)) trackedTabs.delete(tabId);
   }
@@ -193,6 +284,24 @@ async function reconcileTabs(reloadActive = false, reload = false) {
 }
 
 async function initialize() {
+  try {
+    const stored = await chrome.storage.session.get(ACTIVITY_KEY);
+    const records = stored[ACTIVITY_KEY];
+    if (records && typeof records === "object" && !Array.isArray(records)) {
+      for (const [tabId, timestamp] of Object.entries(records)) {
+        const id = Number(tabId);
+        if (Number.isSafeInteger(id) && id >= 0 && validActivityTime(timestamp)) {
+          // A click can arrive while storage is being read on worker startup.
+          activityByTab.set(id, Math.max(activityByTab.get(id) ?? 0, timestamp));
+        }
+      }
+    }
+    activityStorageHealthy = true;
+  } catch {
+    // Reconciliation supplies conservative new grace periods when history
+    // cannot be recovered. Queue reporting/manual refresh still work; automatic
+    // reloads resume only once the session checkpoint can be saved safely.
+  }
   try {
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     for (const kind of KINDS) {
@@ -233,7 +342,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (!trackedTabs.has(tabId)) return;
+  const known = trackedTabs.has(tabId) || activityByTab.has(tabId);
+  forgetActivity(tabId);
+  if (!known) return;
   trackedTabs.delete(tabId);
   void enqueue(() => reconcileTabs(false, false));
 });
@@ -241,6 +352,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const previous = trackedTabs.get(tabId);
   const kind = classifyUrl(changeInfo.url || tab?.url);
+  if (changeInfo.url && kind === null && activityByTab.has(tabId)) {
+    forgetActivity(tabId);
+    void enqueue(() => saveActivity());
+  }
   if (previous && changeInfo.url && kind !== previous.kind) {
     trackedTabs.delete(tabId);
     void enqueue(async () => {
@@ -261,6 +376,21 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "attention:activity") {
+    const tabId = sender.tab?.id;
+    const kind = classifyUrl(sender.tab?.url);
+    if (!Number.isSafeInteger(tabId) || tabId < 0 || kind === null || kind !== message.kind ||
+        (sender.frameId !== undefined && sender.frameId !== 0) || !validActivityTime(message.lastClickAt)) {
+      sendResponse({ error: "Ignored an invalid activity report." });
+      return false;
+    }
+    // Record immediately, even while an idle-check operation is awaiting an
+    // API. Persistence remains serialized, and no verification time is changed.
+    noteActivity(tabId, message.lastClickAt);
+    void enqueue(async () => ({ accepted: await saveActivity() })).then(sendResponse,
+      () => sendResponse({ error: "Activity history could not be saved." }));
+    return true;
+  }
   if (message?.type === "attention:status") {
     void enqueue(async () => {
       await reconcileTabs(false, false);

@@ -11,6 +11,7 @@
   };
   const REFRESH_MINUTES = 2;
   const STALE_MS = 6 * 60 * 1000;
+  const ACTIVE_IDLE_MS = 6 * 60 * 1000;
 
   function sameTokens(query, expected) {
     const tokens = String(query || "").trim().toLowerCase().split(/\s+/).sort();
@@ -139,7 +140,7 @@
     return kind === "approved" ? readApproved(document) : readNotifications(document, kind);
   }
 
-  const api = {KINDS, URLS, REFRESH_MINUTES, STALE_MS, classifyUrl, readDocument};
+  const api = {KINDS, URLS, REFRESH_MINUTES, STALE_MS, ACTIVE_IDLE_MS, classifyUrl, readDocument};
   root.GitHubAttention = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })(globalThis);

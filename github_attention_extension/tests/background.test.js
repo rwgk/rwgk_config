@@ -22,8 +22,10 @@ function event() {
 function setup(options = {}) {
   const tabs = options.tabs || [];
   const storage = options.storage || {};
+  const session = options.session || {};
   const reloads = [];
   const reloadTimes = [];
+  const activityRequests = [];
   let now = options.now ?? Date.now();
   let nextTimerId = 1;
   const timers = new Map();
@@ -62,16 +64,33 @@ function setup(options = {}) {
         reloadTimes.push(now);
         if (options.reloadFails) throw new Error("closed");
       },
+      sendMessage: async (tabId, message, frameOptions) => {
+        activityRequests.push({ tabId, message: structuredClone(message), frameOptions: structuredClone(frameOptions) });
+        if (options.activityReply) return options.activityReply(tabId, message, frameOptions, now);
+        return { kind: message.kind, lastClickAt: null, observedAt: now };
+      },
       onUpdated: event(),
       onRemoved: event(),
     },
-    storage: { local: {
-      get: async () => structuredClone(storage),
-      set: async (value) => {
-        await options.beforeSave?.(value, storage);
-        Object.assign(storage, structuredClone(value));
+    storage: {
+      local: {
+        get: async () => structuredClone(storage),
+        set: async (value) => {
+          await options.beforeSave?.(value, storage);
+          Object.assign(storage, structuredClone(value));
+        },
       },
-    } },
+      session: {
+        get: async () => {
+          await options.beforeSessionGet?.();
+          return structuredClone(session);
+        },
+        set: async (value) => {
+          await options.beforeSessionSave?.(value, session);
+          Object.assign(session, structuredClone(value));
+        },
+      },
+    },
     runtime: { onMessage: event() },
   };
   const context = vm.createContext({ chrome, importScripts: () => {}, Date: FakeDate, setTimeout, clearTimeout, Map, Set, Promise, Number, Object });
@@ -115,16 +134,29 @@ function setup(options = {}) {
       await idle();
     },
   };
-  return { tabs, storage, reloads, reloadTimes, alarms, alarmCreates, chrome, clock, idle, message };
+  return { tabs, storage, session, reloads, reloadTimes, activityRequests, alarms, alarmCreates, chrome, clock, idle, message };
 }
 
 function report(kind, count, status = "ok", message = "") {
   return { type: "attention:report", kind, state: { status, count, message } };
 }
 
+function click(lastClickAt, kind = "reviews") {
+  return { type: "attention:activity", kind, lastClickAt };
+}
+
+async function waitFor(predicate) {
+  for (let index = 0; index < 1000; index++) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail("Expected asynchronous operation to reach its checkpoint");
+}
+
 async function startAutomatic(app) {
   // A newly started worker waits five seconds before its first automatic
   // reload, even if a periodic alarm happens to arrive immediately.
+  await app.idle();
   await app.clock.advance(5000);
   app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
   await app.idle();
@@ -644,4 +676,298 @@ test("already loading tabs are not repeatedly restarted by an alarm", async () =
   const app = setup({ tabs: [{ id: 1, url: REVIEW_URL, active: false, status: "loading" }] });
   await startAutomatic(app);
   assert.deepEqual(app.reloads, []);
+});
+
+test("an active queue becomes automatically refreshable at the six-minute no-click boundary", async () => {
+  const app = setup({ tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }] });
+  await app.idle();
+  const baseline = app.clock.now();
+  assert.equal(app.session.attentionActivity[1], baseline);
+  await app.clock.advance(core.ACTIVE_IDLE_MS - 1);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, []);
+  await app.clock.advance(1);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, [1]);
+  assert.equal(app.session.attentionActivity[1], baseline);
+  assert.deepEqual(app.activityRequests[0], {
+    tabId: 1, message: { type: "attention:activity-state", kind: "reviews" }, frameOptions: { frameId: 0 },
+  });
+});
+
+test("idle active queues join the same priority wave and five-second stagger", async () => {
+  const now = Date.now();
+  const tabs = Object.values(QUEUE_URLS).map((url, index) => ({ id: index + 1, url, active: true, status: "complete" }));
+  const session = { attentionActivity: Object.fromEntries(tabs.map((tab) => [tab.id, now - core.ACTIVE_IDLE_MS])) };
+  const app = setup({ tabs, session, now });
+  await startAutomatic(app);
+  assert.deepEqual(app.reloads, [1]);
+  await app.clock.advance(15000);
+  assert.deepEqual(app.reloads, [1, 2, 3, 4]);
+  assert.equal(app.activityRequests.length, 4);
+  for (let index = 1; index < app.reloadTimes.length; index++) {
+    assert.equal(app.reloadTimes[index] - app.reloadTimes[index - 1], 5000);
+  }
+});
+
+test("a click restarts the active-tab grace period without refreshing queue verification", async () => {
+  const tab = { id: 1, url: REVIEW_URL, active: true, status: "complete" };
+  const app = setup({ tabs: [tab] });
+  await app.message(report("reviews", 4), { tab });
+  const verified = structuredClone(app.storage.attentionQueuesV2.reviews);
+  await app.clock.advance(120000);
+  const clickedAt = app.clock.now();
+  assert.equal((await app.message(click(clickedAt), { tab, frameId: 0 })).accepted, true);
+  assert.deepEqual(app.storage.attentionQueuesV2.reviews, verified);
+  assert.equal(app.session.attentionActivity[1], clickedAt);
+  await app.message(click(clickedAt - 1000), { tab, frameId: 0 });
+  assert.equal(app.session.attentionActivity[1], clickedAt);
+  await app.clock.advance(core.ACTIVE_IDLE_MS - 1);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, []);
+  assert.deepEqual(app.storage.attentionQueuesV2.reviews, verified);
+  await app.clock.advance(1);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await app.idle();
+  assert.deepEqual(app.reloads, [1]);
+  assert.equal(app.storage.attentionQueuesV2.reviews.checkedAt, verified.checkedAt);
+});
+
+test("session history survives worker restart and a reloaded document reporting no new clicks", async () => {
+  const tab = { id: 1, url: REVIEW_URL, active: true, status: "complete" };
+  const first = setup({ tabs: [tab] });
+  await first.idle();
+  const baseline = first.clock.now();
+  await first.clock.advance(core.ACTIVE_IDLE_MS);
+  first.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await first.idle();
+  assert.deepEqual(first.reloads, [1]);
+  first.chrome.tabs.onUpdated.emit(1, { status: "loading" }, tab);
+  await first.idle();
+  assert.equal(first.session.attentionActivity[1], baseline);
+  const restarted = setup({ tabs: [tab], storage: first.storage, session: first.session, now: first.clock.now() + 1000 });
+  await startAutomatic(restarted);
+  assert.deepEqual(restarted.reloads, [1]);
+  assert.equal(restarted.session.attentionActivity[1], baseline);
+});
+
+test("an unfamiliar active document gets a full new grace period despite an old reported click", async () => {
+  const now = Date.now();
+  const app = setup({
+    tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }], now,
+    activityReply: (_id, message, _frame, observedAt) => ({ kind: message.kind, lastClickAt: now - core.ACTIVE_IDLE_MS, observedAt }),
+  });
+  await startAutomatic(app);
+  assert.deepEqual(app.reloads, []);
+  assert.equal(app.session.attentionActivity[1], now);
+});
+
+for (const invalid of [-1, null, "old", Number.NaN, Number.POSITIVE_INFINITY, "future"]) {
+  test(`invalid session activity (${String(invalid)}) receives a conservative new baseline`, async () => {
+    const now = Date.now();
+    const app = setup({
+      tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }], now,
+      session: { attentionActivity: { 1: invalid === "future" ? now + 1 : invalid } },
+    });
+    await startAutomatic(app);
+    assert.equal(app.session.attentionActivity[1], now);
+    assert.deepEqual(app.reloads, []);
+  });
+}
+
+test("malformed activity reports and wrong frames or views cannot change session history", async () => {
+  const tab = { id: 1, url: REVIEW_URL, active: true, status: "complete" };
+  const app = setup({ tabs: [tab] });
+  await app.message(report("reviews", 2), { tab });
+  const before = structuredClone(app.session);
+  const verified = structuredClone(app.storage.attentionQueuesV2);
+  await app.clock.advance(1000);
+  const now = app.clock.now();
+  for (const [message, sender] of [
+    [click(now + 1), { tab, frameId: 0 }],
+    [click(-1), { tab, frameId: 0 }],
+    [click(null), { tab, frameId: 0 }],
+    [click("today"), { tab, frameId: 0 }],
+    [click(now, "approved"), { tab, frameId: 0 }],
+    [click(now), { tab, frameId: 2 }],
+    [click(now), { tab: { id: 2, url: "https://github.com/other" }, frameId: 0 }],
+    [click(now), { tab: { url: REVIEW_URL }, frameId: 0 }],
+  ]) {
+    const response = await app.message(message, sender);
+    assert.match(response.error, /invalid/);
+  }
+  assert.deepEqual(app.session, before);
+  assert.deepEqual(app.storage.attentionQueuesV2, verified);
+});
+
+for (const malformed of ["missing", "wrong kind", "stale", "future", "missing click", "future click", "rejected"]) {
+  test(`an old session cannot authorize active reload with a ${malformed} live activity reply`, async () => {
+    const now = Date.now();
+    const app = setup({
+      tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }], now,
+      session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+      activityReply: (_id, message, _frame, observedAt) => {
+        if (malformed === "rejected") throw new Error("Missing content script");
+        if (malformed === "missing") return undefined;
+        if (malformed === "wrong kind") return { kind: "approved", lastClickAt: null, observedAt };
+        if (malformed === "stale") return { kind: message.kind, lastClickAt: null, observedAt: observedAt - 1 };
+        if (malformed === "future") return { kind: message.kind, lastClickAt: null, observedAt: observedAt + 1 };
+        if (malformed === "missing click") return { kind: message.kind, observedAt };
+        return { kind: message.kind, lastClickAt: observedAt + 1, observedAt };
+      },
+    });
+    await startAutomatic(app);
+    assert.deepEqual(app.reloads, []);
+    await app.message({ type: "attention:refresh" });
+    assert.deepEqual(app.reloads, [1]);
+  });
+}
+
+test("a live activity request that never responds times out without reloading the active tab", async () => {
+  const now = Date.now();
+  const app = setup({
+    tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }], now,
+    session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+    activityReply: () => new Promise(() => {}),
+  });
+  await app.clock.advance(5000);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await waitFor(() => app.clock.pending().length > 0);
+  app.clock.jump(1000);
+  assert.equal(await app.clock.fireNext(), true);
+  assert.deepEqual(app.reloads, []);
+  assert.deepEqual(app.clock.pending(), []);
+  await app.message({ type: "attention:refresh" });
+  assert.deepEqual(app.reloads, [1]);
+});
+
+test("a click arriving during a live activity request immediately prevents automatic reload", async () => {
+  const now = Date.now();
+  let respond;
+  const tab = { id: 1, url: REVIEW_URL, active: true, status: "complete" };
+  const app = setup({
+    tabs: [tab], now, session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+    activityReply: (_id, message, _frame, observedAt) => new Promise((resolve) => {
+      respond = () => resolve({ kind: message.kind, lastClickAt: null, observedAt });
+    }),
+  });
+  await app.clock.advance(5000);
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await waitFor(() => respond !== undefined);
+  const response = new Promise((resolve) => app.chrome.runtime.onMessage.emit(click(app.clock.now()), { tab, frameId: 0 }, resolve));
+  respond();
+  assert.equal((await response).accepted, true);
+  await app.idle();
+  assert.deepEqual(app.reloads, []);
+  assert.equal(app.session.attentionActivity[1], app.clock.now());
+});
+
+test("a click during activity persistence cannot be overwritten by an older in-flight checkpoint", async () => {
+  const now = Date.now();
+  let persistHeld;
+  let releasePersist;
+  let holdSave = false;
+  const held = new Promise((resolve) => { persistHeld = resolve; });
+  const released = new Promise((resolve) => { releasePersist = resolve; });
+  const tab = { id: 1, url: REVIEW_URL, active: true, status: "complete" };
+  const app = setup({
+    tabs: [tab], now, session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS - 10000 } },
+    activityReply: (_id, message, _frame, observedAt) => ({ kind: message.kind, lastClickAt: now - core.ACTIVE_IDLE_MS - 5000, observedAt }),
+    beforeSessionSave: async () => {
+      if (!holdSave) return;
+      holdSave = false;
+      persistHeld();
+      await released;
+    },
+  });
+  await app.clock.advance(5000);
+  holdSave = true;
+  app.chrome.alarms.onAlarm.emit({ name: "attention:refresh" });
+  await held;
+  const response = new Promise((resolve) => app.chrome.runtime.onMessage.emit(click(app.clock.now()), { tab, frameId: 0 }, resolve));
+  releasePersist();
+  assert.equal((await response).accepted, true);
+  await app.idle();
+  assert.deepEqual(app.reloads, []);
+  assert.equal(app.session.attentionActivity[1], app.clock.now());
+});
+
+test("session storage failure blocks automatic reloads but not an explicit Check now", async () => {
+  const now = Date.now();
+  const tabs = [
+    { id: 1, url: REVIEW_URL, active: true, status: "complete" },
+    { id: 2, url: APPROVED_URL, active: false, status: "complete" },
+  ];
+  const app = setup({
+    tabs, now, session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS, 2: now - core.ACTIVE_IDLE_MS } },
+    beforeSessionSave: async () => { throw new Error("Session storage unavailable"); },
+  });
+  await startAutomatic(app);
+  assert.deepEqual(app.reloads, []);
+  await app.message({ type: "attention:refresh" });
+  assert.deepEqual(app.reloads, [1, 2]);
+});
+
+test("unreadable session history starts a new grace period instead of trusting an old timestamp", async () => {
+  const now = Date.now();
+  const app = setup({
+    tabs: [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }], now,
+    session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+    beforeSessionGet: async () => { throw new Error("Cannot read session history"); },
+  });
+  await startAutomatic(app);
+  assert.deepEqual(app.reloads, []);
+  assert.equal(app.session.attentionActivity[1], now);
+});
+
+for (const change of ["navigation", "loading", "closure"]) {
+  test(`a tab's ${change} during the live idle check prevents automatic reload`, async () => {
+    const now = Date.now();
+    const tabs = [{ id: 1, url: REVIEW_URL, active: true, status: "complete" }];
+    const app = setup({
+      tabs, now, session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+      activityReply: (_id, message, _frame, observedAt) => {
+        if (change === "navigation") tabs[0].url = "https://github.com/login";
+        if (change === "loading") tabs[0].status = "loading";
+        if (change === "closure") tabs.splice(0, 1);
+        return { kind: message.kind, lastClickAt: null, observedAt };
+      },
+    });
+    await startAutomatic(app);
+    assert.deepEqual(app.reloads, []);
+  });
+}
+
+test("an inactive tab becoming active at the final browser check requires its own idle approval", async () => {
+  let gets = 0;
+  const now = Date.now();
+  const app = setup({
+    tabs: [{ id: 1, url: REVIEW_URL, active: false, status: "complete" }], now,
+    session: { attentionActivity: { 1: now - core.ACTIVE_IDLE_MS } },
+    beforeGet: (_id, tabs) => { if (++gets === 2) tabs[0].active = true; },
+  });
+  await startAutomatic(app);
+  assert.deepEqual(app.reloads, []);
+  assert.deepEqual(app.activityRequests, []);
+});
+
+test("closing or leaving watched tabs purges their session activity records", async () => {
+  const tabs = [
+    { id: 1, url: REVIEW_URL, active: true, status: "complete" },
+    { id: 2, url: APPROVED_URL, active: false, status: "complete" },
+  ];
+  const app = setup({ tabs });
+  await app.idle();
+  assert.deepEqual(Object.keys(app.session.attentionActivity), ["1", "2"]);
+  tabs.splice(0, 1);
+  app.chrome.tabs.onRemoved.emit(1);
+  await app.idle();
+  assert.deepEqual(Object.keys(app.session.attentionActivity), ["2"]);
+  tabs[0].url = "https://github.com/other";
+  app.chrome.tabs.onUpdated.emit(2, { url: tabs[0].url }, tabs[0]);
+  await app.idle();
+  assert.deepEqual(app.session.attentionActivity, {});
 });

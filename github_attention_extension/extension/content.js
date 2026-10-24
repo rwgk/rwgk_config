@@ -15,6 +15,7 @@
     let lastReport = null;
     let lastRead = null;
     let lastVerifiedAt = null;
+    let lastClickAt = null;
     let staleShown = false;
     let timer = null;
     let graceTimer = null;
@@ -140,6 +141,24 @@
       check();
     }
 
+    function clicked(event) {
+      if (disposed || !event.isTrusted) return;
+      const kind = core.classifyUrl(browserWindow.location.href);
+      if (!kind) return;
+      // Store only when an actual mouse press occurred, never its target.
+      // Loading/rechecking a page must not count as human activity or renew
+      // the separate queue-verification timestamp.
+      lastClickAt = now();
+      try {
+        const result = chrome.runtime.sendMessage({
+          type: "attention:activity", kind, lastClickAt,
+        });
+        if (result && result.catch) result.catch(() => {});
+      } catch (_) {
+        // The background can recover this timestamp through activity-state.
+      }
+    }
+
     const observer = new browserWindow.MutationObserver((mutations) => {
       // Ignore changes made to our own icon, avoiding a self-triggering loop.
       const external = mutations.some((mutation) => {
@@ -159,6 +178,8 @@
 
     const events = ["popstate", "hashchange", "turbo:load", "pjax:end"];
     for (const event of events) browserWindow.addEventListener(event, navigated);
+    // Capture all mouse buttons even when GitHub stops propagation later.
+    document.addEventListener("mousedown", clicked, true);
     // GitHub can replace history without dispatching popstate.
     const urlTimer = browserWindow.setInterval(() => {
       if (browserWindow.location.href !== lastUrl) {
@@ -168,8 +189,15 @@
         check();
       }
     }, 1000);
-    const onMessage = (message) => {
+    const onMessage = (message, _sender, sendResponse) => {
       if (message && message.type === "attention:check") check();
+      if (message && message.type === "attention:activity-state") {
+        const kind = core.classifyUrl(browserWindow.location.href);
+        // Respond synchronously: the background may be awaiting this reply
+        // before deciding whether it is safe to reload the selected tab.
+        sendResponse(!disposed && kind && kind === message.kind
+          ? { kind, lastClickAt, observedAt: now() } : null);
+      }
     };
     chrome.runtime.onMessage.addListener(onMessage);
     check();
@@ -182,6 +210,7 @@
         if (graceTimer !== null) browserWindow.clearTimeout(graceTimer);
         browserWindow.clearInterval(urlTimer);
         for (const event of events) browserWindow.removeEventListener(event, navigated);
+        document.removeEventListener("mousedown", clicked, true);
         chrome.runtime.onMessage.removeListener(onMessage);
         removeBadge();
       },

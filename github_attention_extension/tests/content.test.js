@@ -19,6 +19,18 @@ function harness(initialState = { status: "ok", count: 3, message: "" }, initial
   const timers = new Map();
   const reports = [];
   const listeners = new Map();
+  const documentListeners = new Map();
+  let messageListener = null;
+  const addDocumentListener = document.addEventListener.bind(document);
+  const removeDocumentListener = document.removeEventListener.bind(document);
+  document.addEventListener = (event, callback, capture) => {
+    documentListeners.set(event, { callback, capture });
+    addDocumentListener(event, callback, capture);
+  };
+  document.removeEventListener = (event, callback, capture) => {
+    if (documentListeners.get(event)?.callback === callback) documentListeners.delete(event);
+    removeDocumentListener(event, callback, capture);
+  };
   let nextTimer = 0;
   const window = {
     location: { href: initialUrl },
@@ -38,17 +50,30 @@ function harness(initialState = { status: "ok", count: 3, message: "" }, initial
   const chrome = { runtime: {
     getURL: (path) => `chrome-extension://test/${path}`,
     sendMessage(message) { reports.push(message); return Promise.resolve(); },
-    onMessage: { addListener() {}, removeListener() {} },
+    onMessage: {
+      addListener(callback) { messageListener = callback; },
+      removeListener(callback) { if (messageListener === callback) messageListener = null; },
+    },
   } };
   const controller = createController(document, window, chrome, {
     ...core, readDocument: () => ({ ...state }),
   });
   return {
-    document, window, reports, timers, controller,
+    document, window, reports, timers, controller, documentListeners,
     setState(next) { state = next; },
     advance(ms) { timestamp += ms; },
     interval() { intervalCallback(); },
     event(name) { listeners.get(name)(); },
+    // DOM-created events cannot set isTrusted. Invoke only the captured
+    // document listener with a browser-like event to exercise both paths.
+    documentEvent(name, event = { isTrusted: true, button: 0 }) {
+      documentListeners.get(name)?.callback(event);
+    },
+    message(message) {
+      let response;
+      const returned = messageListener?.(message, {}, (value) => { response = value; });
+      return { response, returned };
+    },
     mutation(mutations) { observerCallback(mutations); },
     runTimers() {
       for (const [id, timer] of [...timers]) {
@@ -258,6 +283,101 @@ test("hash-only navigation does not invalidate a loaded queue", () => {
   assert.equal(h.reports.length, 1);
   assertIcon(h, "clear");
   h.controller.dispose();
+});
+
+for (const kind of core.KINDS) {
+  test(`${kind}: trusted presses of every mouse button report activity without reporting click details`, () => {
+    const h = harness({ status: "ok", count: 0, message: "" }, core.URLS[kind]);
+    assert.equal(h.documentListeners.get("mousedown").capture, true);
+    assert.deepEqual(h.message({ type: "attention:activity-state", kind }), {
+      response: { kind, lastClickAt: null, observedAt: 1000 }, returned: undefined,
+    });
+    for (const button of [0, 1, 2]) {
+      h.advance(100);
+      h.documentEvent("mousedown", { isTrusted: true, button, target: { privateDetails: "not recorded" } });
+      const timestamp = 1100 + button * 100;
+      assert.deepEqual(h.reports.at(-1), { type: "attention:activity", kind, lastClickAt: timestamp });
+      assert.deepEqual(h.message({ type: "attention:activity-state", kind }), {
+        response: { kind, lastClickAt: timestamp, observedAt: timestamp }, returned: undefined,
+      });
+    }
+    assert.equal(h.reports.filter((report) => report.type === "attention:report").length, 1);
+    assertIcon(h, "clear", kind);
+    h.controller.dispose();
+  });
+}
+
+test("untrusted presses, scrolling, keyboard activity, and mouse movement do not count as clicks", () => {
+  const h = harness();
+  h.advance(10000);
+  h.documentEvent("mousedown", { isTrusted: false, button: 0 });
+  for (const event of ["click", "wheel", "scroll", "keydown", "mousemove", "pointermove"]) {
+    h.documentEvent(event, { isTrusted: true });
+  }
+  assert.equal(h.reports.length, 1);
+  assert.deepEqual(h.message({ type: "attention:activity-state", kind: "reviews" }).response,
+    { kind: "reviews", lastClickAt: null, observedAt: 11000 });
+  h.controller.dispose();
+});
+
+test("click activity never freshens a verified queue or clears its stale indication", () => {
+  const h = harness({ status: "ok", count: 0, message: "" });
+  h.advance(core.STALE_MS - 1);
+  h.documentEvent("mousedown");
+  h.advance(1);
+  h.interval();
+  assertIcon(h, "error");
+  assert.match(h.reports.at(-1).state.message, /stale/i);
+  h.advance(1000);
+  h.documentEvent("mousedown");
+  h.controller.check();
+  assertIcon(h, "error");
+  assert.equal(h.reports.filter((report) => report.type === "attention:report").length, 2);
+  h.controller.dispose();
+});
+
+test("checks and fresh documents do not invent click activity", () => {
+  const h = harness();
+  h.documentEvent("mousedown");
+  h.advance(1000);
+  h.message({ type: "attention:check" });
+  assert.equal(h.message({ type: "attention:activity-state", kind: "reviews" }).response.lastClickAt, 1000);
+  h.controller.dispose();
+  const reloaded = harness();
+  assert.equal(reloaded.message({ type: "attention:activity-state", kind: "reviews" }).response.lastClickAt, null);
+  reloaded.controller.dispose();
+});
+
+test("activity queries use the live URL and ignore unwatched or mismatched queue requests", () => {
+  const h = harness();
+  assert.equal(h.message({ type: "attention:activity-state", kind: "mentions" }).response, null);
+  h.window.location.href = core.URLS.mentions;
+  // Neither a route timer nor a queue check must run before this reply.
+  assert.equal(h.message({ type: "attention:activity-state", kind: "reviews" }).response, null);
+  assert.deepEqual(h.message({ type: "attention:activity-state", kind: "mentions" }).response,
+    { kind: "mentions", lastClickAt: null, observedAt: 1000 });
+  h.advance(1000);
+  h.documentEvent("mousedown");
+  assert.deepEqual(h.reports.at(-1), { type: "attention:activity", kind: "mentions", lastClickAt: 2000 });
+  h.window.location.href = "https://github.com/notifications?query=reason%3Aparticipating";
+  const count = h.reports.length;
+  h.advance(1000);
+  h.documentEvent("mousedown");
+  assert.equal(h.reports.length, count);
+  assert.equal(h.message({ type: "attention:activity-state", kind: "mentions" }).response, null);
+  h.controller.dispose();
+});
+
+test("disposing the controller removes the captured click and message listeners", () => {
+  const h = harness();
+  const capturedClick = h.documentListeners.get("mousedown").callback;
+  h.controller.dispose();
+  assert.equal(h.documentListeners.has("mousedown"), false);
+  h.documentEvent("mousedown");
+  capturedClick({ isTrusted: true, button: 0 });
+  assert.equal(h.reports.length, 1);
+  assert.deepEqual(h.message({ type: "attention:activity-state", kind: "reviews" }),
+    { response: undefined, returned: undefined });
 });
 
 test("popup treats zero as clear only for current successful checks", () => {
