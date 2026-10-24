@@ -1,8 +1,8 @@
 {
   "name": "github-attention-tabs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
-  "description": "Local Chrome count indicators for GitHub review requests, approved PRs, mentions, and the notifications inbox",
+  "description": "Local Chrome queue-letter favicons with count badges for GitHub review requests, approved PRs, mentions, and notifications",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check.js"

@@ -38,8 +38,10 @@ Disable or remove the extension there to stop monitoring; reload the tabs to rem
 
 ## Indicators and refresh behavior
 
-- **Red 1–9:** that many PRs or notification threads are waiting in the view.
-- **Red X:** ten or more items are waiting.
+Each favicon keeps its queue character visible: **R** for Review requests, **A** for Approved PRs, **M** for Mentions, and **\*** for All notifications. A small top-right indicator shows its current state:
+
+- **White 1–9 on a red badge:** that many PRs or notification threads are waiting in the view.
+- **White X on a red badge:** ten or more items are waiting.
 - **Pale-green dot:** the extension is watching this view and successfully verified that the queue is empty. This confirms a recent successful check, not just that the extension is installed. It changes to amber if the loaded page becomes stale.
 - **Amber exclamation mark:** loading, signed out on a queue page, stale, or unrecognized page/error. This is not an empty queue. If GitHub redirects to a login page or Chrome shows a network-error page, that page may have its normal favicon instead; the extension popup reports the missing/failed watched view. Do not interpret that other page's favicon as a verified-empty queue.
 
@@ -77,8 +79,8 @@ For an occasional authoritative check of outstanding individual review requests,
 
 This version was tested with local DOM fixtures and mocked Chrome APIs on headless Ubuntu, **not with your signed-in Mac browser**. GitHub's private notifications markup may differ; an unrecognized layout deliberately produces amber, never a false "clear".
 
-1. For a nonempty queue, confirm its favicon shows a red number (1–9) or X (10+) after loading; compare the popup with the visible list. Notification rows across different repository groups should all count.
-2. For an empty queue, confirm the pale-green dot appears and the popup says "Watching — queue empty" with a recent verification time. No configuration is needed beyond opening the four exact views in your signed-in profile and reloading them after installation.
+1. Check the pinned tabs at their normal size on the Mac: **R / A / M / \*** should remain visible, with a small top-right badge. For a nonempty queue, confirm the white number (1–9) or X (10+) on red is legible; compare the popup with the visible list. Notification rows across different repository groups should all count.
+2. For an empty queue, confirm the queue character remains visible beside the pale-green dot and the popup says "Watching — queue empty" with a recent verification time. No configuration is needed beyond opening the four exact views in your signed-in profile and reloading them after installation.
 3. Switch to Slack or another tab. After about two minutes, confirm the four watched tabs have refreshed without being activated.
 4. Keep one queue active through an alarm: it should not reload. **Check now** should reload it when you explicitly click that button.
 5. If a suitable notification is available, mark it Done in Review requests or Mentions, then reload All notifications and confirm it is absent there too. The corresponding PR may still appear in a current-state search.

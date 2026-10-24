@@ -6,6 +6,10 @@ const { createController } = require("../extension/content.js");
 const { describeQueue } = require("../extension/popup.js");
 const core = require("../extension/core.js");
 
+function assertIcon(h, state, kind = "reviews") {
+  assert.equal(h.icon().href, `chrome-extension://test/icons/${kind}-${state}.svg`);
+}
+
 function harness(initialState = { status: "ok", count: 3, message: "" }, initialUrl = core.URLS.reviews) {
   const { document } = parseHTML('<!doctype html><html><head><title>GitHub original title</title><link rel="icon" href="original.svg"></head><body><main></main></body></html>');
   let timestamp = 1000;
@@ -55,41 +59,45 @@ function harness(initialState = { status: "ok", count: 3, message: "" }, initial
   };
 }
 
-test("content shows a red count for nonempty and green for verified zero without changing site icons, title, or body", () => {
+test("content shows a queue-specific red badge for nonempty and green for verified zero without changing site icons, title, or body", () => {
   const h = harness();
-  assert.match(h.icon().href, /count-3\.svg$/);
+  assertIcon(h, "count-3");
   assert.equal(h.reports[0].state.count, 3);
   assert.equal(h.document.title, "GitHub original title");
   assert.equal(h.document.body.innerHTML, "<main></main>");
   h.setState({ status: "ok", count: 0, message: "" });
   h.controller.check();
-  assert.match(h.icon().href, /clear\.svg$/);
+  assertIcon(h, "clear");
   assert.equal(h.document.querySelector('link[rel="icon"]').href, "original.svg");
   h.controller.dispose();
   assert.equal(h.icon(), null);
   assert.equal(h.document.querySelector('link[rel="icon"]').href, "original.svg");
 });
 
-for (const count of [...Array.from({ length: 11 }, (_, i) => i), 99, Number.MAX_SAFE_INTEGER]) {
-  test(`verified count ${count} uses the correct numbered favicon`, () => {
-    const h = harness({ status: "ok", count, message: "" });
-    const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
-    assert.equal(h.icon().href, `chrome-extension://test/icons/${icon}.svg`);
+for (const kind of core.KINDS) {
+  for (const count of [...Array.from({ length: 11 }, (_, i) => i), 99, Number.MAX_SAFE_INTEGER]) {
+    test(`${kind}: verified count ${count} uses the correct queue-specific badge`, () => {
+      const h = harness({ status: "ok", count, message: "" }, core.URLS[kind]);
+      const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
+      assertIcon(h, icon, kind);
+      h.controller.dispose();
+    });
+  }
+
+  test(`${kind}: count transitions preserve the queue identity across one-digit, ten-plus, and zero boundaries`, () => {
+    const h = harness({ status: "ok", count: 8, message: "" }, core.URLS[kind]);
+    assertIcon(h, "count-8", kind);
+    for (const count of [9, 10, 11, 1, 0]) {
+      h.setState({ status: "ok", count, message: "" });
+      h.controller.check();
+      const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
+      assertIcon(h, icon, kind);
+      assert.equal(h.reports.at(-1).state.count, count);
+      assert.equal(h.reports.at(-1).kind, kind);
+    }
     h.controller.dispose();
   });
 }
-
-test("count changes update the favicon across one-digit, ten-plus, and zero boundaries", () => {
-  const h = harness({ status: "ok", count: 8, message: "" });
-  for (const count of [9, 10, 11, 1, 0]) {
-    h.setState({ status: "ok", count, message: "" });
-    h.controller.check();
-    const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
-    assert.equal(h.icon().href, `chrome-extension://test/icons/${icon}.svg`);
-    assert.equal(h.reports.at(-1).state.count, count);
-  }
-  h.controller.dispose();
-});
 
 test("all four watched queues independently display their own counts", () => {
   const kinds = ["reviews", "approved", "mentions", "notifications"];
@@ -97,44 +105,51 @@ test("all four watched queues independently display their own counts", () => {
   const queues = kinds.map((kind, i) => harness({ status: "ok", count: i + 1, message: "" }, core.URLS[kind]));
   for (const [i, h] of queues.entries()) {
     assert.equal(h.reports.at(-1).kind, kinds[i]);
-    assert.equal(h.icon().href, `chrome-extension://test/icons/count-${i + 1}.svg`);
+    assertIcon(h, `count-${i + 1}`, kinds[i]);
   }
   queues[0].setState({ status: "ok", count: 0, message: "" });
   queues[0].controller.check();
-  assert.match(queues[0].icon().href, /clear\.svg$/);
+  assertIcon(queues[0], "clear");
   for (const [i, h] of queues.entries()) {
-    if (i) assert.equal(h.icon().href, `chrome-extension://test/icons/count-${i + 1}.svg`);
+    if (i) assertIcon(h, `count-${i + 1}`, kinds[i]);
     h.controller.dispose();
   }
 });
 
-test("empty, nonempty, and empty transitions stay visible, but a stale empty queue becomes amber", () => {
-  const h = harness({ status: "ok", count: 0, message: "" });
-  assert.match(h.icon().href, /clear\.svg$/);
-  h.setState({ status: "ok", count: 2, message: "" });
-  h.controller.check();
-  assert.match(h.icon().href, /count-2\.svg$/);
-  h.setState({ status: "ok", count: 0, message: "" });
-  h.controller.check();
-  assert.match(h.icon().href, /clear\.svg$/);
-  h.advance(core.STALE_MS);
-  h.interval();
-  assert.match(h.icon().href, /error\.svg$/);
-  assert.equal(h.reports.at(-1).state.status, "error");
-  assert.match(h.reports.at(-1).state.message, /stale/i);
-  h.controller.dispose();
-});
+for (const kind of core.KINDS) {
+  for (const count of [0, 1, 9, 10]) {
+    test(`${kind}: stale count ${count} becomes amber without losing queue identity, then recovers`, () => {
+      const h = harness({ status: "ok", count, message: "" }, core.URLS[kind]);
+      assertIcon(h, count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`, kind);
+      h.advance(core.STALE_MS);
+      h.interval();
+      assertIcon(h, "error", kind);
+      assert.equal(h.reports.at(-1).state.status, "error");
+      assert.match(h.reports.at(-1).state.message, /stale/i);
+      h.setState({ status: "ok", count: count + 1, message: "" });
+      h.controller.check();
+      assertIcon(h, `count-${count + 1 < 10 ? count + 1 : "x"}`, kind);
+      assert.equal(h.reports.at(-1).kind, kind);
+      h.controller.dispose();
+    });
+  }
 
-test("unknown page is amber during loading grace and remains amber on final error", () => {
-  const h = harness({ status: "error", count: null, message: "Unknown layout" });
-  assert.match(h.icon().href, /error\.svg$/);
-  assert.equal(h.reports[0].state.status, "loading");
-  h.advance(15001);
-  h.runTimers();
-  assert.equal(h.reports.at(-1).state.status, "error");
-  assert.equal(h.reports.at(-1).state.message, "Unknown layout");
-  h.controller.dispose();
-});
+  test(`${kind}: unknown page is amber during loading grace and final error, then recovers with its own badge`, () => {
+    const h = harness({ status: "error", count: null, message: "Unknown layout" }, core.URLS[kind]);
+    assertIcon(h, "error", kind);
+    assert.equal(h.reports[0].state.status, "loading");
+    h.advance(15001);
+    h.runTimers();
+    assertIcon(h, "error", kind);
+    assert.equal(h.reports.at(-1).state.status, "error");
+    assert.equal(h.reports.at(-1).state.message, "Unknown layout");
+    h.setState({ status: "ok", count: 0, message: "" });
+    h.controller.check();
+    assertIcon(h, "clear", kind);
+    assert.equal(h.reports.at(-1).kind, kind);
+    h.controller.dispose();
+  });
+}
 
 test("identical DOM rereads neither report nor postpone stale indication", () => {
   const h = harness({ status: "ok", count: 0, message: "" });
@@ -143,11 +158,11 @@ test("identical DOM rereads neither report nor postpone stale indication", () =>
   assert.equal(h.reports.length, 1);
   h.advance(core.STALE_MS - 120000);
   h.interval();
-  assert.match(h.icon().href, /error\.svg$/);
+  assertIcon(h, "error");
   assert.match(h.reports.at(-1).state.message, /stale/i);
   h.setState({ status: "ok", count: 1, message: "" });
   h.controller.check();
-  assert.match(h.icon().href, /count-1\.svg$/);
+  assertIcon(h, "count-1");
   assert.equal(h.reports.at(-1).state.status, "ok");
   h.controller.dispose();
 });
@@ -155,7 +170,7 @@ test("identical DOM rereads neither report nor postpone stale indication", () =>
 for (const count of [0, 3]) {
   test(`leaving the strict watched URL clears the ${count ? "red" : "green"} override and prevents further reports`, () => {
     const h = harness({ status: "ok", count, message: "" });
-    assert.match(h.icon().href, count ? /count-3\.svg$/ : /clear\.svg$/);
+    assertIcon(h, count ? "count-3" : "clear");
     h.window.location.href = "https://github.com/notifications?query=reason%3Aparticipating";
     h.interval();
     assert.equal(h.icon(), null);
@@ -170,11 +185,11 @@ for (const count of [0, 3]) {
 for (const count of [0, 4, 12]) {
   test(`an error retaining count ${count} is amber during loading and after the grace period`, () => {
     const h = harness({ status: "error", count, message: "Unverified queue" });
-    assert.match(h.icon().href, /error\.svg$/);
+    assertIcon(h, "error");
     assert.equal(h.reports.at(-1).state.status, "loading");
     h.advance(15001);
     h.runTimers();
-    assert.match(h.icon().href, /error\.svg$/);
+    assertIcon(h, "error");
     assert.equal(h.reports.at(-1).state.status, "error");
     h.controller.dispose();
   });
@@ -183,7 +198,7 @@ for (const count of [0, 4, 12]) {
 for (const count of [null, -1, 1.5, "3", Number.MAX_SAFE_INTEGER + 1]) {
   test(`an invalid successful count ${String(count)} cannot display a clear or numbered favicon`, () => {
     const h = harness({ status: "ok", count, message: "" });
-    assert.match(h.icon().href, /error\.svg$/);
+    assertIcon(h, "error");
     h.controller.dispose();
   });
 }
@@ -206,7 +221,7 @@ test("in-page watched-query navigation rejects old empty DOM until a full reload
   assert.equal(h.reports.length, 2);
   assert.equal(h.reports.at(-1).state.status, "error");
   assert.match(h.reports.at(-1).state.message, /in-page navigation/);
-  assert.match(h.icon().href, /error\.svg$/);
+  assertIcon(h, "error");
   h.window.location.href = core.URLS.reviews;
   h.interval();
   assert.equal(h.reports.at(-1).state.status, "error");
@@ -221,7 +236,7 @@ test("unchanged-URL navigation events do not renew successful-check timestamps",
   assert.equal(h.reports.length, 1);
   h.advance(core.STALE_MS - 120000);
   h.interval();
-  assert.match(h.icon().href, /error\.svg$/);
+  assertIcon(h, "error");
   h.controller.dispose();
 });
 
@@ -232,7 +247,7 @@ test("entering a watched filter from an unrelated view cannot trust that view's 
   h.interval();
   assert.equal(h.reports.at(-1).state.status, "error");
   assert.equal(h.reports.at(-1).state.count, null);
-  assert.match(h.icon().href, /error\.svg$/);
+  assertIcon(h, "error", "mentions");
   h.controller.dispose();
 });
 
@@ -241,7 +256,7 @@ test("hash-only navigation does not invalidate a loaded queue", () => {
   h.window.location.href = `${core.URLS.reviews}#search-results`;
   h.event("hashchange");
   assert.equal(h.reports.length, 1);
-  assert.match(h.icon().href, /clear\.svg$/);
+  assertIcon(h, "clear");
   h.controller.dispose();
 });
 

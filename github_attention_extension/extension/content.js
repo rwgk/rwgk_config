@@ -54,7 +54,8 @@
       const verified = state.status === "ok" && Number.isSafeInteger(state.count) && state.count >= 0;
       const icon = !verified ? "error" : state.count === 0 ? "clear"
         : `count-${state.count < 10 ? state.count : "x"}`;
-      const href = chrome.runtime.getURL(`icons/${icon}.svg`);
+      // Each packaged icon keeps this queue's letter visible under its badge.
+      const href = chrome.runtime.getURL(`icons/${currentKind}-${icon}.svg`);
       if (!badge || !badge.isConnected) {
         badge = document.createElement("link");
         badge.id = ICON_ID;
