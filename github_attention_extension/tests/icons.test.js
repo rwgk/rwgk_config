@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {parseHTML} = require("linkedom");
-const {renderIcon} = require("../scripts/render-icons.js");
+const {ICON_STATES, renderIcon} = require("../scripts/render-icons.js");
 
 const QUEUES = {reviews: "R", approved: "A", mentions: "M", notifications: "*"};
 const COUNTS = [...Array.from({length: 9}, (_, index) => String(index + 1)), "X"];
@@ -13,7 +13,7 @@ function attributes(element) {
   return Object.fromEntries([...element.attributes].map(({name, value}) => [name, value]));
 }
 
-function assertBaseUnchanged(svg, glyph) {
+function assertBaseLayout(svg, glyph) {
   assert.equal(svg.getAttribute("width"), "32");
   assert.equal(svg.getAttribute("height"), "32");
   assert.equal(svg.getAttribute("viewBox"), "0 0 32 32");
@@ -23,7 +23,7 @@ function assertBaseUnchanged(svg, glyph) {
   const queue = svg.querySelector("#queue-glyph");
   assert.equal(queue.textContent, glyph);
   assert.deepEqual(attributes(queue), {
-    id: "queue-glyph", x: "11", y: glyph === "*" ? "33" : "28",
+    id: "queue-glyph", x: "11", y: glyph === "*" ? "38" : "28",
     "font-family": "Arial, Helvetica, sans-serif", "font-size": glyph === "M" ? "23" : glyph === "*" ? "32" : "25",
     "font-weight": "700", "text-anchor": "middle", fill: "white",
   });
@@ -38,7 +38,7 @@ for (const [kind, glyph] of Object.entries(QUEUES)) {
     test(`${kind} count ${count}: the red badge and number are 1.3x larger without clipping or changing the queue glyph`, () => {
       const state = count === "X" ? "count-x" : `count-${count}`;
       const svg = parseHTML(renderIcon(kind, state)).document.querySelector("svg");
-      assertBaseUnchanged(svg, glyph);
+      assertBaseLayout(svg, glyph);
       const circle = svg.querySelector("circle");
       assert.deepEqual(attributes(circle), {
         cx: "22", cy: "10", r: "9.1", fill: "#cf222e", stroke: "white", "stroke-width": "1.5",
@@ -67,7 +67,7 @@ for (const [kind, glyph] of Object.entries(QUEUES)) {
   for (const state of ["clear", "error"]) {
     test(`${kind} ${state}: the green or amber badge retains its original geometry`, () => {
       const svg = parseHTML(renderIcon(kind, state)).document.querySelector("svg");
-      assertBaseUnchanged(svg, glyph);
+      assertBaseLayout(svg, glyph);
       assert.deepEqual(attributes(svg.querySelector("circle")), {
         cx: "24", cy: "8", r: "7", fill: state === "clear" ? "#b7e4c7" : "#d4a72c", stroke: "white", "stroke-width": "1.5",
       });
@@ -84,3 +84,30 @@ for (const [kind, glyph] of Object.entries(QUEUES)) {
     });
   }
 }
+
+test("all twelve notification variants lower only the asterisk, without shifting letters or badges", () => {
+  assert.equal(ICON_STATES.length, 12);
+  for (const state of ICON_STATES) {
+    const notification = parseHTML(renderIcon("notifications", state)).document.querySelector("svg");
+    const star = notification.querySelector("#queue-glyph");
+    assert.equal(star.textContent, "*");
+    assert.equal(star.getAttribute("y"), "38");
+    assert.equal(star.getAttribute("x"), "11");
+    assert.equal(star.getAttribute("font-size"), "32");
+    for (const kind of ["reviews", "approved", "mentions"]) {
+      const letterIcon = parseHTML(renderIcon(kind, state)).document.querySelector("svg");
+      assert.equal(letterIcon.querySelector("#queue-glyph").getAttribute("y"), "28");
+      assert.deepEqual(attributes(notification.querySelector("rect")), attributes(letterIcon.querySelector("rect")));
+      assert.deepEqual(attributes(notification.querySelector("circle")), attributes(letterIcon.querySelector("circle")));
+      const notificationBadge = notification.querySelector("#badge-glyph");
+      const letterBadge = letterIcon.querySelector("#badge-glyph");
+      if (state === "clear") {
+        assert.equal(notificationBadge, null);
+        assert.equal(letterBadge, null);
+      } else {
+        assert.deepEqual(attributes(notificationBadge), attributes(letterBadge));
+        assert.equal(notificationBadge.textContent, letterBadge.textContent);
+      }
+    }
+  }
+});

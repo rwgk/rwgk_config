@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GitHub Attention Tabs",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Queue-letter favicons with count badges for GitHub review requests, approved PRs, mentions, and all notifications.",
   "minimum_chrome_version": "120",
   "permissions": ["alarms", "storage"],
