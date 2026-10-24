@@ -10,9 +10,15 @@ const TIMEOUT_ALARM = "attention:timeout";
 // never be reused as verified results for the new Done-based inbox views.
 const STORAGE_KEY = "attentionQueuesV2";
 const CHECK_TIMEOUT_MS = 60_000;
+const RELOAD_GAP_MS = 5_000;
 const trackedTabs = new Map();
 let queues = Object.fromEntries(KINDS.map((kind) => [kind, emptyQueue()]));
 let operations = Promise.resolve();
+let automaticWave = null;
+let automaticTimer = null;
+// A previous worker could have dispatched a reload just before shutting down.
+// This startup guard preserves spacing without persisting browser tab IDs.
+let nextAutomaticReloadAt = Date.now() + RELOAD_GAP_MS;
 
 function emptyQueue() {
   return { status: "inactive", count: null, checkedAt: null, message: "Open this GitHub view to monitor it." };
@@ -51,7 +57,98 @@ async function watchedTabs() {
   return tabs.map((tab) => ({ tab, kind: classifyUrl(tab.url) })).filter(({ kind }) => kind !== null);
 }
 
+function cancelAutomaticReloads() {
+  if (automaticTimer !== null) clearTimeout(automaticTimer);
+  automaticTimer = null;
+  automaticWave = null;
+}
+
+async function reloadWatchedTab(tabId, kind, reloadActive) {
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    setUnknown(kind, "error", "The watched GitHub tab could not be refreshed.");
+    await save();
+    return false;
+  }
+  if (classifyUrl(tab.url) !== kind) {
+    trackedTabs.delete(tabId);
+    setUnknown(kind, "error", "The watched tab left its queue; it may need GitHub sign-in.");
+    await save();
+    return false;
+  }
+  // Recheck immediately before dispatch, not when a delayed wave is planned.
+  // No await may appear between this check and the reload call.
+  if ((!reloadActive && tab.active) || tab.status === "loading") return false;
+  setUnknown(kind, "loading", "Checking this GitHub view…");
+  try {
+    await chrome.tabs.reload(tab.id);
+  } catch {
+    setUnknown(kind, "error", "The watched GitHub tab could not be refreshed.");
+  }
+  // Count failed dispatch attempts too. Waiting from API completion is
+  // conservative: actual reload starts are always at least this far apart.
+  nextAutomaticReloadAt = Date.now() + RELOAD_GAP_MS;
+  await save();
+  if (queues[kind].status === "loading") {
+    await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + CHECK_TIMEOUT_MS });
+  }
+  return true;
+}
+
+function scheduleAutomaticStep(wave) {
+  if (automaticWave !== wave) return;
+  const delay = Math.max(1, nextAutomaticReloadAt - Date.now());
+  automaticTimer = setTimeout(() => {
+    if (automaticWave !== wave) return;
+    automaticTimer = null;
+    // Only dispatch work enters the shared queue. Never hold it during the
+    // five-second gap: reports, popup requests, and timeouts must stay live.
+    void enqueue(() => dispatchAutomaticStep(wave)).catch(() => {
+      if (automaticWave === wave) cancelAutomaticReloads();
+    });
+  }, delay);
+}
+
+async function dispatchAutomaticStep(wave) {
+  if (automaticWave !== wave) return;
+  if (Date.now() < nextAutomaticReloadAt) {
+    scheduleAutomaticStep(wave);
+    return;
+  }
+  try {
+    while (wave.pending.length) {
+      const { tabId, kind } = wave.pending.shift();
+      if (!await reloadWatchedTab(tabId, kind, false)) continue;
+      if (wave.pending.length) scheduleAutomaticStep(wave);
+      else automaticWave = null;
+      return;
+    }
+    automaticWave = null;
+  } catch (error) {
+    cancelAutomaticReloads();
+    throw error;
+  }
+}
+
+async function startAutomaticReloads(matches) {
+  // A delayed alarm must not duplicate or restart a partially completed wave.
+  if (automaticWave !== null) return;
+  const pending = matches
+    .filter(({ tab }) => !tab.active && tab.status !== "loading")
+    .sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.tab.id - b.tab.id)
+    .map(({ tab, kind }) => ({ tabId: tab.id, kind }));
+  if (!pending.length) return;
+  automaticWave = { pending };
+  await dispatchAutomaticStep(automaticWave);
+  // A lost timer after worker shutdown is harmless: the next periodic alarm
+  // builds a fresh wave. Delayed callbacks always space from the last actual
+  // dispatch, rather than trying to catch up to nominal offsets in a burst.
+}
+
 async function reconcileTabs(reloadActive = false, reload = false) {
+  if (reload && reloadActive) cancelAutomaticReloads();
   let matches;
   try {
     matches = await watchedTabs();
@@ -84,36 +181,13 @@ async function reconcileTabs(reloadActive = false, reload = false) {
   }
 
   if (reload) {
+    if (!reloadActive) {
+      await startAutomaticReloads(matches);
+      return;
+    }
+    // Explicit Check now stays immediate, and supersedes pending automatic work.
     for (const { tab, kind } of matches) {
-      if (tab.active && !reloadActive) continue;
-      let currentTab;
-      try {
-        currentTab = await chrome.tabs.get(tab.id);
-      } catch {
-        setUnknown(kind, "error", "The watched GitHub tab could not be refreshed.");
-        await save();
-        continue;
-      }
-      if (classifyUrl(currentTab.url) !== kind) {
-        trackedTabs.delete(tab.id);
-        setUnknown(kind, "error", "The watched tab left its queue; it may need GitHub sign-in.");
-        await save();
-        continue;
-      }
-      // The user may have activated or navigated this tab while earlier async
-      // calls were pending. Recheck immediately before reload, with no await
-      // between this check and the reload call.
-      if ((!reloadActive && currentTab.active) || currentTab.status === "loading") continue;
-      setUnknown(kind, "loading", "Checking this GitHub view…");
-      try {
-        await chrome.tabs.reload(currentTab.id);
-      } catch {
-        setUnknown(kind, "error", "The watched GitHub tab could not be refreshed.");
-      }
-      await save();
-      if (queues[kind].status === "loading") {
-        await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + CHECK_TIMEOUT_MS });
-      }
+      await reloadWatchedTab(tab.id, kind, true);
     }
   }
 }
