@@ -49,8 +49,11 @@
 
     function showBadge(state) {
       if (!document.head) return;
-      const icon = state.status === "ok"
-        ? (state.count > 0 ? "nonempty" : "clear") : "error";
+      // Only verified counts get a number: an error may retain a previous
+      // count elsewhere, but must never make an unverified queue look current.
+      const verified = state.status === "ok" && Number.isSafeInteger(state.count) && state.count >= 0;
+      const icon = !verified ? "error" : state.count === 0 ? "clear"
+        : `count-${state.count < 10 ? state.count : "x"}`;
       const href = chrome.runtime.getURL(`icons/${icon}.svg`);
       if (!badge || !badge.isConnected) {
         badge = document.createElement("link");

@@ -24,9 +24,9 @@
       return { label: "🟡 Not verified", detail: "No valid count is available." };
     }
     return {
-      label: queue.count > 0 ? (kind === "mentions"
-        ? `🔴 ${queue.count} ${queue.count === 1 ? "thread" : "threads"} shown`
-        : `🔴 ${queue.count} ${queue.count === 1 ? "item" : "items"}`) : "🟢 Watching — queue empty",
+      label: queue.count > 0 ? (kind === "approved"
+        ? `🔴 ${queue.count} ${queue.count === 1 ? "PR" : "PRs"}`
+        : `🔴 ${queue.count} ${queue.count === 1 ? "thread" : "threads"} shown`) : "🟢 Watching — queue empty",
       detail: queue.message ? `${age} ${queue.message}` : age,
     };
   }

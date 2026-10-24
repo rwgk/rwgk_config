@@ -6,7 +6,9 @@ importScripts("core.js");
 const { KINDS, classifyUrl, REFRESH_MINUTES } = globalThis.GitHubAttention;
 const REFRESH_ALARM = "attention:refresh";
 const TIMEOUT_ALARM = "attention:timeout";
-const STORAGE_KEY = "attentionQueues";
+// v0.1 watched current review requests and unread mentions. Those counts must
+// never be reused as verified results for the new Done-based inbox views.
+const STORAGE_KEY = "attentionQueuesV2";
 const CHECK_TIMEOUT_MS = 60_000;
 const trackedTabs = new Map();
 let queues = Object.fromEntries(KINDS.map((kind) => [kind, emptyQueue()]));

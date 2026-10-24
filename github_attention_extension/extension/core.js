@@ -2,10 +2,12 @@
 (function (root) {
   "use strict";
 
-  const KINDS = ["reviews", "mentions"];
+  const KINDS = ["reviews", "approved", "mentions", "notifications"];
   const URLS = {
-    reviews: "https://github.com/search?q=is%3Apr+is%3Aopen+user-review-requested%3A%40me&type=pullrequests",
-    mentions: "https://github.com/notifications?query=is%3Aunread%20reason%3Amention",
+    reviews: "https://github.com/notifications?query=reason%3Areview-requested",
+    approved: "https://github.com/search?q=is%3Apr+is%3Aopen+author%3Arwgk+review%3Aapproved&type=pullrequests",
+    mentions: "https://github.com/notifications?query=reason%3Amention",
+    notifications: "https://github.com/notifications",
   };
   const REFRESH_MINUTES = 2;
   const STALE_MS = 6 * 60 * 1000;
@@ -29,9 +31,13 @@
     if (Array.from(p.keys()).some((key) => !allowed.includes(key))) return null;
     if (path === "/search" && p.getAll("q").length === 1 && p.getAll("type").length === 1 &&
         p.get("type") === "pullrequests" &&
-        sameTokens(p.get("q"), ["is:pr", "is:open", "user-review-requested:@me"])) return "reviews";
-    if (path === "/notifications" && p.getAll("query").length === 1 &&
-        sameTokens(p.get("query"), ["is:unread", "reason:mention"])) return "mentions";
+        sameTokens(p.get("q"), ["is:pr", "is:open", "author:rwgk", "review:approved"])) return "approved";
+    if (path === "/notifications") {
+      if (!p.has("query")) return "notifications";
+      if (p.getAll("query").length !== 1) return null;
+      if (sameTokens(p.get("query"), ["reason:review-requested"])) return "reviews";
+      if (sameTokens(p.get("query"), ["reason:mention"])) return "mentions";
+    }
     return null;
   }
 
@@ -57,16 +63,16 @@
     return true;
   }
 
-  function readReviews(document) {
+  function readApproved(document) {
     const app = document.querySelector('react-app[app-name="blackbird-search"]');
-    if (!app) return error("GitHub review-search layout not recognized.");
+    if (!app) return error("GitHub approved-PR search layout not recognized.");
     // Embedded server data may remain unchanged after React changes the query.
-    // Trust it only when it belongs to this exact personal review-request view.
+    // Trust it only when it belongs to this exact personal approved-PR view.
     const initialPath = app.getAttribute("initial-path");
     let initialUrl;
     try { initialUrl = new URL(initialPath, "https://github.com").href; } catch { return error("GitHub search route could not be verified."); }
-    if (!initialPath || classifyUrl(initialUrl) !== "reviews") {
-      return error("Search data belongs to a different view. Reload this review-request page.");
+    if (!initialPath || classifyUrl(initialUrl) !== "approved") {
+      return error("Search data belongs to a different view. Reload this approved-PR page.");
     }
     const script = app.querySelector('script[data-target="react-app.embeddedData"]');
     if (script) {
@@ -84,24 +90,45 @@
       return ok(payload.result_count);
     }
     // Fail closed instead of inferring emptiness from missing rows or a spinner.
-    return error("GitHub review-search data has not loaded or its layout changed.");
+    return error("GitHub approved-PR search data has not loaded or its layout changed.");
   }
 
-  function readMentions(document) {
+  function readNotifications(document, kind) {
     const main = document.querySelector('main, [role="main"]');
     if (!main) return error("GitHub notifications layout not recognized.");
-    const container = main.querySelector(".js-notifications-container, .js-notifications-list, .notifications-list");
-    const rows = Array.from(container?.querySelectorAll(".notifications-list-item") || []).filter((row) => visible(row, document));
-    if (rows.length) return ok(rows.length, "At least this many unread mention threads are listed (first page).");
+    // Repository grouping can produce sibling lists without a shared wrapper.
+    // One selector union collects every row once, including nested wrappers.
+    const containers = Array.from(main.querySelectorAll(".js-notifications-container, .js-notifications-list, .notifications-list"));
+    const rows = Array.from(main.querySelectorAll(
+      ".js-notifications-container .notifications-list-item, .js-notifications-list .notifications-list-item, .notifications-list .notifications-list-item"
+    )).filter((row) => visible(row, document));
+    const hasMore = Array.from(main.querySelectorAll(
+      'a[rel~="next"], a.next_page, button.next_page, .paginate-container a, .paginate-container button, .pagination a, .pagination button, [data-target="notifications-list.pagination"] a'
+    )).some((control) => {
+      if (!visible(control, document) || control.disabled || control.hasAttribute("disabled") ||
+          control.getAttribute("aria-disabled") === "true") return false;
+      const label = `${control.getAttribute("aria-label") || ""} ${text(control)}`;
+      return control.getAttribute("rel")?.split(/\s+/).includes("next") ||
+        control.classList.contains("next_page") || /\b(next|older|load more)\b/i.test(label);
+    });
+    // Small numbers must not imply an exact total if another page is known to
+    // exist. Once ten rows are proven, the favicon's X is a safe lower bound.
+    if (hasMore && rows.length < 10) return error("More notification pages exist; a count below ten could not be verified.");
+    if (rows.length) {
+      const scope = kind === "reviews" ? "review-request" : kind === "mentions" ? "mention" : "inbox";
+      return ok(rows.length, `${hasMore ? "At least " : ""}${rows.length} ${scope} threads shown on the first page; read and unread, until Done.`);
+    }
     // Empty is accepted only from a specific empty-state panel in the notifications
     // page, never from absent rows, generic body text, or the global inbox badge.
-    const explicitEmpty = main.querySelector(".js-notifications-blankslate");
-    if (container && visible(explicitEmpty, document)) return ok(0);
-    const panel = main.querySelector(".notifications-list .blankslate, .js-notifications-list .blankslate, .notifications-list-empty .blankslate");
-    const heading = panel?.querySelector("h1, h2, h3");
-    if (visible(panel, document) && heading && /^(You['’]re all caught up!?|No notifications|No notifications matched your query\.?|No notifications found\.?)$/i.test(text(heading))) {
+    const explicitEmpty = Array.from(main.querySelectorAll(".js-notifications-blankslate"));
+    if (containers.some((container) => visible(container, document)) &&
+        explicitEmpty.some((panel) => visible(panel, document))) return ok(0);
+    const panels = main.querySelectorAll(".notifications-list .blankslate, .js-notifications-list .blankslate, .notifications-list-empty .blankslate");
+    for (const panel of panels) {
+      const heading = panel.querySelector("h1, h2, h3");
+      if (!visible(panel, document) || !heading || !/^(You['’]re all caught up!?|No notifications|No notifications matched your query\.?|No notifications found\.?)$/i.test(text(heading))) continue;
       const pageHeading = main.querySelector("h1");
-      if (container || /notifications/i.test(text(pageHeading)) || main.querySelector('form[action="/notifications"]')) return ok(0);
+      if (containers.length || /notifications/i.test(text(pageHeading)) || main.querySelector('form[action="/notifications"]')) return ok(0);
     }
     return error("GitHub notifications have not loaded, or their layout is not recognized.");
   }
@@ -109,7 +136,7 @@
   function readDocument(document, kind) {
     if (!KINDS.includes(kind)) return error("Not a watched GitHub view.");
     if (!signedIn(document)) return error("GitHub sign-in is missing or could not be verified.");
-    return kind === "reviews" ? readReviews(document) : readMentions(document);
+    return kind === "approved" ? readApproved(document) : readNotifications(document, kind);
   }
 
   const api = {KINDS, URLS, REFRESH_MINUTES, STALE_MS, classifyUrl, readDocument};

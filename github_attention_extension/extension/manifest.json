@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "GitHub Attention Tabs",
-  "version": "0.1.1",
-  "description": "Green/red queue indicators for your open individual review requests and unread mention notifications.",
+  "version": "0.2.0",
+  "description": "Numbered favicon indicators for GitHub review requests, your approved PRs, mentions, and all notifications.",
   "minimum_chrome_version": "120",
   "permissions": ["alarms", "storage"],
   "host_permissions": ["https://github.com/*"],
