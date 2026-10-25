@@ -315,6 +315,9 @@ def _display(args, value):
             print(f"  skip {row['branch']}: {row['reason']}")
         if value["result"] == "preview":
             print("Use --apply to execute after reviewing the plan.")
+    elif args.command == "trunk" and args.action == "update":
+        print(value["path"])
+        print(f"{value['trunk']} {value['oid']}")
     elif "path" in value:
         print(value["path"])
     else:
