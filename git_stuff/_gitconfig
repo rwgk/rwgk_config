@@ -16,8 +16,6 @@
         ui = auto
 [push]
         default = simple
-[alias]
-        sw = switch
 [pull]
         rebase = false
 [commit]

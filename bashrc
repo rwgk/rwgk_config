@@ -781,7 +781,7 @@ loggrep() (
 
 alias gb='git branch --format="%(if)%(HEAD)%(then)* %(else)%(if)%(worktreepath)%(then)+ %(else)  %(end)%(end)%(refname:short)%(if)%(HEAD)%(then)%(else)%(if)%(worktreepath)%(then) 👉 %(worktreepath)%(end)%(end)"'
 alias gg='git grep'
-alias gp='git_update_branch.sh'
+alias gp='wt trunk update'
 alias gs='git status'
 alias gsi='git status --ignored'
 alias gcd='cd "$(git rev-parse --show-toplevel)"'
@@ -848,96 +848,140 @@ git_show_upstream_for_branch() {
     return "$rc"
 }
 
-git_mkwt() {
-    if [[ $# -lt 1 || $# -gt 2 ]]; then
-        echo "Usage: git_mkwt <new-branch> [base-branch]" >&2
+# Navigation happens in this shell; the engine emits one validated physical path.
+wt() {
+    local navigate=0 argument worktree_dir status cleanup_primary=
+    for argument in "$@"; do
+        case "$argument" in
+        -h | --help | --json | --print-path)
+            command git-wt "$@"
+            return $?
+            ;;
+        esac
+    done
+    case "${1:-}" in
+    new | pr | go | restore) navigate=1 ;;
+    trunk) [[ $# -eq 1 ]] && navigate=1 ;;
+    stack)
+        case "${2:-}" in
+        add | go) navigate=1 ;;
+        esac
+        ;;
+    clean | drop)
+        for argument in "$@"; do
+            [[ "$argument" == --apply ]] && navigate=1
+        done
+        ;;
+    esac
+    if [[ "$navigate" -eq 0 ]]; then
+        command git-wt "$@"
+        return $?
+    fi
+    case "${1:-}" in
+    clean | drop)
+        # Once cleanup removes this checkout, even a later error must leave a
+        # usable shell. Cache the primary before the engine can remove our CWD.
+        if cleanup_primary=$(command git-wt trunk --print-path); then
+            :
+        else
+            return $?
+        fi
+        if [[ -z "$cleanup_primary" || "$cleanup_primary" == *$'\n'* || "$cleanup_primary" == *$'\r'* || ! -d "$cleanup_primary" ]]; then
+            printf 'wt: engine did not return a valid primary worktree path.\n' >&2
+            return 1
+        fi
+        case "$cleanup_primary" in
+        /* | [A-Za-z]:/*) ;;
+        *)
+            printf 'wt: engine returned a relative primary path.\n' >&2
+            return 1
+            ;;
+        esac
+        ;;
+    esac
+    if worktree_dir=$(command git-wt "$@" --print-path); then
+        :
+    else
+        status=$?
+        if [[ -n "$cleanup_primary" && ! -d "$PWD" ]]; then
+            builtin cd -P -- "$cleanup_primary" || :
+        fi
+        return "$status"
+    fi
+    if [[ -z "$worktree_dir" || "$worktree_dir" == *$'\n'* || "$worktree_dir" == *$'\r'* ]]; then
+        printf 'wt: engine did not return one worktree path.\n' >&2
         return 1
     fi
-
-    local target_branch="$1"
-    local base_branch=main
-    local repo_root
-    local worktree_path="../$target_branch"
-    if [[ $# -eq 2 ]]; then
-        base_branch="$2"
-    fi
-
-    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "git_mkwt: not inside a git work tree" >&2
+    case "$worktree_dir" in
+    /* | [A-Za-z]:/*) ;;
+    *)
+        printf 'wt: engine returned a relative path: %s\n' "$worktree_dir" >&2
+        return 1
+        ;;
+    esac
+    if [[ ! -d "$worktree_dir" ]]; then
+        printf 'wt: worktree directory is missing: %s\n' "$worktree_dir" >&2
         return 1
     fi
-    repo_root=$(git rev-parse --show-toplevel) || return
-
-    if ! git check-ref-format --branch "$target_branch" >/dev/null 2>&1; then
-        echo "git_mkwt: invalid branch name: $target_branch" >&2
-        return 1
-    fi
-
-    if git show-ref --verify --quiet "refs/heads/$target_branch"; then
-        echo "git_mkwt: target branch already exists: $target_branch" >&2
-        return 1
-    fi
-
-    if ! git check-ref-format --branch "$base_branch" >/dev/null 2>&1; then
-        echo "git_mkwt: invalid base branch name: $base_branch" >&2
-        return 1
-    fi
-
-    if ! git show-ref --verify --quiet "refs/heads/$base_branch"; then
-        echo "git_mkwt: base branch does not exist: $base_branch" >&2
-        return 1
-    fi
-
-    (
-        cd -- "$repo_root" || exit
-        set -x
-        git worktree add -b "$target_branch" "$worktree_path" "$base_branch"
-    ) || return
-    cd -- "$repo_root/$worktree_path" || return
+    builtin cd -P -- "$worktree_dir"
 }
 
-git_swnc() (
-    set -euo pipefail
-
-    if [[ $# -ne 1 ]]; then
-        echo "Usage: git_swnc <new-branch>" >&2
-        return 1
+_wt_complete() {
+    local cur="${COMP_WORDS[COMP_CWORD]}" first="${COMP_WORDS[1]:-}"
+    local words= branch
+    COMPREPLY=()
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        words='init new pr go list trunk stack publish clean drop restore doctor path name --help'
+    elif [[ "$first" == stack && "$COMP_CWORD" -eq 2 ]]; then
+        words='init add pull rebase go'
+    elif [[ "$first" == stack && "${COMP_WORDS[2]:-}" == go ]]; then
+        words='up down top bottom'
+    elif [[ "$first" == trunk ]]; then
+        words='update'
+    elif [[ "$cur" == -* ]]; then
+        case "$first" in
+        init) words='--key --trunk --upstream --publish --archive --trees --backtracking' ;;
+        pr) words='--refresh' ;;
+        publish) words='--stack --title --body-file --ready --set-upstream' ;;
+        clean) words='--apply --archive-local --discard-builds --resume' ;;
+        drop) words='--local-only --apply --resume' ;;
+        stack)
+            case "${COMP_WORDS[2]:-}" in
+            pull) words='--stack --apply' ;;
+            rebase) words='--upstack --downstack --no-trunk --continue --abort' ;;
+            esac
+            ;;
+        esac
+        words="$words --help --json --print-path"
+    else
+        case "$first" in
+        name)
+            words=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+            ;;
+        go | path | clean | drop)
+            while IFS= read -r branch; do
+                words+="$branch"$'\n'
+            done < <(command git-wt list --json 2>/dev/null | python -c '
+import json, sys
+for row in json.load(sys.stdin)["branches"]:
+    branch = row["branch"]
+    print(branch)
+    if branch.startswith("rwgk/"):
+        print(branch[5:])
+    if row.get("pr"):
+        print("pr" + str(row["pr"]["number"]))
+' 2>/dev/null)
+            ;;
+        esac
     fi
-
-    local target_branch="$1"
-    local parent_branch
-    local parent_tracking_branch
-
-    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "git_swnc: not inside a git work tree" >&2
-        return 1
+    local IFS=$'\n'
+    # Static words use spaces; selectors use newlines and cannot contain spaces.
+    if [[ "$words" != *$'\n'* ]]; then
+        IFS=' '
     fi
-
-    if ! git check-ref-format --branch "$target_branch" >/dev/null 2>&1; then
-        echo "git_swnc: invalid branch name: $target_branch" >&2
-        return 1
-    fi
-
-    if git show-ref --verify --quiet "refs/heads/$target_branch"; then
-        echo "git_swnc: target branch already exists: $target_branch" >&2
-        return 1
-    fi
-
-    parent_branch=$(git branch --show-current)
-    if [[ -z "$parent_branch" ]]; then
-        echo "git_swnc: current checkout is detached; no parent branch to clear" >&2
-        return 1
-    fi
-
-    if ! parent_tracking_branch=$(git rev-parse --abbrev-ref --symbolic-full-name "${parent_branch}@{upstream}" 2>/dev/null); then
-        echo "git_swnc: current branch has no upstream/tracking branch: $parent_branch" >&2
-        return 1
-    fi
-
-    git switch -c "$target_branch"
-    git branch -f "$parent_branch" "$parent_tracking_branch"
-    echo "git_swnc: created '$target_branch' and reset '$parent_branch' to '$parent_tracking_branch'"
-)
+    COMPREPLY=($(compgen -W "$words" -- "$cur"))
+}
+complete -o bashdefault -o default -F _wt_complete wt git-wt
 
 git_drop_head() {
     if [[ $# -ne 0 ]]; then
@@ -1048,30 +1092,6 @@ _complete_local_git_branches() {
     COMPREPLY=($(compgen -W "$branches" -- "$cur"))
 }
 
-_complete_git_branch_D_track_hash() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--local-only --archive-tracking --archive-to-remote=" -- "$cur"))
-        return
-    fi
-
-    _complete_local_git_branches
-}
-
-_complete_git_archive_branch_to_fork() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--pr= --fork-remote=" -- "$cur"))
-        return
-    fi
-
-    _complete_local_git_branches
-}
-
-complete -o bashdefault -o default -F _complete_git_branch_D_track_hash git_branch_D_track_hash
-complete -o bashdefault -o default -F _complete_git_archive_branch_to_fork git_archive_branch_to_fork.sh
 complete -o bashdefault -o default -F _complete_local_git_branches git_show_upstream_for_branch
 complete -o bashdefault -o default -F _complete_local_git_branches show_pr_for_branch
 
@@ -1171,63 +1191,6 @@ git_remote_add() {
     fi
     echo "git remote add -f \"$owner\" https://github.com/$owner/$repo"
     git remote add -f "$owner" "https://github.com/$owner/$repo"
-}
-
-git_swrp() {
-    local helper="$HOME/rwgk_config/libexec/git_swrp.sh"
-    local worktree_dir
-    local status
-
-    if [[ ! -e "$helper" ]]; then
-        printf "git_swrp: helper is missing: '%s'\n" "$helper" >&2
-        return 127
-    fi
-    if [[ ! -x "$helper" ]]; then
-        printf "git_swrp: helper is not executable: '%s'\n" "$helper" >&2
-        return 126
-    fi
-
-    if [[ $# -eq 1 && ("$1" == -h || "$1" == --help) ]]; then
-        if "$helper" "$@"; then
-            return 0
-        else
-            status=$?
-            return "$status"
-        fi
-    fi
-
-    if worktree_dir=$("$helper" "$@"); then
-        :
-    else
-        status=$?
-        return "$status"
-    fi
-
-    if [[ -z "$worktree_dir" || "$worktree_dir" == *$'\n'* ]]; then
-        printf "git_swrp: helper returned an invalid worktree directory: '%s'\n" "$worktree_dir" >&2
-        return 1
-    fi
-    case "$worktree_dir" in
-    /* | [A-Za-z]:/*) ;;
-    *)
-        printf "git_swrp: helper returned a non-absolute worktree directory: '%s'\n" "$worktree_dir" >&2
-        return 1
-        ;;
-    esac
-    if [[ -L "$worktree_dir" || ! -d "$worktree_dir" ]]; then
-        printf "git_swrp: helper returned a missing or unsafe worktree directory: '%s'\n" \
-            "$worktree_dir" >&2
-        return 1
-    fi
-
-    if builtin cd -- "$worktree_dir"; then
-        return 0
-    else
-        status=$?
-        printf "git_swrp: worktree is ready, but could not change directory to '%s'.\n" \
-            "$worktree_dir" >&2
-        return "$status"
-    fi
 }
 
 git_show_merge_commits() {

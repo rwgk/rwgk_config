@@ -24,3 +24,20 @@ There is no centrally installed `ruff`. On the first Python-related `ruff` use i
 When assessing potential side effects of changes in this repo, also inspect `$HOME/rwgk_config_nvidia`. It is a daughter repo that builds on `rwgk_config`.
 
 Fully trust that both `$HOME/rwgk_config/bin` and `$HOME/rwgk_config_nvidia/bin` are on `PATH`.
+
+## Managed branches and worktrees
+
+Use `wt` (`git-wt` in noninteractive shells) for branch/worktree lifecycle work;
+see `README.md` for the command reference. Keep primary worktrees on configured
+trunk. Each development or review branch owns one stable worktree under
+`$W/trees/<repo-key>/`; new branch names use `rwgk/<slug>`. Navigate with `wt go`
+or `wt stack go`, without switching branches in an existing worktree.
+
+All stacks publish to verified upstream, unconditionally. Independent PRs use
+the registered repository's publication destination. Publication and remote
+cleanup require task authorization; command availability grants none.
+
+Use `wt clean` for terminal PRs and `wt drop --local-only` for explicit local
+retirement. Preview before `--apply`. Preserve backtracking records and recovery
+refs; never substitute extension pruning or raw branch deletion for standard
+cleanup. Use `wt doctor` to inspect existing layouts before adopting them.
