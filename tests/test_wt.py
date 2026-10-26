@@ -275,6 +275,130 @@ class WorktreeTests(unittest.TestCase):
         )
         self.assertEqual(lines[2:], [f"{remote}: no changes" for remote in remotes])
 
+    def test_unpaired_legacy_branch_is_recorded_and_restored_as_a_pair(self):
+        branch = "legacy\u2192nested/backup"
+        self.git("branch", branch)
+        before = self.git("rev-parse", "HEAD")
+        self.git("config", f"branch.{branch}.remote", "origin")
+        self.git("config", f"branch.{branch}.merge", "refs/heads/old-name")
+        self.git("config", f"branch.{branch}.pushRemote", "fork")
+        self.git(
+            "config", f"branch.{branch}.description", "Legacy checkpoint\nKeep this"
+        )
+        with (self.repo.common / "config").open("a") as config:
+            config.write(f'\n[branch "{branch}"]\n\trebase\n')
+        other = branch + ".extra"
+        self.git("branch", other)
+        self.git("config", f"branch.{other}.remote", "unchanged")
+        initial_worktrees = self.repo.worktrees()
+        preview = self.cli("drop", branch, "--local-only", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        plan = json.loads(preview.stdout)["operations"][0]
+        self.assertIsNone(plan["path"])
+        self.assertEqual(plan["local_oid"], before)
+        self.assertEqual(self.repo.worktrees(), initial_worktrees)
+        self.assertFalse(list((self.area / "backtracking").glob("*.json")))
+        result = self.cli("drop", branch, "--local-only", "--apply", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)["operations"][0]
+        self.assertEqual(record["status"], "complete")
+        self.assertIsNone(record["path"])
+        self.assertEqual(self.repo.worktrees(), initial_worktrees)
+        self.assertFalse(self.repo.exists("refs/heads/" + branch))
+        self.assertEqual(record["archives"], [])
+        self.assertEqual(
+            self.git("rev-parse", record["snapshots"][0]["recovery_ref"]), before
+        )
+        self.assertEqual(
+            json.loads(Path(record["backtracking_path"]).read_text()), record
+        )
+        self.assertFalse(
+            any(
+                key.rpartition(".")[0] == f"branch.{other}"
+                for key, _ in record["branch_config"]
+            )
+        )
+        self.assertEqual(self.git("config", f"branch.{other}.remote"), "unchanged")
+        self.git("config", f"branch.{other}.remote", "updated-after-retirement")
+        restored = self.cli("restore", record["id"], "--json")
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        path = Path(json.loads(restored.stdout)["path"])
+        self.assertEqual(path, self.repo.canonical_path(branch))
+        self.assertEqual(self.git("branch", "--show-current", cwd=path), branch)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=path), before)
+        self.assertEqual(self.git("config", f"branch.{branch}.pushRemote"), "fork")
+        self.assertEqual(self.git("config", f"branch.{branch}.remote"), "origin")
+        self.assertEqual(
+            self.git("config", f"branch.{branch}.merge"), "refs/heads/old-name"
+        )
+        self.assertEqual(
+            self.git("config", f"branch.{branch}.description"),
+            "Legacy checkpoint\nKeep this",
+        )
+        self.assertEqual(
+            self.git("config", "--bool", f"branch.{branch}.rebase"), "true"
+        )
+        self.assertEqual(
+            self.git("config", f"branch.{other}.remote"), "updated-after-retirement"
+        )
+
+    def test_unpaired_branch_human_feedback_and_navigation(self):
+        branch = "old-review-notes"
+        self.git("branch", branch)
+        result = self.cli("drop", branch, "--local-only", "--apply", "--print-path")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(self.primary.resolve()) + "\n")
+        self.assertIn(f"Removed local branch {branch} (no worktree).", result.stderr)
+        self.assertIn("Backtracking:", result.stderr)
+        self.assertIn("origin: no changes", result.stderr)
+
+    def test_unpaired_drop_rejects_trunk_and_symbolic_alias(self):
+        self.git("symbolic-ref", "refs/heads/alias", "refs/heads/main")
+        before = self.git("rev-parse", "main")
+        for branch in ("main", "alias"):
+            with self.subTest(branch=branch):
+                result = self.cli("drop", branch, "--local-only", "--apply")
+                self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git("rev-parse", "main"), before)
+        self.assertTrue(self.repo.exists("refs/heads/alias"))
+        self.assertFalse(list((self.area / "backtracking").glob("*.json")))
+
+    def test_unpaired_drop_rejects_checked_out_legacy_and_missing_managed_owner(self):
+        legacy = self.area / "legacy-tree"
+        self.git("worktree", "add", "-b", "old-branch", str(legacy))
+        result = self.cli("drop", "old-branch", "--local-only", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(legacy.is_dir())
+        path = self.repo.create("rwgk/missing", "main")
+        self.git("worktree", "remove", str(path))
+        result = self.cli("drop", "rwgk/missing", "--local-only", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.repo.exists("refs/heads/rwgk/missing"))
+
+    def test_unpaired_drop_does_not_accept_tags_or_invent_a_prefixed_branch(self):
+        self.git("tag", "old-tag")
+        self.git("branch", "rwgk/existing-unmanaged")
+        for selector in ("old-tag", "existing-unmanaged", "main~1"):
+            with self.subTest(selector=selector):
+                result = self.cli("drop", selector, "--local-only", "--apply")
+                self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.repo.exists("refs/heads/rwgk/existing-unmanaged"))
+
+    def test_unpaired_branch_reserved_by_detached_rebase_is_preserved(self):
+        path = self.repo.create("rwgk/rebasing", "main")
+        (path / "base").write_text("branch change\n")
+        self.git("commit", "-am", "Branch change", cwd=path)
+        (self.primary / "base").write_text("trunk change\n")
+        self.git("commit", "-am", "Trunk change")
+        self.repo.branches.pop("rwgk/rebasing")
+        self.repo.save()
+        self.git("rebase", "main", cwd=path, check=False)
+        self.assertEqual(self.git("branch", "--show-current", cwd=path), "")
+        result = self.cli("drop", "rwgk/rebasing", "--local-only", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Git operation", result.stderr)
+        self.assertTrue(self.repo.exists("refs/heads/rwgk/rebasing"))
+
 
 class NamingTests(unittest.TestCase):
     def test_readable_names_and_collision_safe_legacy_names(self):

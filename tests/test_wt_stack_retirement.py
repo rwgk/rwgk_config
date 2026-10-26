@@ -32,6 +32,7 @@ class RetirementTests(unittest.TestCase):
             resolve=lambda selector=None: selector or "rwgk/lower",
             check_primary=lambda: None,
             ensure_clean=lambda path: None,
+            exists=lambda ref: False,
         )
         self.repo.owner = lambda name: Path(self.repo.branches[name]["path"])
         self.write([self.lower, self.upper])
@@ -47,7 +48,45 @@ class RetirementTests(unittest.TestCase):
 
     def remove(self, name):
         stacks.retired(self.repo, name)
-        self.repo.branches.pop(name)
+        self.repo.branches.pop(name, None)
+
+    def test_unmanaged_descendant_blocks_parent_retirement_even_with_missing_ref(self):
+        self.repo.branches.pop("rwgk/upper")
+        for present in (False, True):
+            with self.subTest(descendant_ref_exists=present):
+                self.repo.exists = lambda ref, present=present: present
+                with self.assertRaisesRegex(WTError, "active descendants"):
+                    stacks.check_retirement(self.repo, "rwgk/lower")
+
+    def test_top_retirement_preserves_unmanaged_lower_layer(self):
+        self.repo.branches.clear()
+        self.repo.exists = lambda ref: ref == "refs/heads/rwgk/lower"
+        self.remove("rwgk/upper")
+        stack = stacks.get_stack(self.repo, "rwgk/lower")
+        self.assertEqual(stack["branches"], [self.lower])
+
+    def test_missing_unmerged_legacy_layer_is_preserved_in_catalog(self):
+        self.repo.branches.clear()
+        self.remove("rwgk/upper")
+        stack = stacks.get_stack(self.repo, "rwgk/lower")
+        self.assertEqual(stack["branches"], [self.lower])
+
+    def test_merged_tombstone_is_retained_for_unmanaged_child(self):
+        self.repo.branches.clear()
+        self.lower["pullRequest"]["merged"] = True
+        self.write([self.lower, self.upper])
+        self.remove("rwgk/lower")
+        stack = stacks.get_stack(self.repo, "rwgk/upper")
+        self.assertEqual(stack["branches"], [self.lower, self.upper])
+
+    def test_merged_legacy_layer_with_local_ref_is_preserved(self):
+        self.repo.branches.clear()
+        self.lower["pullRequest"]["merged"] = True
+        self.write([self.lower, self.upper])
+        self.repo.exists = lambda ref: ref == "refs/heads/rwgk/lower"
+        self.remove("rwgk/upper")
+        stack = stacks.get_stack(self.repo, "rwgk/lower")
+        self.assertEqual(stack["branches"], [self.lower])
 
     def test_closed_unmerged_top_can_be_replaced_by_a_new_layer(self):
         self.remove("rwgk/upper")

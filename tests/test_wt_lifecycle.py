@@ -380,6 +380,86 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(record["archives"], [])
         self.assertTrue(self.has_ref(self.upstream, "refs/heads/" + self.branch))
 
+    def unpair_branch(self):
+        self.git("worktree", "remove", str(self.path))
+        self.repo.branches.pop(self.branch)
+        self.repo.save()
+
+    def test_unpaired_retirement_is_local_without_creating_a_worktree(self):
+        self.unpair_branch()
+        before = self.repo.worktrees()
+        with mock.patch.object(
+            lifecycle, "_remote_tip", side_effect=AssertionError("No network")
+        ):
+            record = lifecycle.retire(
+                self.repo, self.branch, apply=True, local_only=True
+            )
+        self.assertIsNone(record["path"])
+        self.assertEqual(self.repo.worktrees(), before)
+        self.assertTrue(self.has_ref(self.upstream, "refs/heads/" + self.branch))
+        self.assertEqual(record["archives"], [])
+        self.assertEqual(
+            self.git("rev-parse", record["snapshots"][0]["recovery_ref"]), self.tip
+        )
+
+    def test_new_worktree_owner_during_unpaired_retirement_is_preserved(self):
+        self.unpair_branch()
+        original = lifecycle._protect_snapshots
+
+        def take_ownership(*args):
+            original(*args)
+            self.git("worktree", "add", str(self.path), self.branch)
+
+        with (
+            mock.patch.object(
+                lifecycle, "_protect_snapshots", side_effect=take_ownership
+            ),
+            self.assertRaisesRegex(core.WTError, "unmanaged worktree"),
+        ):
+            lifecycle.retire(self.repo, self.branch, apply=True, local_only=True)
+        self.assertTrue(self.path.is_dir())
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.path), self.tip)
+        self.assertTrue(
+            self.has_ref(self.primary / ".git", "refs/heads/" + self.branch)
+        )
+
+    def test_unpaired_ref_change_during_retirement_is_preserved(self):
+        self.unpair_branch()
+        original = lifecycle._protect_snapshots
+
+        def move_branch(*args):
+            original(*args)
+            self.git("update-ref", "refs/heads/" + self.branch, self.base, self.tip)
+
+        with (
+            mock.patch.object(lifecycle, "_protect_snapshots", side_effect=move_branch),
+            self.assertRaises(core.WTError),
+        ):
+            lifecycle.retire(self.repo, self.branch, apply=True, local_only=True)
+        self.assertEqual(self.git("rev-parse", "refs/heads/" + self.branch), self.base)
+
+    def test_unpaired_retirement_resumes_after_ref_deletion_before_journal_save(self):
+        self.unpair_branch()
+        original = self.repo.git
+
+        def interrupt(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if args and args[0] == "update-ref" and "-d" in args:
+                raise core.WTError("Interrupted after ref deletion")
+            return result
+
+        with (
+            mock.patch.object(self.repo, "git", side_effect=interrupt),
+            self.assertRaisesRegex(core.WTError, "Interrupted"),
+        ):
+            lifecycle.retire(self.repo, self.branch, apply=True, local_only=True)
+        record = self.records()[0]
+        self.assertNotIn("local_branch", record["completed"])
+        result = lifecycle.resume(core.Repo(self.primary), record["id"])
+        self.assertEqual(result["status"], "complete")
+        self.assertIsNone(result["path"])
+        self.assertFalse(self.repo.exists("refs/heads/" + self.branch))
+
     def test_open_pr_requires_explicit_local_only(self):
         self.pr["state"] = "OPEN"
         with self.assertRaisesRegex(core.WTError, "still open"):

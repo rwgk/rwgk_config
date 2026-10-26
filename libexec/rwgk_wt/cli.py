@@ -100,7 +100,7 @@ def parser():
     for name in ("clean", "drop"):
         command = commands.add_parser(
             name,
-            help="preview retirement; --apply records recovery before removing the pair",
+            help="preview retirement; drop also accepts an unpaired local branch",
         )
         command.add_argument("selector", nargs="?")
         command.add_argument("--apply", action="store_true")
@@ -209,7 +209,12 @@ def _dispatch(repo, args):
         if command == "clean" and args.local_only:
             raise WTError("Use 'wt drop --local-only' for explicit local retirement.")
         if args.selector:
-            names = [repo.resolve(args.selector)]
+            try:
+                names = [repo.resolve(args.selector)]
+            except WTError:
+                if command != "drop" or not repo.exists("refs/heads/" + args.selector):
+                    raise
+                names = [args.selector]
         elif command == "drop":
             names = [repo.resolve()]
         else:
@@ -287,7 +292,8 @@ def _cleanup_lines(repo, value):
     if not operations:
         lines.append("No branch/worktree pairs removed.")
     for record in operations:
-        lines.append(f"Removed local branch {record['branch']} and its worktree.")
+        suffix = " and its worktree" if record.get("path") else " (no worktree)"
+        lines.append(f"Removed local branch {record['branch']}{suffix}.")
         path = record.get("backtracking_path") or (
             lifecycle._backtracking_dir(repo) / f"{record['id']}.json"
         )
@@ -375,7 +381,12 @@ def _display(args, value, repo=None):
     elif args.command in ("clean", "drop") and args.apply:
         print("\n".join(_cleanup_lines(repo, value)))
     elif args.command in ("clean", "drop") and "operations" in value:
-        print(f"{value['result']}: {len(value['operations'])} pair(s)")
+        noun = (
+            "branch(es)"
+            if any(row.get("path") is None for row in value["operations"])
+            else "pair(s)"
+        )
+        print(f"{value['result']}: {len(value['operations'])} {noun}")
         for row in value["operations"]:
             print(f"  {row['branch']}  {row['id']}")
             if row.get("source", {}).get("oid"):

@@ -395,6 +395,53 @@ def _trunk_snapshot(repo):
     return {"remote": remote, "url": url, "ref": ref, "oid": oid}
 
 
+def _preflight_unpaired(repo, branch):
+    if branch == repo.config["trunk"]:
+        raise WTError("The primary trunk branch cannot be retired")
+    if branch in repo.branches:
+        raise WTError("Managed branch has a missing worktree; inspect 'wt doctor'")
+    owner = repo.owner(branch)
+    if owner:
+        raise WTError(f"Branch has an unmanaged worktree at {owner}; adopt it first")
+    ref = "refs/heads/" + branch
+    if _git_result(repo, "symbolic-ref", "--quiet", ref).returncode == 0:
+        raise WTError("Symbolic branch refs cannot be retired")
+    repo.ensure_idle(repo.primary)
+    # A rebase or bisect can detach HEAD while still reserving the original branch.
+    for row in repo.worktrees():
+        path = Path(row["path"])
+        if not path.is_dir():
+            raise WTError(
+                f"Registered worktree is missing at {path}; inspect 'wt doctor'"
+            )
+        gitdir = Path(_git(repo, "rev-parse", "--absolute-git-dir", cwd=path))
+        for name in (
+            "rebase-merge/head-name",
+            "rebase-apply/head-name",
+            "BISECT_START",
+        ):
+            state = gitdir / name
+            if state.is_file() and state.read_text().strip() in (branch, ref):
+                raise WTError(f"Branch is in use by a Git operation at {path}")
+
+
+def _branch_config(repo, branch):
+    result = _git_result(
+        repo, "config", "--local", "--null", "--get-regexp", r"^branch\."
+    )
+    if result.returncode not in (0, 1):
+        raise WTError(result.stderr.strip() or "Cannot read local branch configuration")
+    section = f"branch.{branch}"
+    values = []
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        key, separator, value = entry.partition("\n")
+        if key.rpartition(".")[0] == section:
+            values.append([key, value if separator else "true"])
+    return values
+
+
 def _source_snapshot(repo, metadata, pr):
     from . import github
 
@@ -433,26 +480,32 @@ def retire(
     archive_local=False,
     discard_builds=False,
 ):
-    """Preview or retire a managed pair. Remote writes require apply=True."""
+    """Retire a managed pair or an explicitly selected unpaired local branch."""
     from . import github, stacks
 
     repo.check_primary()
-    if branch not in repo.branches:
-        raise WTError(f"Branch is not managed by wt: {branch}")
-    metadata = copy.deepcopy(repo.branches[branch])
-    path = Path(metadata["path"])
-    ignored = _preflight_worktree(repo, path, branch, discard_builds)
+    if branch in repo.branches:
+        metadata = copy.deepcopy(repo.branches[branch])
+        path = Path(metadata["path"])
+        ignored = _preflight_worktree(repo, path, branch, discard_builds)
+    else:
+        if not local_only:
+            raise WTError("Unpaired branches require 'wt drop <branch> --local-only'")
+        _preflight_unpaired(repo, branch)
+        metadata, path, ignored = {}, None, False
     stacks.check_retirement(repo, branch)
     oid = repo.oid(f"refs/heads/{branch}")
     record = _new_record(repo, branch, metadata)
     record.update(
         local_oid=oid,
-        path=str(path),
+        path=str(path) if path is not None else None,
         local_only=local_only,
         archive_local=archive_local,
         discard_builds=discard_builds,
         ignored_builds=ignored,
     )
+    if path is None:
+        record["branch_config"] = _branch_config(repo, branch)
     tracking = _git_result(
         repo, "for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"
     )
@@ -542,7 +595,7 @@ def _apply_retirement_locked(repo, record):
     from . import github, stacks
 
     branch = record["branch"]
-    path = Path(record["path"])
+    path = Path(record["path"]) if record["path"] is not None else None
     completed = record["completed"]
     if record["status"] == "complete":
         return record
@@ -564,7 +617,9 @@ def _apply_retirement_locked(repo, record):
         if result.returncode and "worktree" not in completed:
             raise WTError("Local branch disappeared before worktree cleanup")
     if "worktree" not in completed:
-        if path.exists():
+        if path is None:
+            _preflight_unpaired(repo, branch)
+        elif path.exists():
             _preflight_worktree(repo, path, branch, record["discard_builds"])
         elif repo.owner(branch):
             raise WTError("Worktree path disappeared but registration remains")
@@ -642,7 +697,7 @@ def _apply_retirement_locked(repo, record):
         completed.append("remote_branch")
         _save_record(repo, record)
     if "worktree" not in completed:
-        if path.exists():
+        if path is not None and path.exists():
             _assert_local_tip(repo, record)
             stacks.check_retirement(repo, branch)
             _preflight_worktree(repo, path, branch, record["discard_builds"])
@@ -650,16 +705,20 @@ def _apply_retirement_locked(repo, record):
             if record["ignored_builds"]:
                 args.append("--force")
             _git(repo, *args, "--", str(path), cwd=repo.primary)
-        if repo.root.resolve() == path.resolve():
+        if path is not None and repo.root.resolve() == path.resolve():
             repo.root = repo.primary
         completed.append("worktree")
         _save_record(repo, record)
     if "local_branch" not in completed:
+        if path is None:
+            _preflight_unpaired(repo, branch)
+            stacks.check_retirement(repo, branch)
         existing = _git_result(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
         if existing.returncode == 0:
             _git(
                 repo,
                 "update-ref",
+                "--no-deref",
                 "-d",
                 f"refs/heads/{branch}",
                 record["local_oid"],
@@ -673,7 +732,7 @@ def _apply_retirement_locked(repo, record):
     if "metadata" not in completed:
         # Remove aliases only when they still resolve to this retiring worktree.
         trees = Path(repo.config["trees_root"]).expanduser() / repo.config["key"]
-        if trees.exists():
+        if path is not None and trees.exists():
             for alias in trees.glob("pr[0-9]*"):
                 if alias.is_symlink() and alias.resolve() == path.resolve():
                     alias.unlink()
@@ -737,7 +796,12 @@ def restore(repo, record_id):
     role = metadata.pop("role", "owned")
     path = repo.create(branch, oid, role=role, extra=metadata)
     tracking = record.get("tracking")
-    if tracking:
+    if "branch_config" in record:
+        for key in dict(record["branch_config"]):
+            _git_result(repo, "config", "--local", "--unset-all", key)
+        for key, value in record["branch_config"]:
+            _git(repo, "config", "--local", "--add", "--", key, value)
+    elif tracking:
         remote_branch = tracking.removeprefix("refs/remotes/")
         _git_result(repo, "branch", f"--set-upstream-to={remote_branch}", branch)
     if metadata.get("pr"):

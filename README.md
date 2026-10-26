@@ -196,6 +196,20 @@ wt drop fix-stream --local-only          # preview
 wt drop fix-stream --local-only --apply
 ```
 
+For a legacy local branch that has no worktree, use its exact existing name:
+
+```bash
+wt drop old-branch-name --local-only          # preview; no temporary worktree
+wt drop old-branch-name --local-only --apply
+```
+
+This is the replacement for `git_branch_D_track_hash --local-only`: it records
+the commit and branch configuration, creates a local recovery ref, and deletes
+only that local branch. Neither upstream nor origin is changed. Legacy names do
+not need an `rwgk/` prefix. Checked-out branches, trunk, missing managed worktrees,
+and branches needed by surviving stack layers are protected. `wt restore` can
+recreate the retired branch in its own managed worktree.
+
 Backtracking records remain under `~/Sve/git_backtracking_info/` or the configured
 location. The existing `MY_GIT_BACKTRACKING_INFO_LOCAL` and
 `MY_GIT_BACKTRACKING_INFO_REMOTE=HOST:PATH` settings are honored. Local recovery

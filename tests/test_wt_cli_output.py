@@ -33,6 +33,7 @@ class CleanupOutputTests(unittest.TestCase):
             "kind": "retire",
             "status": "complete",
             "branch": "rwgk/review-pr3189",
+            "path": "/trees/rwgk-review-pr3189",
             "backtracking_path": "/actual-records/project-cleanup.json",
             "completed": ["recovery_refs", "worktree", "local_branch", "metadata"],
             "snapshots": [{"recovery_ref": "refs/rwgk/backtracking/project/0"}],
@@ -78,6 +79,14 @@ class CleanupOutputTests(unittest.TestCase):
         stdout, stderr = self.invoke(["--print-path"])
         self.assertEqual(stdout, "/primary\n")
         self.assertEqual(stderr, expected)
+
+    def test_unpaired_cleanup_does_not_claim_a_worktree_was_removed(self):
+        self.record["path"] = None
+        stdout, _ = self.invoke()
+        self.assertEqual(
+            stdout.splitlines()[0],
+            "Removed local branch rwgk/review-pr3189 (no worktree).",
+        )
 
     def test_json_has_no_human_feedback_and_preserves_result_shape(self):
         stdout, stderr = self.invoke(["--json"])

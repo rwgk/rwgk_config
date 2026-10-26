@@ -301,8 +301,7 @@ def check_retirement(repo, branch):
     descendants = [
         row
         for row in stack["branches"][position + 1 :]
-        if row["branch"] in repo.branches
-        and row["branch"] not in getattr(repo, "_wt_retiring", set())
+        if row["branch"] not in getattr(repo, "_wt_retiring", set())
         and not row.get("pullRequest", {}).get("merged")
     ]
     if not descendants:
@@ -343,23 +342,27 @@ def retired(repo, branch):
                 surviving.append(stack)
                 continue
             changed = True
-            managed = {
+            survivors = {
                 row["branch"]
                 for row in rows
-                if row["branch"] != branch and row["branch"] in repo.branches
+                if row["branch"] != branch
+                and (
+                    row["branch"] in repo.branches
+                    or not row.get("pullRequest", {}).get("merged")
+                    or repo.exists("refs/heads/" + row["branch"])
+                )
             }
-            if not managed:
+            if not survivors:
                 continue
             kept = []
             for position, row in enumerate(rows):
                 name = row["branch"]
                 merged = row.get("pullRequest", {}).get("merged")
-                retiring = name == branch or (name not in repo.branches and merged)
-                if retiring:
+                if name not in survivors:
                     # A deleted unmerged layer must not remain an active parent.
                     # Merged tombstones matter only to surviving later layers.
                     needed = merged and any(
-                        later["branch"] in managed for later in rows[position + 1 :]
+                        later["branch"] in survivors for later in rows[position + 1 :]
                     )
                     if not needed:
                         continue
