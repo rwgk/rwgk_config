@@ -3,7 +3,7 @@
 
 Set GH_STACK_ADOPT to test an alternate executable. Linked worktree coverage is
 opt-in through GH_STACK_CHECK_WORKTREE_ROOT under
-/wrk/codex_scratch_space/worktrees/.
+$W/trees/.wt-tests/.
 """
 
 from __future__ import annotations
@@ -808,7 +808,7 @@ class StackAdoptTests(unittest.TestCase):
     def test_concurrent_checkout_is_blocked_before_it_can_change_linked_worktree(
         self,
     ) -> None:
-        allowed = Path("/wrk/codex_scratch_space/worktrees").resolve()
+        allowed = (Path(os.environ.get("W", "/wrk")) / "trees" / ".wt-tests").resolve()
         root = Path(WORKTREE_ROOT).resolve()
         self.assertTrue(root.is_relative_to(allowed), str(root))
         root.mkdir(parents=True, exist_ok=True)
@@ -838,7 +838,7 @@ class StackAdoptTests(unittest.TestCase):
 
     @unittest.skipUnless(WORKTREE_ROOT, "GH_STACK_CHECK_WORKTREE_ROOT was not supplied")
     def test_unrelated_locked_worktree_does_not_block_selected_stack(self) -> None:
-        allowed = Path("/wrk/codex_scratch_space/worktrees").resolve()
+        allowed = (Path(os.environ.get("W", "/wrk")) / "trees" / ".wt-tests").resolve()
         root = Path(WORKTREE_ROOT).resolve()
         self.assertTrue(root.is_relative_to(allowed), str(root))
         root.mkdir(parents=True, exist_ok=True)
@@ -858,7 +858,7 @@ class StackAdoptTests(unittest.TestCase):
     def test_all_linked_worktrees_adopt_without_changing_selected_branches(
         self,
     ) -> None:
-        allowed = Path("/wrk/codex_scratch_space/worktrees").resolve()
+        allowed = (Path(os.environ.get("W", "/wrk")) / "trees" / ".wt-tests").resolve()
         root = Path(WORKTREE_ROOT).resolve()
         self.assertTrue(root.is_relative_to(allowed), str(root))
         root.mkdir(parents=True, exist_ok=True)

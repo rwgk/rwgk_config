@@ -12,6 +12,15 @@ Each active local branch owns one worktree. The primary checkout stays on trunk;
 navigation changes directories. New development branches are `rwgk/<slug>` and
 live under `$W/trees/<repo-key>/`, normally `/wrk/trees/<repo-key>/`.
 
+This applies to both human and agent work, including PR reviews and short-lived
+experiments. `$W/codex_scratch_space/worktrees/` is a legacy location: existing
+work may be reused or adopted deliberately, but new worktrees belong under
+`$W/trees/`. Reuse a worktree already supplied for the task. The broader
+`$W/codex_scratch_space/` remains available for logs and other non-checkout files.
+
+Tests that exercise Git in wholly disposable fixture repositories use
+`$W/trees/.wt-tests/`; that exception does not cover real task repositories.
+
 ```text
 /wrk/forked/cuda-python/                    main (primary)
 /wrk/trees/cuda-python/rwgk-fix-stream/      rwgk/fix-stream

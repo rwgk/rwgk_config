@@ -3,7 +3,7 @@
 
 Set GH_STACK_CHECK to test an alternate executable. Linked worktree coverage is
 opt-in through GH_STACK_CHECK_WORKTREE_ROOT, which should name an authorized
-location under $W/codex_scratch_space/worktrees/.
+location under $W/trees/.wt-tests/.
 """
 
 from __future__ import annotations
@@ -753,7 +753,9 @@ class StackCheckTests(unittest.TestCase):
         self.assert_issue(report, "incomplete", "concurrent")
 
     def linked_worktree(self) -> Path:
-        root = Path(WORKTREE_ROOT)
+        root = Path(WORKTREE_ROOT).resolve()
+        allowed = (Path(os.environ.get("W", "/wrk")) / "trees" / ".wt-tests").resolve()
+        self.assertTrue(root.is_relative_to(allowed), str(root))
         root.mkdir(parents=True, exist_ok=True)
         temporary = tempfile.TemporaryDirectory(prefix="fixture-", dir=root)
         self.addCleanup(temporary.cleanup)
