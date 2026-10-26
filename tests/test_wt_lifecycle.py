@@ -204,6 +204,17 @@ class LifecycleTests(unittest.TestCase):
             self.git("rev-parse", record["snapshots"][0]["recovery_ref"]), self.tip
         )
         self.assertEqual(self.records()[0]["status"], "complete")
+        self.assertEqual(
+            record["backtracking_path"],
+            str(self.root / "backtracking" / (record["id"] + ".json")),
+        )
+        self.assertEqual(
+            [
+                (action["remote"], action["action"])
+                for action in record["remote_actions"]
+            ],
+            [("origin", "archive-created"), ("upstream", "branch-deleted")],
+        )
         restored = lifecycle.restore(core.Repo(self.primary), record["id"])
         self.assertEqual(restored, self.path)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=restored), self.tip)
@@ -298,8 +309,52 @@ class LifecycleTests(unittest.TestCase):
         self.repo.save()
         record = lifecycle.retire(self.repo, self.branch, apply=True)
         self.assertEqual(record["archives"], [])
+        self.assertEqual(record.get("remote_actions", []), [])
         self.assertTrue(self.has_ref(self.upstream, "refs/heads/" + self.branch))
         self.assertFalse(self.path.exists())
+
+    def test_existing_archive_is_reported_without_claiming_a_creation(self):
+        lifecycle.pin_snapshots(
+            self.repo, [{"oid": self.tip, "label": "existing"}], pr=self.pr
+        )
+        record = lifecycle.retire(self.repo, self.branch, apply=True)
+        actions = record["remote_actions"]
+        self.assertEqual(actions[0]["action"], "archive-reused")
+        self.assertEqual(actions[0]["ref"], record["archives"][0]["ref"])
+        self.assertNotIn("archive-created", [action["action"] for action in actions])
+
+    def test_source_disappearing_during_cleanup_is_reported_as_already_absent(self):
+        original = lifecycle._pin
+
+        def remove_source(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.git("update-ref", "-d", "refs/heads/" + self.branch, cwd=self.upstream)
+            return result
+
+        with mock.patch.object(lifecycle, "_pin", side_effect=remove_source):
+            record = lifecycle.retire(self.repo, self.branch, apply=True)
+        action = record["remote_actions"][-1]
+        self.assertEqual(action["action"], "branch-absent")
+        self.assertEqual(action["remote"], "upstream")
+        self.assertTrue(record["source"]["oid"])
+
+    def test_source_missing_at_preview_is_reported_as_already_absent(self):
+        self.git("update-ref", "-d", "refs/heads/" + self.branch, cwd=self.upstream)
+        record = lifecycle.retire(self.repo, self.branch, apply=True)
+        self.assertEqual(record["remote_actions"][-1]["action"], "branch-absent")
+        self.assertIsNone(record["source"]["oid"])
+
+    def test_backtracking_override_is_the_reported_record_path(self):
+        override = self.root / "custom-backtracking"
+        with mock.patch.dict(
+            os.environ, {"MY_GIT_BACKTRACKING_INFO_LOCAL": str(override)}
+        ):
+            record = lifecycle.retire(
+                self.repo, self.branch, apply=True, local_only=True
+            )
+        saved_path = override / (record["id"] + ".json")
+        self.assertEqual(record["backtracking_path"], str(saved_path))
+        self.assertEqual(json.loads(saved_path.read_text()), record)
 
     def test_explicit_review_archive_pins_tip_without_deleting_source(self):
         self.repo.branches[self.branch]["role"] = "review"
@@ -457,6 +512,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotIn("worktree", record["completed"])
         result = lifecycle.resume(core.Repo(self.primary), record["id"])
         self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["remote_actions"], record["remote_actions"])
         self.assertNotIn(self.branch, core.Repo(self.primary).branches)
 
     def test_preserve_local_before_rebase_uses_no_remote(self):

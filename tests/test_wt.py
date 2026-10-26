@@ -244,12 +244,36 @@ class WorktreeTests(unittest.TestCase):
         path = Path(created.stdout.strip())
         result = self.cli("drop", "--local-only", "--apply", "--json", cwd=path)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
         record = json.loads(result.stdout)["operations"][0]
         self.assertFalse(path.exists())
         restored = self.cli("restore", record["id"], "--print-path")
         self.assertEqual(restored.returncode, 0, restored.stderr)
         self.assertEqual(Path(restored.stdout.strip()), path)
         self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_cleanup_path_mode_reports_recovery_without_polluting_navigation(self):
+        path = self.repo.create("rwgk/disposable", "main")
+        result = self.cli("drop", "--local-only", "--apply", "--print-path", cwd=path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(self.primary.resolve()) + "\n")
+        records = list((self.area / "backtracking").glob("*.json"))
+        self.assertEqual(len(records), 1)
+        record = json.loads(records[0].read_text())
+        self.assertEqual(record["status"], "complete")
+        self.assertFalse(path.exists())
+        lines = result.stderr.splitlines()
+        remotes = dict.fromkeys(
+            self.repo.config[key] for key in ("upstream_remote", "archive_remote")
+        )
+        self.assertEqual(len(lines), 2 + len(remotes))
+        self.assertEqual(
+            lines[0], "Removed local branch rwgk/disposable and its worktree."
+        )
+        self.assertEqual(
+            lines[1], f"Backtracking: {records[0].resolve()} (1 recovery ref)"
+        )
+        self.assertEqual(lines[2:], [f"{remote}: no changes" for remote in remotes])
 
 
 class NamingTests(unittest.TestCase):

@@ -166,6 +166,12 @@ wt clean pr1234                 # preview one PR
 wt clean pr1234 --apply          # perform its lifecycle cleanup
 ```
 
+Applied cleanup reports the backtracking record's full path and the outcome on
+each remote: branches deleted or already absent, archive tags created or reused,
+or no changes. This feedback is also visible through the `wt` shell function;
+`--json` remains structured output, and `--print-path` writes the feedback to
+stderr while keeping stdout reserved for the navigation path.
+
 Merged and closed-unmerged PRs are eligible. Open, draft, or queued PRs stay live.
 A batch previews every terminal candidate before deleting anything, then retires
 stack layers from top to bottom. Surviving stack dependencies, unfinished Git

@@ -107,8 +107,10 @@ def _save_record(repo, record):
     """Persist locally and, when configured, remotely before any next mutation."""
     name = f"{record['id']}.json"
     journal = _operation_dir(repo) / name
+    backtracking = (_backtracking_dir(repo) / name).absolute()
+    record["backtracking_path"] = str(backtracking)
     _atomic_json(journal, record)
-    _atomic_json(_backtracking_dir(repo) / name, record)
+    _atomic_json(backtracking, record)
     destination = os.environ.get("MY_GIT_BACKTRACKING_INFO_REMOTE", "").rstrip("/")
     if destination:
         if ":" not in destination:
@@ -218,7 +220,7 @@ def _covering_archive(repo, destination, oid, pr):
     return None
 
 
-def _pin(repo, snapshots, pr=None, destination=None):
+def _pin(repo, snapshots, pr=None, destination=None, *, on_archive=None):
     if not snapshots:
         return []
     destination = destination or _archive_identity(repo)
@@ -239,6 +241,8 @@ def _pin(repo, snapshots, pr=None, destination=None):
             if existing:
                 if existing not in archives:
                     archives.append(existing)
+                if on_archive:
+                    on_archive(existing, created=False)
                 continue
             # Empty expected value means creation only. Never move an existing tag.
             _git(
@@ -251,7 +255,10 @@ def _pin(repo, snapshots, pr=None, destination=None):
             )
         if _remote_tip(repo, actual_url, ref) != oid:
             raise WTError(f"Remote archive verification failed for {ref}")
-        archives.append({**destination, "ref": ref, "oid": oid})
+        archive = {**destination, "ref": ref, "oid": oid}
+        archives.append(archive)
+        if on_archive:
+            on_archive(archive, created=not current)
     return archives
 
 
@@ -564,11 +571,21 @@ def _apply_retirement_locked(repo, record):
         stacks.check_retirement(repo, branch)
     _protect_snapshots(repo, record)
     if "archives" not in completed:
+
+        def record_archive(archive, *, created):
+            action = {key: archive[key] for key in ("remote", "repo", "ref", "oid")}
+            action["action"] = "archive-created" if created else "archive-reused"
+            actions = record.setdefault("remote_actions", [])
+            if action not in actions:
+                actions.append(action)
+                _save_record(repo, record)
+
         record["archives"] = _pin(
             repo,
             record["archive_snapshots"],
             record.get("pr"),
             record.get("archive_destination"),
+            on_archive=record_archive,
         )
         completed.append("archives")
         _save_record(repo, record)
@@ -607,6 +624,21 @@ def _apply_retirement_locked(repo, record):
                 source["url"],
                 f":{source['ref']}",
             )
+        record.setdefault("remote_actions", []).append(
+            {
+                **{key: source[key] for key in ("remote", "repo", "ref", "oid")},
+                "action": "branch-deleted" if current else "branch-absent",
+            }
+        )
+        completed.append("remote_branch")
+        _save_record(repo, record)
+    elif source and not source["oid"] and "remote_branch" not in completed:
+        record.setdefault("remote_actions", []).append(
+            {
+                **{key: source[key] for key in ("remote", "repo", "ref", "oid")},
+                "action": "branch-absent",
+            }
+        )
         completed.append("remote_branch")
         _save_record(repo, record)
     if "worktree" not in completed:

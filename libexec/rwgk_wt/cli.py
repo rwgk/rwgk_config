@@ -281,7 +281,78 @@ def _dispatch(repo, args):
     raise WTError("Unknown command")
 
 
-def _display(args, value):
+def _cleanup_lines(repo, value):
+    operations = value.get("operations", [value])
+    lines = []
+    if not operations:
+        lines.append("No branch/worktree pairs removed.")
+    for record in operations:
+        lines.append(f"Removed local branch {record['branch']} and its worktree.")
+        path = record.get("backtracking_path") or (
+            lifecycle._backtracking_dir(repo) / f"{record['id']}.json"
+        )
+        count = sum(bool(row.get("recovery_ref")) for row in record["snapshots"])
+        noun = "ref" if count == 1 else "refs"
+        lines.append(
+            f"Backtracking: {Path(path).expanduser().resolve()} "
+            f"({count} recovery {noun})"
+        )
+        events = record.get("remote_actions", [])
+        archives = record.get("archives", [])
+        source = record.get("source") or {}
+        remotes = dict.fromkeys(
+            [
+                repo.config.get("upstream_remote", "upstream"),
+                repo.config.get("archive_remote", "origin"),
+                *[row["remote"] for row in events],
+                *[row["remote"] for row in archives],
+                *([source["remote"]] if source else []),
+            ]
+        )
+        for remote in remotes:
+            # Resuming can verify an archive that this operation already created.
+            # Report the recorded mutation once rather than claiming two changes.
+            actions = {}
+            for event in events:
+                if event["remote"] != remote:
+                    continue
+                key = event["ref"]
+                if key not in actions or event["action"] in (
+                    "archive-created",
+                    "branch-deleted",
+                ):
+                    actions[key] = event
+            descriptions = []
+            for event in actions.values():
+                description = {
+                    "archive-created": "created archive tag",
+                    "archive-reused": "reused archive tag",
+                    "branch-deleted": "deleted",
+                    "branch-absent": "source branch already absent:",
+                }[event["action"]]
+                descriptions.append(f"{description} {event['ref']} ({event['repo']})")
+            for archive in archives:
+                if archive["remote"] == remote and archive["ref"] not in actions:
+                    descriptions.append(
+                        f"archive verified: {archive['ref']} ({archive['repo']}; "
+                        "creation not recorded)"
+                    )
+            if (
+                source.get("remote") == remote
+                and source["ref"] not in actions
+                and ("remote_branch" in record["completed"] or not source["oid"])
+            ):
+                descriptions.append(
+                    f"source branch absent: {source['ref']} ({source['repo']}; "
+                    "prior deletion not recorded)"
+                )
+            lines.append(f"{remote}: " + ("; ".join(descriptions) or "no changes"))
+    for row in value.get("skipped", []):
+        lines.append(f"Skipped {row['branch']}: {row['reason']}")
+    return lines
+
+
+def _display(args, value, repo=None):
     if args.command == "list":
         print(
             f"{value['config']['key']}: {value['config']['trunk']} at {value['config']['primary']}"
@@ -301,6 +372,8 @@ def _display(args, value):
                 "Detached worktrees (unchanged): "
                 + ", ".join(value["detached_worktrees"])
             )
+    elif args.command in ("clean", "drop") and args.apply:
+        print("\n".join(_cleanup_lines(repo, value)))
     elif args.command in ("clean", "drop") and "operations" in value:
         print(f"{value['result']}: {len(value['operations'])} pair(s)")
         for row in value["operations"]:
@@ -352,11 +425,13 @@ def main(argv=None):
         if print_path:
             if path is None:
                 raise WTError("This invocation does not produce a navigation path.")
+            if args.command in ("clean", "drop") and args.apply:
+                print("\n".join(_cleanup_lines(repo, value)), file=sys.stderr)
             print(Path(path).resolve())
         elif as_json:
             print(json.dumps(value, indent=2))
         else:
-            _display(args, value)
+            _display(args, value, repo)
         return 1 if args.command == "doctor" and not value["ok"] else 0
     except (WTError, OSError, ValueError, KeyError) as error:
         if as_json:
