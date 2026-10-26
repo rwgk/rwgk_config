@@ -13,8 +13,8 @@ navigation changes directories. New development branches are `rwgk/<slug>` and
 live under `$W/trees/<repo-key>/`, normally `/wrk/trees/<repo-key>/`.
 
 This applies to both human and agent work, including PR reviews and short-lived
-experiments. Reuse a worktree already supplied for the task. The broader
-`$W/codex_scratch_space/` remains available for logs and other non-checkout files.
+experiments. Reuse a worktree already supplied for the task. For working material
+outside Git checkouts, see [Persistent scratch and temporary files](#persistent-scratch-and-temporary-files).
 
 Tests that exercise Git in wholly disposable fixture repositories use
 `$W/trees/.wt-tests/`; that exception does not cover real task repositories.
@@ -86,7 +86,10 @@ current interface; inspect existing state before changing repository settings.
 wt trunk update                 # fast-forward trunk in its primary worktree
 wt new fix-stream               # create rwgk/fix-stream and enter its worktree
 # edit, build, test, commit
-wt publish --title 'Fix stream lifetime' --body-file /tmp/pr-body.txt
+mkdir -p "$W/codex_scratch_space/fix-stream"
+# write the PR draft to "$W/codex_scratch_space/fix-stream/pr-body.md"
+wt publish --title 'Fix stream lifetime' \
+    --body-file "$W/codex_scratch_space/fix-stream/pr-body.md"
 wt go pr1234                    # after GitHub assigns a PR number
 ```
 
@@ -274,3 +277,37 @@ stack operations.
 
 The previous creation, PR checkout, archival, deletion, and trunk-update helpers
 have been removed. Use this command family for the complete lifecycle.
+
+## Persistent scratch and temporary files
+
+`$W/codex_scratch_space/` holds working material outside Git checkouts that should
+survive an interruption or reboot. Keep material when its loss would cost authored
+work, substantial preparation, or useful evidence or context for resuming,
+explaining, reproducing, or verifying a task. This includes drafts, patches,
+reproducers, investigation notes, diagnostic logs, downloaded inputs, and prepared
+tooling. A short failed run can yield important evidence; runtime alone does not
+decide what to retain.
+
+Group material by task or reusable purpose:
+
+| Location | Typical contents |
+|---|---|
+| `$W/codex_scratch_space/<task>/` | Drafts, patches, reproducers, investigation notes |
+| `$W/codex_scratch_space/logs/<task>/` | Useful logs and results |
+| `$W/codex_scratch_space/toolkits/<purpose>/` | Reusable tooling and prepared inputs |
+
+Reuse established durable locations such as `$L` for QA logs, and keep build
+outputs and environments in worktree-local ignored directories where the build
+workflow specifies them. Maintained source and documentation belong in their
+repositories; real Git checkouts use the `wt` layout above.
+
+Use `/tmp` for cheap disposable plumbing: command inputs, intermediates, or
+throwaway environments that can be recreated from durable inputs without losing
+useful work or observations. Move useful evidence into durable storage before
+relying on it for follow-up.
+
+Use meaningful directory names, with a brief note when the purpose or reason to
+retain the contents would otherwise be unclear. Agent handoffs should identify
+useful retained artifacts and why they matter. Remove redundant scratch within
+the task's scope once useful contents reach their intended destination or are no
+longer needed. Keeping important work visible matters more than saving disk space.

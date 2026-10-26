@@ -41,3 +41,10 @@ Use `wt clean` for terminal PRs and `wt drop --local-only` for explicit local
 retirement. Preview before `--apply`. Preserve backtracking records and recovery
 refs; never substitute extension pruning or raw branch deletion for standard
 cleanup. Use `wt doctor` to inspect existing layouts before adopting them.
+
+## Persistent scratch and temporary files
+
+Follow the [scratch policy in README.md](README.md#persistent-scratch-and-temporary-files).
+Use `$W/codex_scratch_space/` for task material needed to resume, explain,
+reproduce, or verify work after interruption. Use `/tmp` for cheap disposable
+plumbing recreated from durable inputs without losing useful work or evidence.
