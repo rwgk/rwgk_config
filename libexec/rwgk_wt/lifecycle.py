@@ -395,6 +395,33 @@ def _trunk_snapshot(repo):
     return {"remote": remote, "url": url, "ref": ref, "oid": oid}
 
 
+def _worktree_gitdir(repo, path):
+    if path.resolve() == repo.primary.resolve():
+        return repo.common
+    root = repo.common / "worktrees"
+    candidates = []
+    for admin in root.iterdir() if root.is_dir() else ():
+        backlink = admin / "gitdir"
+        if not backlink.is_file():
+            continue
+        location = admin / backlink.read_text().rstrip("\n")
+        if location.parent.resolve() != path.resolve():
+            continue
+        common = admin / "commondir"
+        if (
+            not common.is_file()
+            or (admin / common.read_text().rstrip("\n")).resolve()
+            != repo.common.resolve()
+        ):
+            raise WTError(f"Invalid Git administration for {path}; inspect 'wt doctor'")
+        candidates.append(admin)
+    if len(candidates) != 1:
+        raise WTError(
+            f"Cannot identify Git administration for {path}; inspect 'wt doctor'"
+        )
+    return candidates[0]
+
+
 def _preflight_unpaired(repo, branch):
     if branch == repo.config["trunk"]:
         raise WTError("The primary trunk branch cannot be retired")
@@ -410,11 +437,7 @@ def _preflight_unpaired(repo, branch):
     # A rebase or bisect can detach HEAD while still reserving the original branch.
     for row in repo.worktrees():
         path = Path(row["path"])
-        if not path.is_dir():
-            raise WTError(
-                f"Registered worktree is missing at {path}; inspect 'wt doctor'"
-            )
-        gitdir = Path(_git(repo, "rev-parse", "--absolute-git-dir", cwd=path))
+        gitdir = _worktree_gitdir(repo, path)
         for name in (
             "rebase-merge/head-name",
             "rebase-apply/head-name",

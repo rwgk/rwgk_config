@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libexec"))
-from rwgk_wt import stacks
+from rwgk_wt import lifecycle, stacks
 from rwgk_wt.core import Repo, WTError, branch_name, directory_name, run_command
 
 TEST_ROOT = os.environ.get("WT_TEST_WORKTREE_ROOT")
@@ -398,6 +398,82 @@ class WorktreeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Git operation", result.stderr)
         self.assertTrue(self.repo.exists("refs/heads/rwgk/rebasing"))
+
+    def stale_detached_worktree(self):
+        path = self.area / "missing-checkout"
+        self.git("worktree", "add", "--detach", str(path), "main")
+        admin = Path(self.git("rev-parse", "--absolute-git-dir", cwd=path))
+        shutil.rmtree(path)
+        return path, admin
+
+    def test_unrelated_stale_worktree_does_not_block_unpaired_retirement(self):
+        path, admin = self.stale_detached_worktree()
+        (admin / "rebase-merge").mkdir()
+        (admin / "rebase-merge/head-name").write_text("refs/heads/other-branch\n")
+        before = {
+            str(p.relative_to(admin)): p.read_bytes()
+            for p in admin.rglob("*")
+            if p.is_file()
+        }
+        self.git("branch", "old-branch")
+        preview = self.cli("drop", "old-branch", "--local-only", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertTrue(self.repo.exists("refs/heads/old-branch"))
+        result = self.cli("drop", "old-branch", "--local-only", "--apply", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)["operations"][0]
+        self.assertEqual(record["status"], "complete")
+        self.assertFalse(self.repo.exists("refs/heads/old-branch"))
+        self.assertFalse(path.exists())
+        self.assertEqual(
+            before,
+            {
+                str(p.relative_to(admin)): p.read_bytes()
+                for p in admin.rglob("*")
+                if p.is_file()
+            },
+        )
+        self.assertTrue(any(Path(row["path"]) == path for row in self.repo.worktrees()))
+
+    def test_stale_worktree_reservations_protect_the_target_branch(self):
+        _, admin = self.stale_detached_worktree()
+        self.git("branch", "old-branch")
+        for state in (
+            "rebase-merge/head-name",
+            "rebase-apply/head-name",
+            "BISECT_START",
+        ):
+            with self.subTest(state=state):
+                marker = admin / state
+                marker.parent.mkdir(exist_ok=True)
+                marker.write_text(
+                    "old-branch\n"
+                    if state == "BISECT_START"
+                    else "refs/heads/old-branch\n"
+                )
+                result = self.cli("drop", "old-branch", "--local-only", "--apply")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Git operation", result.stderr)
+                self.assertTrue(self.repo.exists("refs/heads/old-branch"))
+                marker.unlink()
+        self.assertFalse(list((self.area / "backtracking").glob("*.json")))
+
+    def test_stale_worktree_still_owning_branch_is_protected(self):
+        path = self.area / "missing-owner"
+        self.git("worktree", "add", "-b", "old-branch", str(path))
+        shutil.rmtree(path)
+        result = self.cli("drop", "old-branch", "--local-only", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanaged worktree", result.stderr)
+        self.assertTrue(self.repo.exists("refs/heads/old-branch"))
+
+    def test_worktree_admin_backlinks_accept_relative_paths_and_validate_common(self):
+        path, admin = self.stale_detached_worktree()
+        (admin / "gitdir").write_text(os.path.relpath(path / ".git", admin) + "\n")
+        self.assertEqual(lifecycle._worktree_gitdir(self.repo, path), admin)
+        (admin / "commondir").write_text("../../../foreign\n")
+        with self.assertRaisesRegex(WTError, "Invalid Git administration"):
+            lifecycle._worktree_gitdir(self.repo, path)
 
 
 class NamingTests(unittest.TestCase):
