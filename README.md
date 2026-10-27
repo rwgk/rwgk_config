@@ -196,6 +196,14 @@ cleanup. Known disposable build outputs and tool caches (including `.mypy_cache`
 and `.lycheecache`) need the explicit `--discard-builds` option. Inspect the
 preview before applying.
 
+Git's ignore rules select the ignored paths. Cleanup recognizes conventional
+Python extension binaries, package metadata, Cython debug output, benchmark
+directories, and generated Cython/version files as disposable build outputs.
+Generated source files require generator markers; Cython C/C++ also requires a
+matching tracked `.pyx` source. Other ignored material stays protected, including
+ignored credentials and handwritten source. An ignored path alone is not consent
+to discard it.
+
 For your own PR, cleanup records recovery information, preserves distinct local
 and source histories, archives otherwise-uncovered tips with immutable tags on
 origin, and deletes the verified live remote branch with an exact-SHA lease.
