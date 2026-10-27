@@ -105,7 +105,11 @@ def parser():
         command.add_argument("selector", nargs="?")
         command.add_argument("--apply", action="store_true")
         command.add_argument("--archive-local", action="store_true")
-        command.add_argument("--discard-builds", action="store_true")
+        command.add_argument(
+            "--discard-builds",
+            action="store_true",
+            help="discard recognized ignored build outputs and tool caches",
+        )
         command.add_argument(
             "--resume",
             metavar="RECORD",

@@ -192,8 +192,9 @@ Merged and closed-unmerged PRs are eligible. Open, draft, or queued PRs stay liv
 A batch previews every terminal candidate before deleting anything, then retires
 stack layers from top to bottom. Surviving stack dependencies, unfinished Git
 operations, dirty tracked files, or unexpected untracked files stop unsafe
-cleanup. Known disposable build outputs
-need the explicit `--discard-builds` option. Inspect the preview before applying.
+cleanup. Known disposable build outputs and tool caches (including `.mypy_cache`
+and `.lycheecache`) need the explicit `--discard-builds` option. Inspect the
+preview before applying.
 
 For your own PR, cleanup records recovery information, preserves distinct local
 and source histories, archives otherwise-uncovered tips with immutable tags on

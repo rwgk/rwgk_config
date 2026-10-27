@@ -353,7 +353,7 @@ def _preflight_worktree(repo, path, branch, discard_builds):
     ignored = [item for item in ignored if item]
     if ignored and not discard_builds:
         raise WTError(
-            "Ignored files require --discard-builds after inspecting build directories"
+            "Ignored files require --discard-builds after inspecting build outputs and caches"
         )
     known = set(
         repo.config.get("disposable_build_dirs", [])
@@ -366,6 +366,8 @@ def _preflight_worktree(repo, path, branch, discard_builds):
             "__pycache__",
             ".pytest_cache",
             ".ruff_cache",
+            ".mypy_cache",
+            ".lycheecache",
             "CMakeFiles",
         ]
     )
@@ -374,7 +376,8 @@ def _preflight_worktree(repo, path, branch, discard_builds):
     ]
     if unknown:
         raise WTError(
-            "Ignored paths are not recognized disposable builds: " + ", ".join(unknown)
+            "Ignored paths are not recognized disposable build outputs or caches: "
+            + ", ".join(unknown)
         )
     return bool(ignored)
 

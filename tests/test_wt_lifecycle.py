@@ -480,9 +480,15 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(core.WTError, "assume-unchanged"):
             lifecycle.retire(self.repo, self.branch, apply=True)
 
-    def test_ignored_builds_need_explicit_discard(self):
+    def test_ignored_builds_and_tool_caches_need_explicit_discard(self):
+        with (self.repo.common / "info" / "exclude").open("a") as stream:
+            stream.write("\n.lycheecache\n.mypy_cache/\n")
         (self.path / "build").mkdir()
         (self.path / "build" / "generated").write_text("disposable\n")
+        (self.path / ".lycheecache").write_text("https://example.invalid/,200,123\n")
+        cache = self.path / ".mypy_cache" / "3.11"
+        cache.mkdir(parents=True)
+        (cache / "cache.json").write_text("{}\n")
         with self.assertRaisesRegex(core.WTError, "discard-builds"):
             lifecycle.retire(self.repo, self.branch, apply=True)
         lifecycle.retire(self.repo, self.branch, apply=True, discard_builds=True)
