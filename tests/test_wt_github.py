@@ -269,7 +269,7 @@ class GitHubTests(unittest.TestCase):
             if command[0] == "git" and "push" in command[:4]
         ]
 
-    def invoke_pull(self, path, command="pull", flags=()):
+    def invoke_pull(self, path, flags=()):
         stdout, stderr = io.StringIO(), io.StringIO()
         repo = FixtureRepo(self, path)
         with (
@@ -277,7 +277,7 @@ class GitHubTests(unittest.TestCase):
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
-            status = cli.main([command, *flags])
+            status = cli.main(["pull", *flags])
         return status, stdout.getvalue(), stderr.getvalue()
 
     def review_pair(self):
@@ -288,32 +288,28 @@ class GitHubTests(unittest.TestCase):
         git(self.remotes["upstream"], "update-ref", "refs/pull/42/head", oid)
         return github.open_pr(self.repo, 42)
 
-    def test_pull_and_refresh_update_current_pr_from_subdirectory(self):
+    def test_pull_updates_current_pr_from_subdirectory(self):
         path = self.review_pair()
         nested = path / "nested"
         nested.mkdir()
-        for command in ("pull", "refresh"):
-            with self.subTest(command=command):
-                previous = git(path, "rev-parse", "HEAD")
-                oid = git(
-                    self.primary,
-                    "commit-tree",
-                    "main^{tree}",
-                    "-p",
-                    previous,
-                    "-m",
-                    "New PR commit",
-                )
-                self.prs[42]["head"]["sha"] = oid
-                git(self.primary, "push", "upstream", oid + ":refs/pull/42/head")
-                status, stdout, stderr = self.invoke_pull(nested, command)
-                self.assertEqual((status, stderr), (0, ""))
-                self.assertIn("Refreshed from PR #42: rwgk/review-pr42", stdout)
-                self.assertIn(f"HEAD {oid}", stdout)
-                self.assertEqual(git(path, "rev-parse", "HEAD"), oid)
-                self.assertEqual(
-                    git(self.primary, "symbolic-ref", "--short", "HEAD"), "main"
-                )
+        previous = git(path, "rev-parse", "HEAD")
+        oid = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            previous,
+            "-m",
+            "New PR commit",
+        )
+        self.prs[42]["head"]["sha"] = oid
+        git(self.primary, "push", "upstream", oid + ":refs/pull/42/head")
+        status, stdout, stderr = self.invoke_pull(nested)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Updated from PR #42: rwgk/review-pr42", stdout)
+        self.assertIn(f"HEAD {oid}", stdout)
+        self.assertEqual(git(path, "rev-parse", "HEAD"), oid)
+        self.assertEqual(git(self.primary, "symbolic-ref", "--short", "HEAD"), "main")
         status, stdout, stderr = self.invoke_pull(path)
         self.assertEqual((status, stderr), (0, ""))
         self.assertIn("Already up to date with PR #42", stdout)

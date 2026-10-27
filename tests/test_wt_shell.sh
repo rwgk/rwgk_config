@@ -80,12 +80,10 @@ wt trunk
 
 # Pull updates the current worktree without moving out of a nested directory.
 cd "$test_root/from"
-for subcommand in pull refresh; do
-    wt "$subcommand" >"$test_root/output"
-    [[ "$PWD" == "$test_root/from" ]] || fail "$subcommand changed directories"
-    [[ "$(cat "$WT_TEST_ARGUMENTS")" == "$subcommand" ]] || fail "$subcommand was altered"
-    [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail "$subcommand output was hidden"
-done
+wt pull >"$test_root/output"
+[[ "$PWD" == "$test_root/from" ]] || fail 'pull changed directories'
+[[ "$(cat "$WT_TEST_ARGUMENTS")" == pull ]] || fail 'pull was altered'
+[[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail 'pull output was hidden'
 
 # A late journal/catalog failure can occur after cleanup removes our CWD.
 cd "$test_root/from"

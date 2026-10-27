@@ -117,15 +117,13 @@ wt name rwgk/fix-stream          # print centrally mapped directory name
 wt pr 1234                      # or the full PR URL
 # review and test in the resulting worktree
 wt pr 1234                      # resume the same pair
-wt pull                         # refresh this worktree's PR; no number needed
-wt refresh                      # alias for wt pull
-wt pr 1234 --refresh             # explicitly select the PR to refresh
+wt pull                         # update this worktree's PR; no number needed
 ```
 
 Your own PR reuses its local branch when available. Another author's PR gets a
 local `rwgk/review-pr1234` branch. PR head identity is recorded separately from
 the local branch name, and the receiving repository's PR head ref permits
-checkout after a contributor fork or branch disappears. Refresh stops when local
+checkout after a contributor fork or branch disappears. Pull stops when local
 work cannot be updated safely. Publishing changes to another author's branch
 requires a separate explicit action; ordinary `wt publish` does not imply that.
 
