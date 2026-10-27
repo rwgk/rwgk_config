@@ -414,6 +414,7 @@ def _display(args, value, repo=None):
             action = "Updated from"
         print(f"{action} PR #{value['pr']['number']}: {value['branch']}")
         print(f"HEAD {value['oid']}")
+        print(value["pr"]["url"])
     elif "path" in value:
         print(value["path"])
     else:
