@@ -45,6 +45,12 @@ def parser():
         action="store_true",
         help="update a clean review checkout from its observed PR head",
     )
+    commands.add_parser(
+        "pull",
+        aliases=["refresh"],
+        help="refresh the current independent PR worktree safely",
+        description="Refresh the PR associated with this worktree, preserving local work.",
+    )
     for name in ("go", "path"):
         command = commands.add_parser(name, help="resolve an existing owning worktree")
         command.add_argument("selector")
@@ -146,6 +152,9 @@ def _dispatch(repo, args):
     if command == "pr":
         path = github.open_pr(repo, args.selector, refresh=args.refresh)
         return {"path": str(path)}, path
+    if command in ("pull", "refresh"):
+        result = github.refresh_current(repo)
+        return result, Path(result["path"])
     if command in ("go", "path"):
         branch = repo.resolve(args.selector)
         path = repo.owner(branch)
@@ -402,6 +411,15 @@ def _display(args, value, repo=None):
     elif args.command == "trunk" and args.action == "update":
         print(value["path"])
         print(f"{value['trunk']} {value['oid']}")
+    elif args.command in ("pull", "refresh"):
+        if value["oid"] != value["pr"]["head_oid"]:
+            action = "Kept local commits ahead of"
+        elif value["oid"] == value["previous_oid"]:
+            action = "Already up to date with"
+        else:
+            action = "Refreshed from"
+        print(f"{action} PR #{value['pr']['number']}: {value['branch']}")
+        print(f"HEAD {value['oid']}")
     elif "path" in value:
         print(value["path"])
     else:

@@ -1,6 +1,8 @@
 """Exercise PR and publication policy with real Git refs and local bare remotes."""
 
+import contextlib
 import copy
+import io
 import json
 import os
 import subprocess
@@ -12,7 +14,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
-from rwgk_wt import github
+from rwgk_wt import cli, github
 from rwgk_wt.core import Repo, WTError
 
 
@@ -266,6 +268,144 @@ class GitHubTests(unittest.TestCase):
             for command in self.commands
             if command[0] == "git" and "push" in command[:4]
         ]
+
+    def invoke_pull(self, path, command="pull", flags=()):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        repo = FixtureRepo(self, path)
+        with (
+            mock.patch.object(cli, "Repo", return_value=repo),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = cli.main([command, *flags])
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def review_pair(self):
+        oid = self.repo.oid("main")
+        self.prs[42] = self.raw_pr(
+            42, author="contributor", head_repo=None, branch="topic", oid=oid
+        )
+        git(self.remotes["upstream"], "update-ref", "refs/pull/42/head", oid)
+        return github.open_pr(self.repo, 42)
+
+    def test_pull_and_refresh_update_current_pr_from_subdirectory(self):
+        path = self.review_pair()
+        nested = path / "nested"
+        nested.mkdir()
+        for command in ("pull", "refresh"):
+            with self.subTest(command=command):
+                previous = git(path, "rev-parse", "HEAD")
+                oid = git(
+                    self.primary,
+                    "commit-tree",
+                    "main^{tree}",
+                    "-p",
+                    previous,
+                    "-m",
+                    "New PR commit",
+                )
+                self.prs[42]["head"]["sha"] = oid
+                git(self.primary, "push", "upstream", oid + ":refs/pull/42/head")
+                status, stdout, stderr = self.invoke_pull(nested, command)
+                self.assertEqual((status, stderr), (0, ""))
+                self.assertIn("Refreshed from PR #42: rwgk/review-pr42", stdout)
+                self.assertIn(f"HEAD {oid}", stdout)
+                self.assertEqual(git(path, "rev-parse", "HEAD"), oid)
+                self.assertEqual(
+                    git(self.primary, "symbolic-ref", "--short", "HEAD"), "main"
+                )
+        status, stdout, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Already up to date with PR #42", stdout)
+        self.assertFalse(self.pushes())
+
+    def test_pull_reports_local_commits_without_discarding_them(self):
+        path = self.review_pair()
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local review work")
+        local = git(path, "rev-parse", "HEAD")
+        status, stdout, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Kept local commits ahead of PR #42", stdout)
+        self.assertIn(f"HEAD {local}", stdout)
+        self.assertEqual((path / "valuable").read_text(), "local contribution\n")
+
+    def test_pull_machine_output_retains_pr_and_commit_identity(self):
+        path = self.review_pair()
+        oid = git(path, "rev-parse", "HEAD")
+        status, stdout, stderr = self.invoke_pull(path, flags=["--json"])
+        self.assertEqual((status, stderr), (0, ""))
+        value = json.loads(stdout)
+        self.assertEqual(value["branch"], "rwgk/review-pr42")
+        self.assertEqual(value["pr"]["number"], 42)
+        self.assertEqual(value["pr"]["head_oid"], oid)
+        self.assertEqual((value["previous_oid"], value["oid"]), (oid, oid))
+        status, stdout, stderr = self.invoke_pull(path, flags=["--print-path"])
+        self.assertEqual((status, stderr, stdout), (0, "", str(path) + "\n"))
+
+    def test_pull_requires_pr_and_directs_trunk_to_its_update_command(self):
+        status, _, stderr = self.invoke_pull(self.primary)
+        self.assertEqual(status, 1)
+        self.assertIn("wt trunk update", stderr)
+        unpublished = self.branch()
+        status, _, stderr = self.invoke_pull(unpublished.root)
+        self.assertEqual(status, 1)
+        self.assertIn("no associated PR", stderr)
+        self.assertIn("wt pr NUMBER", stderr)
+        self.assertFalse(self.gh_calls)
+
+    def test_pull_does_not_refresh_one_stack_layer(self):
+        path = self.review_pair()
+        (self.repo.common / "gh-stack").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "stacks": [
+                        {
+                            "trunk": {"branch": "main"},
+                            "branches": [{"branch": "rwgk/review-pr42"}],
+                        }
+                    ],
+                }
+            )
+        )
+        before = len(self.gh_calls)
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual(status, 1)
+        self.assertIn("wt stack pull", stderr)
+        self.assertEqual(len(self.gh_calls), before)
+
+    def test_pull_rejects_wrong_pr_repository_or_registration_before_fetch(self):
+        path = self.review_pair()
+        saved = copy.deepcopy(self.repo.branches["rwgk/review-pr42"])
+        for problem in ("foreign-pr", "wrong-owner"):
+            with self.subTest(problem=problem):
+                metadata = copy.deepcopy(saved)
+                if problem == "foreign-pr":
+                    metadata["pr"]["base_repo"] = "Other/project"
+                else:
+                    metadata["path"] = str(self.primary)
+                self.repo.branches["rwgk/review-pr42"] = metadata
+                self.repo.save()
+                before = len(self.gh_calls)
+                status, _, stderr = self.invoke_pull(path)
+                self.assertEqual(status, 1)
+                self.assertIn("wt doctor", stderr)
+                self.assertEqual(len(self.gh_calls), before)
+
+    def test_pull_rejects_unmanaged_or_detached_worktree(self):
+        path = self.branch().root
+        del self.repo.branches["rwgk/change"]
+        self.repo.save()
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual(status, 1)
+        self.assertIn("unmanaged", stderr)
+        git(path, "checkout", "--detach", "HEAD")
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual(status, 1)
+        self.assertIn("Detached HEAD", stderr)
+        self.assertFalse(self.gh_calls)
 
     def test_new_publication_uses_fixed_empty_lease_and_tracks_destination(self):
         repo = self.branch()
@@ -546,7 +686,8 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(
             self.repo.branches["rwgk/review-pr42"]["last_checked_out_head"], old
         )
-        github.open_pr(self.repo, number, refresh=True)
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
         self.assertEqual(git(path, "rev-parse", "HEAD"), new)
         self.assertEqual(git(path, "status", "--porcelain"), "")
         refs = git(
@@ -572,8 +713,9 @@ class GitHubTests(unittest.TestCase):
         new = self.rewrite(source)
         self.prs[42]["head"]["sha"] = new
         git(self.primary, "push", "--force", "upstream", new + ":refs/pull/42/head")
-        with self.assertRaisesRegex(WTError, "local work diverged"):
-            github.open_pr(self.repo, 42, refresh=True)
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual(status, 1)
+        self.assertIn("local work diverged", stderr)
         self.assertEqual(git(path, "rev-parse", "HEAD"), local)
         self.assertEqual((path / "valuable").read_text(), "local contribution\n")
 

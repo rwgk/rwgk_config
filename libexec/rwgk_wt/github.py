@@ -431,6 +431,50 @@ def open_pr(repo, selector, refresh=False):
     return Path(path).resolve()
 
 
+def refresh_current(repo):
+    """Refresh the current independent PR through the same guarded PR-ref path."""
+    from . import stacks
+
+    branch = repo.current_branch()
+    if branch == repo.config["trunk"]:
+        raise WTError("On trunk; use 'wt trunk update' to fast-forward it.")
+    if branch is None:
+        raise WTError("Detached HEAD; use 'wt go' to enter a managed PR worktree.")
+    if branch not in repo.branches:
+        raise WTError("Current branch is unmanaged; use 'wt pr NUMBER' to open its PR.")
+    metadata = repo.branches[branch]
+    if repo.owner(branch) != repo.root or Path(metadata["path"]).resolve() != repo.root:
+        raise WTError(
+            "Current worktree does not match its registration; run 'wt doctor'."
+        )
+    if stacks.get_stack(repo, branch):
+        raise WTError(
+            "Current branch belongs to a stack; use 'wt stack pull' to preview, "
+            "then 'wt stack pull --apply' to adopt it."
+        )
+    pr = metadata.get("pr")
+    if not pr:
+        raise WTError(
+            "Current branch has no associated PR; use 'wt pr NUMBER' to open or associate one."
+        )
+    if (pr.get("base_repo") or "").lower() != repo.config["upstream_repo"].lower():
+        raise WTError(
+            "Associated PR belongs to another repository; inspect 'wt doctor'."
+        )
+    repo.check_primary()
+    previous = repo.oid(f"refs/heads/{branch}")
+    path = open_pr(repo, pr["number"], refresh=True)
+    oid = repo.oid(f"refs/heads/{branch}")
+    return {
+        "result": "unchanged" if oid == previous else "refreshed",
+        "branch": branch,
+        "path": str(path),
+        "pr": repo.branches[branch]["pr"],
+        "previous_oid": previous,
+        "oid": oid,
+    }
+
+
 def _remote_tip(repo, url, ref):
     result = _git_result(repo, "ls-remote", "--exit-code", "--refs", url, ref)
     if result.returncode == 2:

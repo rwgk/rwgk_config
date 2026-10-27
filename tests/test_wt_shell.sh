@@ -78,6 +78,15 @@ wt trunk update >"$test_root/output"
 wt trunk
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'trunk navigation did not enter primary'
 
+# Pull updates the current worktree without moving out of a nested directory.
+cd "$test_root/from"
+for subcommand in pull refresh; do
+    wt "$subcommand" >"$test_root/output"
+    [[ "$PWD" == "$test_root/from" ]] || fail "$subcommand changed directories"
+    [[ "$(cat "$WT_TEST_ARGUMENTS")" == "$subcommand" ]] || fail "$subcommand was altered"
+    [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail "$subcommand output was hidden"
+done
+
 # A late journal/catalog failure can occur after cleanup removes our CWD.
 cd "$test_root/from"
 export WT_TEST_REMOVE_ROOT="$test_root/from" WT_TEST_STATUS=17

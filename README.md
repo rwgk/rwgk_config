@@ -117,7 +117,9 @@ wt name rwgk/fix-stream          # print centrally mapped directory name
 wt pr 1234                      # or the full PR URL
 # review and test in the resulting worktree
 wt pr 1234                      # resume the same pair
-wt pr 1234 --refresh             # explicitly update after preserving local work
+wt pull                         # refresh this worktree's PR; no number needed
+wt refresh                      # alias for wt pull
+wt pr 1234 --refresh             # explicitly select the PR to refresh
 ```
 
 Your own PR reuses its local branch when available. Another author's PR gets a
@@ -126,6 +128,12 @@ the local branch name, and the receiving repository's PR head ref permits
 checkout after a contributor fork or branch disappears. Refresh stops when local
 work cannot be updated safely. Publishing changes to another author's branch
 requires a separate explicit action; ordinary `wt publish` does not imply that.
+
+Use `wt pull` instead of `git pull` in an independent PR worktree. It reports
+the PR and full resulting commit hash, follows rewritten PR history with recovery
+records, and stops on conflicting local work. Local commits ahead of the PR are
+kept. It preserves your current directory, including subdirectories. Trunk uses
+`wt trunk update`; stack layers use `wt stack pull` and its explicit `--apply`.
 
 ### Stacked PRs
 
