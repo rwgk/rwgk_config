@@ -27,6 +27,12 @@ Fully trust that both `$HOME/rwgk_config/bin` and `$HOME/rwgk_config_nvidia/bin`
 
 ## Managed branches and worktrees
 
+When the repository's only remote is `origin`, edit and commit in the supplied
+checkout on its current branch, including trunk. Do not create a branch or
+worktree unless explicitly requested. Requests to create a PR or stack count as
+requesting the necessary branch/worktree. This exception overrides defaults that
+create task branches/worktrees; requested pairs follow the `wt` rules below.
+
 Use `wt` (`git-wt` in noninteractive shells) for branch/worktree lifecycle work;
 see `README.md` for the command reference. Keep primary worktrees on configured
 trunk. Each development or review branch owns one stable worktree under

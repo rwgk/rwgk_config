@@ -12,9 +12,17 @@ Each active local branch owns one worktree. The primary checkout stays on trunk;
 navigation changes directories. New development branches are `rwgk/<slug>` and
 live under `$W/trees/<repo-key>/`, normally `/wrk/trees/<repo-key>/`.
 
-This applies to both human and agent work, including PR reviews and short-lived
-experiments. Reuse a worktree already supplied for the task. For working material
-outside Git checkouts, see [Persistent scratch and temporary files](#persistent-scratch-and-temporary-files).
+**Origin-only exception:** when a repository's only remote is `origin`, edit and
+commit in the supplied checkout on its current branch, including trunk. Create
+a new branch or worktree only when explicitly requested. Requests to create a PR
+or stack count as requesting the necessary branch/worktree, which follows the
+normal `wt` conventions. This exception overrides defaults that create a task
+branch/worktree for ordinary edits.
+
+New worktrees use this location for both human and agent work, including PR
+reviews and short-lived experiments. Reuse a worktree already supplied for the
+task. For working material outside Git checkouts, see the
+[persistent scratch policy](#persistent-scratch-and-temporary-files).
 
 Tests that exercise Git in wholly disposable fixture repositories use
 `$W/trees/.wt-tests/`; that exception does not cover real task repositories.
