@@ -42,12 +42,28 @@ _SKIP_FIELDS = {
 }
 
 
+def _command_result(value):
+    """Decode the CLI's text envelope without scanning incidental output prose."""
+    if not isinstance(value, str) or len(value) > 1_000_000:
+        return None
+    match = re.fullmatch(
+        r"Exit code: (-?\d+)\r?\nWall time: [^\r\n]+\r?\nOutput:\r?\n([\s\S]*)",
+        value,
+    )
+    if match is None:
+        return None
+    return {"exit_code": int(match[1]), "output": match[2]}
+
+
 def _objects(value, depth=0):
     """Unwrap structured results and JSON MCP text, without mining prose bodies."""
     if depth > 8:
         return
     if isinstance(value, str):
-        if value.lstrip().startswith(("{", "[")) and len(value) <= 1_000_000:
+        wrapped = _command_result(value)
+        if wrapped is not None:
+            yield from _objects(wrapped, depth + 1)
+        elif value.lstrip().startswith(("{", "[")) and len(value) <= 1_000_000:
             try:
                 yield from _objects(json.loads(value), depth + 1)
             except ValueError:
@@ -132,6 +148,11 @@ def _link(value, relation, cwd, evidence):
 def _patch_succeeded(response):
     # Some Codex versions expose only {} for a successful freeform patch.
     if isinstance(response, str):
+        wrapped = _command_result(response)
+        if wrapped is not None:
+            return not _failed(list(_objects(wrapped))) and _patch_succeeded(
+                wrapped["output"]
+            )
         stripped = response.lstrip()
         if stripped.startswith("{"):
             try:

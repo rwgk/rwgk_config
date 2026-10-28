@@ -383,6 +383,67 @@ class HookTests(unittest.TestCase):
         )
         self.assertEqual(self.captured()["links"][0]["relation"], "created")
 
+    def test_live_cli_wrapped_patch_success_is_captured(self):
+        self.handle(
+            self.event(
+                "apply_patch",
+                {"command": "*** Update File: changed.py"},
+                "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nSuccess. Updated the following files:\nM changed.py\n",
+            )
+        )
+        self.assertEqual(self.captured()["links"][0]["relation"], "modified")
+
+    def test_wrapped_patch_failures_and_empty_output_are_rejected(self):
+        for code, output in [
+            (1, "Success"),
+            (-1, "Success"),
+            (0, "Failed to apply patch"),
+            (0, ""),
+            (0, '{"isError":true}'),
+        ]:
+            with self.subTest(code=code, output=output):
+                self.handle(
+                    self.event(
+                        "apply_patch",
+                        {"command": "*** Add File: nope.py"},
+                        f"Exit code: {code}\nWall time: 0.1 seconds\nOutput:\n{output}",
+                    )
+                )
+        self.append.assert_not_called()
+
+    def test_partial_or_incidental_command_headers_are_not_success(self):
+        for response in [
+            "Exit code: 0\nOutput:\nSuccess",
+            "Log output:\nExit code: 0\nWall time: 0.1 seconds\nOutput:\nSuccess",
+        ]:
+            self.handle(
+                self.event(
+                    "apply_patch", {"command": "*** Add File: nope.py"}, response
+                )
+            )
+        self.append.assert_not_called()
+
+    def test_live_cli_wrapped_gh_success_is_captured(self):
+        self.handle(
+            self.event(
+                "Bash",
+                {"command": "gh pr create --title fixture --body fixture"},
+                "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nhttps://github.com/org/repo/pull/123\n",
+            )
+        )
+        self.assertEqual(self.captured()["links"][0]["relation"], "created")
+
+    def test_wrapped_gh_failure_and_reads_are_not_write_provenance(self):
+        for command, code in [("gh pr create", 1), ("gh pr view 123", 0)]:
+            self.handle(
+                self.event(
+                    "Bash",
+                    {"command": command},
+                    f"Exit code: {code}\nWall time: 0.1 seconds\nOutput:\nhttps://github.com/org/repo/pull/123\n",
+                )
+            )
+        self.append.assert_not_called()
+
     def test_http_failures_and_approval_states_do_not_claim_write_provenance(self):
         failures = [
             {"status": 422, "message": "Validation Failed"},
