@@ -211,6 +211,13 @@ class Repo:
         return owners[0] if owners else None
 
     def ensure_idle(self, path=None):
+        if self.state.get("submodule_rebase") and not getattr(
+            self, "_wt_submodule_rebase_active", False
+        ):
+            raise WTError(
+                "A restack has pending submodule work; finish or abort it with "
+                "'wt stack rebase' before another lifecycle operation."
+            )
         for name in (
             "gh-stack-rebase-state",
             "gh-stack-modify-state",
@@ -240,7 +247,13 @@ class Repo:
     def ensure_clean(self, path=None):
         path = path or self.root
         self.ensure_idle(path)
-        status = self.git("status", "--porcelain=v1", "--untracked-files=all", cwd=path)
+        status = self.git(
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+            cwd=path,
+        )
         if status:
             raise WTError(
                 f"Worktree has uncommitted or untracked files: {path}\n{status}"
@@ -253,6 +266,9 @@ class Repo:
             raise WTError(
                 f"Clear assume-unchanged/skip-worktree flags in {path} first."
             )
+        from . import submodules
+
+        submodules.inspect(self, path)
 
     def check_primary(self):
         if not self.primary.is_dir():
@@ -307,6 +323,14 @@ class Repo:
                 branch in self.branches
                 and owner == Path(self.branches[branch]["path"]).resolve()
             ):
+                if self.branches[branch].get("creating"):
+                    from . import submodules
+
+                    submodules.recover(self, owner)
+                    self.ensure_clean(owner)
+                    submodules.initialize(self, owner)
+                    self.branches[branch].pop("creating", None)
+                    self.save()
                 return owner
             raise WTError(
                 f"Branch already has a worktree at {owner}; adopt it deliberately."
@@ -336,9 +360,12 @@ class Repo:
         else:
             args += [str(path), branch]
         try:
-            self.git(*args)
+            self.git("-c", "submodule.recurse=false", *args)
             if self.owner(branch) != path.resolve():
                 raise WTError(f"Creation incomplete; inspect {path} and 'wt doctor'.")
+            from . import submodules
+
+            submodules.initialize(self, path)
         except Exception:
             if not self.owner(branch) and not path.exists():
                 self.branches.pop(branch, None)
@@ -456,7 +483,10 @@ class Repo:
         return self.config
 
     def trunk_update(self):
+        from . import submodules
+
         self.check_primary()
+        submodules.recover(self, self.primary)
         self.ensure_clean(self.primary)
         remote = self.config["upstream_remote"]
         if self.config["upstream_repo"]:
@@ -472,14 +502,23 @@ class Repo:
         trunk = self.config["trunk"]
         self.git(
             "fetch",
+            "--recurse-submodules=no",
             "--no-tags",
             remote,
             f"+refs/heads/{trunk}:refs/remotes/{remote}/{trunk}",
             cwd=self.primary,
         )
+        target = f"refs/remotes/{remote}/{trunk}"
+        submodules.validate_update(self, self.primary, target)
         self.git(
-            "merge", "--ff-only", f"refs/remotes/{remote}/{trunk}", cwd=self.primary
+            "-c",
+            "submodule.recurse=false",
+            "merge",
+            "--ff-only",
+            target,
+            cwd=self.primary,
         )
+        submodules.initialize(self, self.primary)
         return {
             "trunk": trunk,
             "path": str(self.primary),

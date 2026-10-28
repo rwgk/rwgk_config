@@ -9,6 +9,7 @@ $W/trees/.wt-tests/.
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import shlex
@@ -19,6 +20,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = Path(
@@ -882,6 +884,176 @@ class StackAdoptTests(unittest.TestCase):
             self.assertEqual(self.run_git("status", "--porcelain", cwd=path), "")
         self.assertTrue((one / "upstream-only.txt").exists())
         self.assertTrue((two / "upper.txt").exists())
+
+
+@unittest.skipUnless(
+    REAL_GIT and WORKTREE_ROOT,
+    "Submodule fixtures need Git and a worktree fixture root",
+)
+class SubmodulePinAdoptionTests(unittest.TestCase):
+    def setUp(self):
+        allowed = (Path(os.environ.get("W", "/wrk")) / "trees" / ".wt-tests").resolve()
+        root = Path(WORKTREE_ROOT).resolve()
+        self.assertTrue(root.is_relative_to(allowed), str(root))
+        root.mkdir(parents=True, exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="adopt-module-", dir=root)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("GIT_", "GH_"))
+        }
+        self.env.update(
+            GIT_CONFIG_GLOBAL=str(self.root / "gitconfig"), GIT_CONFIG_NOSYSTEM="1"
+        )
+        self.repo = self.root / "primary"
+        self.source = self.root / "module-source"
+        for path in (self.repo, self.source):
+            self.git(
+                "init", "--quiet", "--initial-branch=main", str(path), cwd=self.root
+            )
+            self.git("config", "user.name", "Submodule adoption fixture", cwd=path)
+            self.git("config", "user.email", "fixture@example.invalid", cwd=path)
+        (self.source / "module.txt").write_text("old\n")
+        self.git("add", ".", cwd=self.source)
+        self.git("commit", "--quiet", "-m", "Old module", cwd=self.source)
+        self.old_module = self.git("rev-parse", "HEAD", cwd=self.source)
+        (self.source / "module.txt").write_text("new\n")
+        self.git("commit", "--quiet", "-am", "New module", cwd=self.source)
+        self.new_module = self.git("rev-parse", "HEAD", cwd=self.source)
+        (self.repo / "parent.txt").write_text("parent\n")
+        self.git(
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--quiet",
+            str(self.source),
+            "modules/library",
+        )
+        self.module = self.repo / "modules" / "library"
+        self.git("checkout", "--quiet", "--detach", self.old_module, cwd=self.module)
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "Old parent pin")
+        self.old = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--quiet", "--detach", self.new_module, cwd=self.module)
+        self.git("add", "modules/library")
+        self.git("commit", "--quiet", "-m", "New parent pin")
+        self.target = self.git("rev-parse", "HEAD")
+        self.git(
+            "-c", "submodule.recurse=false", "reset", "--hard", "--quiet", self.old
+        )
+        self.git("checkout", "--quiet", "--detach", self.old_module, cwd=self.module)
+        sys.path.insert(0, str(SCRIPT_PATH.parent))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "adopter_submodule_fixture", SCRIPT_PATH
+            )
+            self.implementation = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self.implementation)
+        finally:
+            sys.path.pop(0)
+        self.args = SimpleNamespace(
+            worktree=str(self.repo), timeout=10, allow_submodule_pin_updates=True
+        )
+        self.adopter = self.implementation.Adopter(self.args)
+        self.adopter.env = dict(self.env)
+        self.row = {
+            "path": str(self.repo),
+            "branch": "main",
+            "old": self.old,
+            "target": self.target,
+        }
+        self.index = self.root / "adoption-index"
+
+    def git(self, *args, cwd=None):
+        return subprocess.run(
+            [str(REAL_GIT), *args],
+            cwd=cwd or self.repo,
+            env=self.env,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+
+    def stage_target(self):
+        self.adopter.clean(self.repo, "main")
+        self.adopter.collisions(self.repo, self.old, self.target)
+        shutil.copy2(self.repo / ".git" / "index", self.index)
+        self.adopter.read_tree(self.row, self.old, self.target, self.index)
+
+    def test_default_refuses_changed_submodule_pin(self):
+        self.args.allow_submodule_pin_updates = False
+        with self.assertRaisesRegex(self.implementation.Refusal, "submodule entries"):
+            self.adopter.collisions(self.repo, self.old, self.target)
+
+    def test_opt_in_leaves_clean_old_submodule_for_wt_to_update(self):
+        self.stage_target()
+        self.adopter.verify_index(self.row, self.index)
+        self.assertEqual(
+            self.git("rev-parse", "HEAD", cwd=self.module), self.old_module
+        )
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.old)
+        shutil.copy2(self.index, self.repo / ".git" / "index")
+        self.git("update-ref", "refs/heads/main", self.target, self.old)
+        self.adopter.clean(self.repo, "main", previous=self.old)
+        self.assertEqual(
+            self.git("rev-parse", "HEAD", cwd=self.module), self.old_module
+        )
+
+    def test_opt_in_still_rejects_dirty_parent_files(self):
+        self.stage_target()
+        (self.repo / "parent.txt").write_text("local parent work\n")
+        with self.assertRaises(self.implementation.Refusal):
+            self.adopter.verify_index(self.row, self.index)
+        self.assertEqual((self.repo / "parent.txt").read_text(), "local parent work\n")
+
+    def test_opt_in_still_rejects_concurrent_module_edits(self):
+        self.stage_target()
+        (self.module / "module.txt").write_text("local module work\n")
+        with self.assertRaisesRegex(self.implementation.Refusal, "Submodule"):
+            self.adopter.verify_index(self.row, self.index)
+        self.assertEqual(
+            (self.module / "module.txt").read_text(), "local module work\n"
+        )
+
+    def test_opt_in_rejects_unexpected_module_head(self):
+        self.stage_target()
+        self.git("config", "user.name", "Fixture", cwd=self.module)
+        self.git("config", "user.email", "fixture@example.invalid", cwd=self.module)
+        self.git(
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "-m",
+            "Local module commit",
+            cwd=self.module,
+        )
+        local = self.git("rev-parse", "HEAD", cwd=self.module)
+        with self.assertRaisesRegex(self.implementation.Refusal, "checkout changed"):
+            self.adopter.verify_index(self.row, self.index)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.module), local)
+
+    def test_opt_in_checks_module_hidden_index_flags(self):
+        self.git("update-index", "--assume-unchanged", "module.txt", cwd=self.module)
+        (self.module / "module.txt").write_text("hidden local work\n")
+        with self.assertRaisesRegex(self.implementation.Refusal, "hidden index"):
+            self.adopter.clean(self.repo, "main")
+
+    def test_opt_in_preserves_files_in_uninitialized_module(self):
+        self.git("submodule", "deinit", "--force", "--all")
+        (self.module / "notes.txt").write_text("keep local notes\n")
+        with self.assertRaises(self.implementation.Refusal):
+            self.adopter.clean(self.repo, "main")
+        self.assertEqual((self.module / "notes.txt").read_text(), "keep local notes\n")
+
+    def test_opt_in_still_refuses_submodule_removal(self):
+        self.git("rm", "--cached", "--quiet", "modules/library")
+        tree = self.git("write-tree")
+        target = self.git("commit-tree", tree, "-p", self.old, "-m", "Remove module")
+        with self.assertRaisesRegex(self.implementation.Refusal, "submodule entries"):
+            self.adopter.collisions(self.repo, self.old, target)
 
 
 if __name__ == "__main__":

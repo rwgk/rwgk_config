@@ -167,6 +167,7 @@ class AdoptionPreservationTests(unittest.TestCase):
             repo.run = adopt
             with (
                 patch.object(stacks, "_owners"),
+                patch.object(stacks, "_sync_submodules"),
                 patch(
                     "rwgk_wt.lifecycle.protect_local",
                     side_effect=lambda *args, **kwargs: events.append("preserved"),

@@ -75,9 +75,11 @@ def _command(repo, *args, cwd=None):
     result = repo.run(
         [
             "env",
-            "GIT_CONFIG_COUNT=1",
+            "GIT_CONFIG_COUNT=2",
             "GIT_CONFIG_KEY_0=remote.pushDefault",
             f"GIT_CONFIG_VALUE_0={repo.config['upstream_remote']}",
+            "GIT_CONFIG_KEY_1=submodule.recurse",
+            "GIT_CONFIG_VALUE_1=false",
             f"GH_REPO={repo.config['upstream_repo']}",
             "gh",
             "stack",
@@ -164,13 +166,67 @@ def navigate(repo, target):
     return path
 
 
+def _sync_submodules(repo, stack, *, recover=False, include_primary=False):
+    from . import submodules
+
+    paths = [repo.primary] if include_primary else []
+    for row in stack["branches"] if stack else []:
+        if row.get("pullRequest", {}).get("merged"):
+            continue
+        path = repo.owner(row["branch"])
+        if path and path not in paths:
+            paths.append(path)
+    for path in paths:
+        if recover:
+            submodules.recover(repo, path)
+        else:
+            submodules.initialize(repo, path)
+            repo.ensure_clean(path)
+
+
 def rebase(repo, flags=()):
+    active = getattr(repo, "_wt_submodule_rebase_active", False)
+    repo._wt_submodule_rebase_active = True
+    try:
+        return _rebase(repo, flags)
+    finally:
+        repo._wt_submodule_rebase_active = active
+
+
+def _rebase(repo, flags=()):
+    from . import submodule_rebase
+
+    pending = repo.state.get("submodule_rebase")
+    if pending and pending.get("phase") == "aligning":
+        if "--abort" in flags:
+            raise WTError(
+                "The restack finished; submodule alignment remains. "
+                "Retry 'wt stack rebase' to finish it before planning a rollback."
+            )
+        submodule_rebase.after(repo, pending["captured"])
+        _sync_submodules(repo, get_stack(repo), recover=True, include_primary=True)
+        _sync_submodules(repo, get_stack(repo), include_primary=True)
+        repo.state.pop("submodule_rebase", None)
+        repo.save()
+        return {"result": "rebased", "stack": get_stack(repo)}
+    primary_before = (
+        pending["primary_before"]
+        if pending
+        else repo.oid("refs/heads/" + repo.config["trunk"])
+    )
     recovery = "--continue" in flags or "--abort" in flags
+    captured = pending["captured"] if pending else []
     if not recovery:
         stack = get_stack(repo)
         if not stack:
             raise WTError("Current branch does not belong to a stack.")
+        _sync_submodules(repo, stack, recover=True, include_primary=True)
         _owners(repo, stack)
+        if "--no-trunk" not in flags:
+            repo.ensure_clean(repo.primary)
+        if captured:
+            submodule_rebase.after(repo, captured)
+        captured = submodule_rebase.before(repo, stack, flags)
         # Keep every local pre-rewrite tip alive, without publishing local-only work.
         from .lifecycle import protect_local
 
@@ -182,9 +238,37 @@ def rebase(repo, flags=()):
                 if repo.exists("refs/heads/" + row["branch"])
             ],
             kind="rebase",
+            extra_paths=[repo.primary]
+            if any(
+                Path(item["path"]).resolve() == repo.primary.resolve()
+                for item in captured
+            )
+            else [],
         )
+        if captured:
+            repo.state["submodule_rebase"] = {
+                "phase": "rebasing",
+                "captured": captured,
+                "primary_before": primary_before,
+            }
+            repo.save()
+    if recovery and captured:
+        submodule_rebase.before_resume(repo, captured)
     _command(repo, "rebase", "--remote", repo.config["upstream_remote"], *flags)
     repo.check_primary()
+    if captured:
+        repo.state["submodule_rebase"]["phase"] = "aligning"
+        repo.save()
+        submodule_rebase.after(repo, captured)
+    _sync_submodules(
+        repo,
+        get_stack(repo),
+        include_primary=repo.oid("refs/heads/" + repo.config["trunk"])
+        != primary_before,
+    )
+    if captured:
+        repo.state.pop("submodule_rebase", None)
+        repo.save()
     return {
         "result": "rebased" if "--abort" not in flags else "aborted",
         "stack": get_stack(repo),
@@ -195,6 +279,8 @@ def pull(repo, number=None, apply=False):
     stack = get_stack(repo)
     if not stack:
         raise WTError("No existing local stack; create/adopt its pairs first.")
+    if apply:
+        _sync_submodules(repo, stack, recover=True, include_primary=True)
     _owners(repo, stack)
     number = number or stack.get("number")
     if not number:
@@ -210,6 +296,7 @@ def pull(repo, number=None, apply=False):
         "--remote",
         repo.config["upstream_remote"],
         "--json",
+        "--allow-submodule-pin-updates",
     ]
     if apply:
         from .lifecycle import protect_local
@@ -229,6 +316,7 @@ def pull(repo, number=None, apply=False):
     if apply:
         from .github import get_pr
 
+        _sync_submodules(repo, get_stack(repo), include_primary=True)
         for row in result.get("rows", []):
             name = row["branch"]
             if (

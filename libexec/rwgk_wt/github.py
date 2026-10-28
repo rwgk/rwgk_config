@@ -321,6 +321,8 @@ def _associate(repo, branch, pr, role, refresh=False, checked_out=None):
 
 def open_pr(repo, selector, refresh=False):
     """Open/resume a PR through its retained upstream ref, including deleted forks."""
+    from . import submodules
+
     number = _pr_selector(repo, selector)
     base_repo = repo.config["upstream_repo"]
     remote = repo.config["upstream_remote"]
@@ -341,6 +343,8 @@ def open_pr(repo, selector, refresh=False):
         if not path:
             raise WTError(f"Managed branch {branch} has no worktree; run wt doctor")
         if not refresh:
+            if repo.branches[branch].get("creating"):
+                path = repo.create(branch, branch, role=role)
             _associate(repo, branch, pr, role)
             return Path(path).resolve()
     else:
@@ -383,7 +387,13 @@ def open_pr(repo, selector, refresh=False):
 
     digest = hashlib.sha256(base_repo.lower().encode()).hexdigest()[:12]
     fetched = f"refs/rwgk/pr/{digest}/{number}/head"
-    repo.git("fetch", "--no-tags", remote, f"+refs/pull/{number}/head:{fetched}")
+    repo.git(
+        "fetch",
+        "--recurse-submodules=no",
+        "--no-tags",
+        remote,
+        f"+refs/pull/{number}/head:{fetched}",
+    )
     if repo.oid(fetched) != pr["head_oid"]:
         raise WTError("PR head changed while opening it; retry after inspecting the PR")
     checked_out = None
@@ -391,11 +401,20 @@ def open_pr(repo, selector, refresh=False):
         path = repo.create(branch, fetched, role=role)
         checked_out = pr["head_oid"]
     elif refresh:
+        submodules.recover(repo, path)
         repo.ensure_idle(path)
         repo.ensure_clean(path)
         local = repo.oid(f"refs/heads/{branch}")
         if _ancestor(repo, local, pr["head_oid"]):
-            repo.git("merge", "--ff-only", fetched, cwd=path)
+            submodules.validate_update(repo, path, fetched)
+            repo.git(
+                "-c",
+                "submodule.recurse=false",
+                "merge",
+                "--ff-only",
+                fetched,
+                cwd=path,
+            )
         elif not _ancestor(repo, pr["head_oid"], local):
             metadata = repo.branches[branch]
             previous = metadata.get(
@@ -413,6 +432,7 @@ def open_pr(repo, selector, refresh=False):
                 kind="pr-refresh",
             )
             repo.ensure_clean(path)
+            submodules.validate_update(repo, path, fetched)
             if (
                 repo.git("symbolic-ref", "--quiet", "HEAD", cwd=path)
                 != f"refs/heads/{branch}"
@@ -421,12 +441,24 @@ def open_pr(repo, selector, refresh=False):
             # Compare-and-swap the branch, then update the checkout without
             # resetting that ref a second time. Recovery refs precede both.
             repo.git("update-ref", f"refs/heads/{branch}", pr["head_oid"], local)
-            repo.git("read-tree", "--reset", "-u", pr["head_oid"], cwd=path)
+            repo.git(
+                "-c",
+                "submodule.recurse=false",
+                "read-tree",
+                "--reset",
+                "-u",
+                pr["head_oid"],
+                cwd=path,
+            )
             if repo.oid(f"refs/heads/{branch}") != pr["head_oid"]:
                 raise WTError(
                     "Branch changed concurrently while refreshing the PR; inspect its preserved recovery record"
                 )
+        submodules.initialize(repo, path)
         checked_out = pr["head_oid"]
+    elif repo.branches[branch].get("creating"):
+        path = repo.create(branch, branch, role=role)
+        checked_out = repo.oid(f"refs/heads/{branch}")
     _associate(repo, branch, pr, role, refresh=refresh, checked_out=checked_out)
     return Path(path).resolve()
 

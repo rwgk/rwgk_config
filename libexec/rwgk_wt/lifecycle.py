@@ -262,7 +262,7 @@ def _pin(repo, snapshots, pr=None, destination=None, *, on_archive=None):
     return archives
 
 
-def protect_local(repo, snapshots, kind="rebase"):
+def protect_local(repo, snapshots, kind="rebase", extra_paths=()):
     """Keep local history reachable before rewriting, without any remote operation."""
     unique = {snapshot["oid"]: dict(snapshot) for snapshot in snapshots}
     for snapshot in unique.values():
@@ -272,6 +272,21 @@ def protect_local(repo, snapshots, kind="rebase"):
     record["snapshots"] = list(unique.values())
     _save_record(repo, record)
     _protect_snapshots(repo, record)
+    from . import submodules
+
+    owners = {
+        repo.owner(snapshot.get("branch") or snapshot.get("label"))
+        for snapshot in record["snapshots"]
+        if snapshot.get("branch") or snapshot.get("label")
+    }
+    owners.update(Path(path) for path in extra_paths)
+    for path in sorted((owner for owner in owners if owner), key=str):
+        if submodules.inspect(repo, path):
+            preserved = submodules.preserve(repo, path, record["id"])
+            record.setdefault("submodule_worktrees", []).append(
+                {"path": str(path), "submodules": preserved}
+            )
+            _save_record(repo, record)
     record["status"] = "complete"
     _save_record(repo, record)
     return record
@@ -378,6 +393,16 @@ def _preflight_worktree(repo, path, branch, discard_builds):
     dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all", cwd=path)
     if dirty:
         raise WTError(f"Worktree contains changes or untracked files: {path}")
+    ignored = _check_ignored(repo, path, discard_builds)
+    from . import submodules
+
+    for module in submodules.inspect(repo, path):
+        ignored |= _check_ignored(repo, path / module["path"], discard_builds)
+    return ignored
+
+
+def _check_ignored(repo, path, discard_builds):
+    """Apply the same disposal policy to a superproject or initialized submodule."""
     ignored = _git(
         repo,
         "ls-files",
@@ -575,7 +600,7 @@ def retire(
     discard_builds=False,
 ):
     """Retire a managed pair or an explicitly selected unpaired local branch."""
-    from . import github, stacks
+    from . import github, stacks, submodules
 
     repo.check_primary()
     if branch in repo.branches:
@@ -597,6 +622,7 @@ def retire(
         archive_local=archive_local,
         discard_builds=discard_builds,
         ignored_builds=ignored,
+        submodules=submodules.inspect(repo, path) if path is not None else [],
     )
     if path is None:
         record["branch_config"] = _branch_config(repo, branch)
@@ -685,8 +711,31 @@ def _assert_local_tip(repo, record):
         )
 
 
+def _assert_submodules(repo, record, path):
+    from . import submodules
+
+    current = submodules.inspect(repo, path)
+    if "submodules" not in record:
+        record["submodules"] = current
+        _save_record(repo, record)
+
+    def identity(modules):
+        return [
+            (
+                module["path"],
+                module["oid"],
+                module.get("gitlink"),
+                sorted((ref["ref"], ref["oid"]) for ref in module["refs"]),
+            )
+            for module in sorted(modules, key=lambda item: item["path"])
+        ]
+
+    if identity(current) != identity(record["submodules"]):
+        raise WTError("Submodule history changed since cleanup planning; preserving it")
+
+
 def _apply_retirement_locked(repo, record):
-    from . import github, stacks
+    from . import github, stacks, submodules
 
     branch = record["branch"]
     path = Path(record["path"]) if record["path"] is not None else None
@@ -715,10 +764,15 @@ def _apply_retirement_locked(repo, record):
             _preflight_unpaired(repo, branch)
         elif path.exists():
             _preflight_worktree(repo, path, branch, record["discard_builds"])
+            _assert_submodules(repo, record, path)
         elif repo.owner(branch):
             raise WTError("Worktree path disappeared but registration remains")
         stacks.check_retirement(repo, branch)
     _protect_snapshots(repo, record)
+    if record.get("submodules") and "submodules" not in completed:
+        record["submodules"] = submodules.preserve(repo, path, record["id"])
+        completed.append("submodules")
+        _save_record(repo, record)
     if "archives" not in completed:
 
         def record_archive(archive, *, created):
@@ -741,6 +795,8 @@ def _apply_retirement_locked(repo, record):
     source = record.get("source")
     if source and source["oid"] and "remote_branch" not in completed:
         _assert_local_tip(repo, record)
+        if path is not None and path.exists():
+            _assert_submodules(repo, record, path)
         github.ensure_source_unused(repo, record["pr"])
         stacks.check_retirement(repo, branch)
         if _remote_url(repo, source["remote"], push=True) != source["url"]:
@@ -795,8 +851,9 @@ def _apply_retirement_locked(repo, record):
             _assert_local_tip(repo, record)
             stacks.check_retirement(repo, branch)
             _preflight_worktree(repo, path, branch, record["discard_builds"])
+            _assert_submodules(repo, record, path)
             args = ["worktree", "remove"]
-            if record["ignored_builds"]:
+            if record["ignored_builds"] or record.get("submodules"):
                 args.append("--force")
             _git(repo, *args, "--", str(path), cwd=repo.primary)
         if path is not None and repo.root.resolve() == path.resolve():
@@ -889,6 +946,10 @@ def restore(repo, record_id):
     metadata.pop("path", None)
     role = metadata.pop("role", "owned")
     path = repo.create(branch, oid, role=role, extra=metadata)
+    if record.get("submodules"):
+        from . import submodules
+
+        submodules.restore(repo, path, record["submodules"])
     tracking = record.get("tracking")
     if "branch_config" in record:
         for key in dict(record["branch_config"]):

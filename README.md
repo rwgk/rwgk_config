@@ -141,6 +141,41 @@ records, and stops on conflicting local work. Local commits ahead of the PR are
 kept. It preserves your current directory, including subdirectories. Trunk uses
 `wt trunk update`; stack layers use `wt stack pull` and its explicit `--apply`.
 
+### Submodules
+
+New pairs initialize submodules recursively at the commits recorded by their
+superproject. When the corresponding primary submodule is initialized, `wt`
+uses it as a Git `--reference` without `--dissociate`. Each worktree keeps its
+own checkout and Git refs while reusing the primary's object storage. A module
+without an available reference is initialized normally. Existing initialized
+modules keep their current object-storage layout.
+
+`wt pull`, `wt trunk update`, and stack updates align submodule checkouts after
+updating the parent. Git's implicit recursive updates are suppressed until the
+reference and recovery setup is ready. Initialized module removal, renaming,
+or replacement with ordinary files requires deliberate handling; automatic
+updates stop before discarding those checkouts.
+Stack rebases also check replayed commits for module layout changes and stop
+on non-build ignored material inside submodules.
+
+Borrowed history is retained with immutable local refs under `refs/rwgk/wt/`
+in the reference submodule repository, including histories behind branches and
+tags. These refs protect objects from ordinary Git garbage collection and remain
+for recovery. Keep the primary repository and its submodule object stores in
+place while worktrees depend on them.
+
+Cleanup checks nested edits, untracked files, hidden index flags, and unfinished
+Git operations. Ignored submodule build outputs follow the same
+`--discard-builds` policy as the parent. Before removal, submodule HEADs and refs
+are preserved in a stable primary module or a bare cache under the common Git
+directory's `rwgk-wt/submodules/`, and recorded in the backtracking record.
+`wt restore` can recover local module branches and unpublished recorded pins.
+This retention is local; cleanup does not push submodule refs.
+
+Interrupted initialization leaves a pending journal. Retry the same creation or
+update command; unexpected local changes stop recovery for inspection.
+Other lifecycle operations wait for an interrupted restack to finish.
+
 ### Stacked PRs
 
 ```bash

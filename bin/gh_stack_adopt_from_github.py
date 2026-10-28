@@ -382,7 +382,7 @@ class Adopter:
                 entries[branch] = Path(fields["worktree"]).resolve()
         return entries
 
-    def clean(self, path, branch):
+    def clean(self, path, branch, previous=None):
         require(
             self.out("symbolic-ref", "--short", "HEAD", cwd=path) == branch,
             f"Unexpected checkout in {path}; stopped.",
@@ -392,7 +392,9 @@ class Adopter:
                 "status",
                 "--porcelain",
                 "--untracked-files=all",
-                "--ignore-submodules=none",
+                "--ignore-submodules=all"
+                if self.args.allow_submodule_pin_updates and previous is not None
+                else "--ignore-submodules=none",
                 cwd=path,
             ).stdout,
             f"Uncommitted changes in {path}; commit or stash them first.",
@@ -409,6 +411,81 @@ class Adopter:
             not any(item and (item[0].islower() or item[0] == "S") for item in flags),
             f"Hidden index flags (assume-unchanged or skip-worktree) in {path}; clear them before adopting.",
         )
+        if self.args.allow_submodule_pin_updates:
+            self.check_submodule_checkouts(
+                path, previous or self.tip(branch), self.tip(branch)
+            )
+
+    def gitlinks(self, path, revision):
+        result = {}
+        for entry in self.git("ls-tree", "-r", "-z", revision, cwd=path).stdout.split(
+            "\0"
+        ):
+            header, separator, name = entry.partition("\t")
+            if separator:
+                mode, _, oid = header.split()
+                if mode == "160000":
+                    result[name] = oid
+        return result
+
+    def check_submodule_checkouts(self, path, old, target):
+        """Keep an old clean module checkout until wt aligns it after adoption."""
+        previous = self.gitlinks(path, old)
+        for name, oid in self.gitlinks(path, target).items():
+            module = path / name
+            require(
+                not module.is_symlink()
+                and module.resolve().is_relative_to(path.resolve()),
+                f"Submodule path escapes its worktree: {module}",
+            )
+            marker = module / ".git"
+            if not marker.exists():
+                require(
+                    not module.exists()
+                    or module.is_dir()
+                    and not any(module.iterdir()),
+                    f"Uninitialized submodule contains local files: {module}",
+                )
+                continue
+            require(
+                Path(self.out("rev-parse", "--show-toplevel", cwd=module)).resolve()
+                == module.resolve(),
+                f"Submodule is not its own checkout: {module}",
+            )
+            head = self.out("rev-parse", "--verify", "HEAD", cwd=module)
+            require(
+                head in (previous.get(name), oid),
+                f"Submodule checkout changed during adoption: {module}",
+            )
+            require(
+                not self.git(
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=all",
+                    "--ignore-submodules=none",
+                    cwd=module,
+                ).stdout,
+                f"Submodule has uncommitted or untracked files: {module}",
+            )
+            flags = self.git("ls-files", "-v", "-z", cwd=module).stdout.split("\0")
+            require(
+                not any(
+                    flag and (flag[0].islower() or flag[0] == "S") for flag in flags
+                ),
+                f"Submodule has hidden index flags: {module}",
+            )
+            for operation in checkpoint.GIT_OPERATIONS:
+                location = self.out(
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    operation,
+                    cwd=module,
+                )
+                require(
+                    not Path(location).exists(), f"Unfinished {operation} in {module}"
+                )
+            self.check_submodule_checkouts(module, head, head)
 
     def collisions(self, path, old, new):
         ignored = self.git(
@@ -447,15 +524,14 @@ class Adopter:
         raw = self.git(
             "diff-tree", "--no-commit-id", "--raw", "--no-renames", "-r", old, new
         ).stdout
-        require(
-            not any(
-                line.startswith(":160000 ")
-                or line.startswith(":100")
-                and " 160000 " in line
-                for line in raw.splitlines()
-            ),
-            f"The target changes submodule entries in {path}; update that checkout and its submodules explicitly first.",
-        )
+        for line in raw.splitlines():
+            modes = line.removeprefix(":").split(" ", 2)[:2]
+            if "160000" in modes:
+                require(
+                    self.args.allow_submodule_pin_updates
+                    and modes == ["160000", "160000"],
+                    f"The target changes submodule entries in {path}; update that checkout and its submodules explicitly first.",
+                )
 
     def validate_remote(self, native, stack):
         trunk = native.get("base", {}).get("ref")
@@ -765,11 +841,15 @@ class Adopter:
         self.git(
             "diff-files",
             "--quiet",
-            "--ignore-submodules=none",
+            "--ignore-submodules=all"
+            if self.args.allow_submodule_pin_updates
+            else "--ignore-submodules=none",
             "--",
             cwd=path,
             index=index,
         )
+        if self.args.allow_submodule_pin_updates:
+            self.check_submodule_checkouts(path, row["old"], row["target"])
         require(
             self.out("symbolic-ref", "--short", "HEAD", cwd=path) == row["branch"],
             "An affected worktree changed branches during adoption; stopped.",
@@ -849,7 +929,9 @@ class Adopter:
                 )
                 for row in rows:
                     if row["path"]:
-                        self.clean(Path(row["path"]), row["branch"])
+                        self.clean(
+                            Path(row["path"]), row["branch"], previous=row["old"]
+                        )
                 atomic_json(
                     self.catalog, updated, stat.S_IMODE(self.catalog.stat().st_mode)
                 )
@@ -1122,6 +1204,9 @@ def main(argv=None):
     )
     parser.add_argument(
         "--json", action="store_true", help="emit a structured plan/result"
+    )
+    parser.add_argument(
+        "--allow-submodule-pin-updates", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument(
         "--timeout",
