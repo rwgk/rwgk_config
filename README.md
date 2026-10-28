@@ -6,6 +6,92 @@ Ralf's personal configuration and commands.
 git clone https://github.com/rwgk/rwgk_config.git
 ```
 
+## Find and resume agent sessions
+
+`agent-logbook` records which Codex sessions worked on PRs, issues, Slack threads,
+NVBugs, and durable files. `codex-find` looks them up from any directory, and
+`wt codex` uses the current worktree's saved PR association, then its workspace.
+No network request or catalog write is needed for lookup.
+
+```bash
+wt pr 123
+codex                        # start work; installed hooks register the session
+# later, from that worktree:
+wt codex
+wt codex --list               # show matches without launching Codex
+codex-find 'https://github.com/OWNER/REPO/pull/123'
+codex-find 'https://WORKSPACE.slack.com/archives/CHANNEL/pTIMESTAMP'
+codex-find path/to/artifact.txt
+codex-find artifact.txt
+codex-find 'topic words' --list
+codex-find 'OWNER/REPO#123' --json
+```
+
+A single exact resource match resumes automatically when its saved Codex history
+is available locally. Multiple matches list IDs, dates, hosts, relationship
+labels, topic hints, and commands to copy. Topic substring matches are labeled
+possible and never launch automatically. `--list` and `--json` always suppress
+launching. No match reports an error instead of silently starting a new session.
+`wt codex` resumes in the current worktree; standalone lookup uses the session's
+recorded directory when it still exists. A missing directory suppresses automatic
+resume; recreate the worktree or explicitly select `--cwd PATH`.
+
+### Storage and setup
+
+The logbook lives in `$H/agent-logbook` when `H` is set, otherwise
+`$W/agent-logbook`, otherwise `~/.local/share/agent-logbook`.
+`AGENT_LOGBOOK_DIR` selects an explicit location; `agent-logbook path` shows it.
+An inaccessible configured location reports a failure instead of creating a
+second logbook elsewhere.
+
+The shared NetApp store contains private, immutable JSON event files published
+with unique names by atomic rename. It needs no shared SQLite database, lock
+service, daemon, or third-party Python packages. Readers fold records into the
+session index. Incomplete temporary files are ignored; corrupt published records
+stop lookup rather than permitting an automatic resume from incomplete results.
+The first implementation scans these small metadata records on each query.
+
+The index stores resource identifiers and short work hints, not session history.
+Preserve the actual Codex history separately. Each session records its host and
+observed history location; a session known only on another host is listed with
+instructions to resume there. Deleting a worktree does not delete its logbook
+links. Restored worktrees can find sessions through the canonical PR identity.
+
+For Ralf's NVIDIA setup, `~/rwgk_config_nvidia/codex/01_create_codex_softlinks.sh`
+installs the hook-file symlink when no existing hooks file is present. Keep both
+configuration repositories up to date. Open `/hooks` in Codex to review and trust
+the new hooks once; changed definitions require review again. Existing hook files
+are preserved and can incorporate the handlers from
+`~/rwgk_config_nvidia/codex/hooks.json`. Automatic capture requires trusted hooks;
+manual recording and lookup work independently.
+
+### Explicit associations and capture limits
+
+Agents should register the main task and useful changes as they happen:
+
+```bash
+agent-logbook record 'https://github.com/OWNER/REPO/issues/123' \
+    --relation discussed --note 'Investigate stream lifetime failure'
+agent-logbook record path/to/report.txt --relation created \
+    --note 'Reproducer results and remaining questions'
+agent-logbook record --note 'Follow-up: validate the fix on another host'
+```
+
+The default ID comes from `CODEX_THREAD_ID` (`AGENT_LOGBOOK_SESSION_ID` overrides
+it). Outside a session, supply `--session ID`. Registration includes current
+workspace context, so work outside the starting directory remains discoverable.
+The main agent should register meaningful work delegated to subagents under the
+resumable main session.
+
+Lifecycle hooks register workspace/PR context and a short prompt hint. Supported
+successful tool writes add file, PR/issue, NVBug, Slack, and GitLab associations.
+Read results do not imply creation or modification. Arbitrary shell commands,
+unsupported tool shapes, and semantic review/discussion need explicit recording.
+Hooks are best effort and never block or restart the agent; failures are reported
+on stderr. Tool outputs and message bodies are not copied into the logbook.
+
+No historical sessions or `agent-resume.txt` entries are imported automatically.
+
 ## Branches and worktrees with `wt`
 
 Each active local branch owns one worktree. The primary checkout stays on trunk;

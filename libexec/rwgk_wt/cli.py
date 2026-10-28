@@ -52,6 +52,12 @@ def parser():
         "name", help="map a branch to its canonical directory name"
     )
     name.add_argument("branch")
+    codex = commands.add_parser(
+        "codex", help="find and resume Codex sessions for the current PR or workspace"
+    )
+    codex.add_argument(
+        "--list", action="store_true", help="list matches without resuming"
+    )
     commands.add_parser("list", help="list managed branch/worktree pairs")
     commands.add_parser("doctor", help="check managed pairs and report legacy work")
     trunk = commands.add_parser(
@@ -438,6 +444,17 @@ def main(argv=None):
             name = directory_name(args.branch)
             print(json.dumps({"directory": name}) if as_json else name)
             return 0
+        if args.command == "codex":
+            if print_path:
+                raise WTError("wt codex does not produce a navigation path.")
+            from agent_logbook.cli import main as logbook_main
+
+            options = ["here"]
+            if as_json:
+                options.append("--json")
+            if args.list:
+                options.append("--list")
+            return logbook_main(options)
         repo = Repo(initialized=args.command != "init")
         readonly = (
             args.command in ("go", "path", "list", "doctor")
