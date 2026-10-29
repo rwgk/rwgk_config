@@ -254,8 +254,11 @@ def ensure_source_unused(repo, pr):
             )
 
 
-def _git_result(repo, *args):
-    return repo.run(["git", "-C", str(repo.root), *args], check=False)
+def _git_result(repo, *args, c_locale=False):
+    command = ["git", "-C", str(repo.root), *args]
+    if c_locale:
+        command = ["env", "LC_ALL=C", *command]
+    return repo.run(command, check=False)
 
 
 def _ancestor(repo, old, new):
@@ -675,6 +678,8 @@ def publish(
         raise WTError("This branch is in a stack; publish it with wt publish --stack")
     if stack and not selected:
         raise WTError("The current branch is not in a stack")
+    if stack:
+        stacks.require_extension(repo)
     if stack and title is not None:
         raise WTError(
             "Use per-PR titles after stack creation; --title applies to a single PR"
@@ -690,6 +695,12 @@ def publish(
     base_repo = repo.config["upstream_repo"]
     head_repo = _checked_remote(repo, remote, base_repo if stack else None)
     _checked_remote(repo, repo.config["upstream_remote"], base_repo)
+    native_base = stacks.native_base(repo, selected) if stack else None
+    if native_base is not None and native_base != selected["trunk"]["branch"]:
+        raise WTError(
+            f"GitHub retargeted this stack to {native_base}; run wt stack rebase "
+            "before publishing. No publication push or PR update was attempted."
+        )
     push_url = _remote_url(repo, remote, push=True)
     viewer = _viewer(repo)
     layers = selected["branches"] if stack else [{"branch": current}]
@@ -783,6 +794,7 @@ def publish(
                 "old": old,
                 "ref": ref,
                 "upstream": upstream,
+                "force": force,
                 "pr": pr,
                 "auto_text": _auto_text(repo, branch, base) if pr is None else None,
             }
@@ -824,7 +836,18 @@ def publish(
     )
     command.append(push_url)
     command.extend(f"{item['oid']}:{item['ref']}" for item in entries)
-    pushed = _git_result(repo, *command)
+    if native_base is not None and any(item["force"] for item in entries):
+        # Let GitHub preserve approvals for a native-stack rebase whose diff did
+        # not change, preserving any configured push options. Only an
+        # unsupported-option error permits a retry, using
+        # the identical atomic ref update and independently inspected leases.
+        pushed = _git_result(
+            repo, "-c", "push.pushOption=pull.stacked", *command, c_locale=True
+        )
+        if pushed.returncode and "does not support push options" in pushed.stderr:
+            pushed = _git_result(repo, *command, c_locale=True)
+    else:
+        pushed = _git_result(repo, *command)
     if pushed.returncode:
         raise WTError(
             "Publication push failed. Fixed leases were not refreshed; inspect remote refs/authentication before retrying."

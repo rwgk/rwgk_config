@@ -9,8 +9,73 @@ import sys
 from pathlib import Path
 
 from .core import WTError, atomic_json, branch_name
+from .stack_version import require_supported
 
 BIN = Path(__file__).resolve().parents[2] / "bin"
+
+
+def require_extension(repo):
+    """Require the supported extension quietly, once per repository instance."""
+    if not getattr(repo, "_wt_stack_version_checked", False):
+        require_supported(repo.run)
+        repo._wt_stack_version_checked = True
+
+
+def native_base(repo, stack):
+    """Read a tracked native stack's base without refreshing the local catalog."""
+    from .github import _api
+
+    number, identifier = stack.get("number"), stack.get("id")
+    if identifier == "":
+        identifier = None
+    if identifier is not None and (
+        not isinstance(identifier, str)
+        or not identifier.isdecimal()
+        or int(identifier) <= 0
+    ):
+        raise WTError(
+            "Tracked stack has an invalid native identity; inspect its GitHub association before continuing."
+        )
+    if identifier is None and (number is None or type(number) is int and number == 0):
+        return None
+    if type(number) is not int or number <= 0:
+        raise WTError(
+            "Tracked stack lacks a valid GitHub stack number; inspect its identity and use "
+            "'wt stack pull --stack NUMBER' before continuing."
+        )
+    native = _api(repo, f"repos/{repo.config['upstream_repo']}/stacks/{number}")
+    if (
+        not isinstance(native, dict)
+        or type(native.get("number")) is not int
+        or native["number"] != number
+        or type(native.get("id")) is not int
+        or native["id"] <= 0
+        or identifier is not None
+        and str(native["id"]) != identifier
+        or native.get("open") is not True
+        or not isinstance(native.get("base"), dict)
+        or not isinstance(native["base"].get("ref"), str)
+        or not native["base"]["ref"]
+    ):
+        raise WTError(
+            "GitHub returned an inconsistent native stack identity or base; inspect the stack before continuing."
+        )
+    base = native["base"]["ref"]
+    if repo.run(
+        ["git", "check-ref-format", "refs/heads/" + base], check=False
+    ).returncode:
+        raise WTError("GitHub returned an invalid native stack base branch.")
+    return base
+
+
+def _check_rebase_target(repo, stack):
+    target = native_base(repo, stack)
+    if target is not None and target != repo.config["trunk"]:
+        raise WTError(
+            f"GitHub stack base {target!r} differs from registered trunk {repo.config['trunk']!r}; "
+            "reconcile the repository trunk and its primary worktree explicitly before rebasing."
+        )
+    return target
 
 
 def catalog(repo):
@@ -71,6 +136,7 @@ def catalog_lock(repo):
 
 
 def _command(repo, *args, cwd=None):
+    require_extension(repo)
     # Process-scoped configuration avoids changing global or existing branch tracking.
     result = repo.run(
         [
@@ -107,6 +173,7 @@ def _owners(repo, stack):
 
 
 def initialize(repo):
+    require_extension(repo)
     repo.check_primary()
     name = repo.resolve()
     if get_stack(repo):
@@ -118,6 +185,7 @@ def initialize(repo):
 
 
 def add(repo, slug):
+    require_extension(repo)
     current = repo.resolve()
     stack = get_stack(repo, current)
     if not stack:
@@ -185,6 +253,13 @@ def _sync_submodules(repo, stack, *, recover=False, include_primary=False):
 
 
 def rebase(repo, flags=()):
+    if "--accept-base-change" in flags and any(
+        option in flags for option in ("--continue", "--abort", "--no-trunk")
+    ):
+        raise WTError(
+            "Use --accept-base-change only with a fresh rebase that includes trunk."
+        )
+    require_extension(repo)
     active = getattr(repo, "_wt_submodule_rebase_active", False)
     repo._wt_submodule_rebase_active = True
     try:
@@ -220,6 +295,8 @@ def _rebase(repo, flags=()):
         stack = get_stack(repo)
         if not stack:
             raise WTError("Current branch does not belong to a stack.")
+        if "--no-trunk" not in flags:
+            _check_rebase_target(repo, stack)
         _sync_submodules(repo, stack, recover=True, include_primary=True)
         _owners(repo, stack)
         if "--no-trunk" not in flags:
@@ -276,6 +353,8 @@ def _rebase(repo, flags=()):
 
 
 def pull(repo, number=None, apply=False):
+    if apply:
+        require_extension(repo)
     stack = get_stack(repo)
     if not stack:
         raise WTError("No existing local stack; create/adopt its pairs first.")

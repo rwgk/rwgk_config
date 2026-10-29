@@ -33,6 +33,10 @@ class FixtureRepo(Repo):
 
     def run(self, argv, *, cwd=None, check=True, input=None):
         argv = list(map(str, argv))
+        prefix = []
+        if argv[:2] == ["env", "LC_ALL=C"]:
+            self.fixture.locale_commands.append(list(argv))
+            prefix, argv = argv[:2], argv[2:]
         if argv[0] == "gh":
             return self.fixture.gh(argv, input)
         # Git endpoints remain actual bare repos. Only identity observation is
@@ -49,7 +53,7 @@ class FixtureRepo(Repo):
                 if value == identity:
                     argv[index] = str(self.fixture.remotes[remote])
         self.fixture.commands.append(original)
-        return super().run(argv, cwd=cwd, check=check, input=input)
+        return super().run([*prefix, *argv], cwd=cwd, check=check, input=input)
 
 
 class GitHubTests(unittest.TestCase):
@@ -89,8 +93,11 @@ class GitHubTests(unittest.TestCase):
         }
         self.push_identities = {}
         self.commands = []
+        self.locale_commands = []
         self.gh_calls = []
         self.prs = {}
+        self.native_base = "main"
+        self.native_identity = {"id": 9876, "number": 10}
         self.next_pr = 100
         self.repo = FixtureRepo(self)
         trees_root = Path(
@@ -174,6 +181,8 @@ class GitHubTests(unittest.TestCase):
 
     def gh(self, argv, input):
         self.gh_calls.append((argv, json.loads(input) if input else None))
+        if argv[1:3] == ["stack", "--version"]:
+            return subprocess.CompletedProcess(argv, 0, "gh stack version 0.3.0\n", "")
         if argv[1:3] == ["stack", "link"]:
             return self.response({})
         if argv[1:3] == ["pr", "ready"]:
@@ -235,20 +244,16 @@ class GitHubTests(unittest.TestCase):
                 if "base" in payload:
                     self.prs[number]["base"]["ref"] = payload["base"]
             return self.response(self.refresh_pr(self.prs[number]))
-        if endpoint.startswith("repos/Acme/project/stacks?pull_request="):
-            return self.response(
-                [
-                    {
-                        "id": 9876,
-                        "number": 10,
-                        "open": True,
-                        "base": {"ref": "main"},
-                        "pull_requests": [
-                            self.refresh_pr(pr) for pr in self.prs.values()
-                        ],
-                    }
-                ]
-            )
+        if endpoint == "repos/Acme/project/stacks/10" or endpoint.startswith(
+            "repos/Acme/project/stacks?pull_request="
+        ):
+            native = {
+                **self.native_identity,
+                "open": True,
+                "base": {"ref": self.native_base},
+                "pull_requests": [self.refresh_pr(pr) for pr in self.prs.values()],
+            }
+            return self.response([native] if "?" in endpoint else native)
         self.fail(f"Unexpected GitHub operation: {argv}")
 
     def branch(self, name="rwgk/change", base="main"):
@@ -266,7 +271,7 @@ class GitHubTests(unittest.TestCase):
         return [
             command
             for command in self.commands
-            if command[0] == "git" and "push" in command[:4]
+            if command[0] == "git" and "push" in command
         ]
 
     def invoke_pull(self, path, flags=()):
@@ -483,6 +488,7 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(
             "--force-with-lease=refs/heads/rwgk/change:" + old, self.pushes()[-1]
         )
+        self.assertNotIn("push.pushOption=pull.stacked", self.pushes()[-1])
         self.assertEqual(
             git(self.remotes["origin"], "rev-parse", "refs/heads/rwgk/change"), new
         )
@@ -555,6 +561,7 @@ class GitHubTests(unittest.TestCase):
         first = self.branch("rwgk/first")
         second = self.branch("rwgk/second", "rwgk/first")
         stack = {
+            "id": "9876",
             "number": 10,
             "trunk": {"branch": "main"},
             "branches": [
@@ -604,6 +611,277 @@ class GitHubTests(unittest.TestCase):
                 for value in link[7:]
             )
         )
+
+    def native_stack(self):
+        first = self.branch("rwgk/first")
+        second = self.branch("rwgk/second", "rwgk/first")
+        selected = {
+            "id": "9876",
+            "number": 10,
+            "trunk": {"branch": "main"},
+            "branches": [
+                {
+                    "branch": "rwgk/first",
+                    "head": first.oid("HEAD"),
+                    "base": first.oid("main"),
+                },
+                {
+                    "branch": "rwgk/second",
+                    "head": second.oid("HEAD"),
+                    "base": second.oid("rwgk/first"),
+                },
+            ],
+        }
+        return second, selected
+
+    def publish_stack(self, repo, selected):
+        with (
+            mock.patch("rwgk_wt.stacks.get_stack", return_value=selected),
+            mock.patch("rwgk_wt.stacks.refresh"),
+            mock.patch("rwgk_wt.stacks.save_native_identity"),
+        ):
+            return github.publish(repo, stack=True)
+
+    def mark_first_layer_merged(self, repo, selected):
+        first = selected["branches"][0]
+        git(self.primary, "merge", "--ff-only", first["branch"])
+        pr = next(
+            pr for pr in self.prs.values() if pr["head"]["ref"] == first["branch"]
+        )
+        pr["state"], pr["merged_at"] = "closed", "2026-10-29T12:00:00Z"
+        first["pullRequest"] = {"number": pr["number"], "merged": True}
+        selected["branches"][1]["base"] = repo.oid("main")
+
+    def assert_no_publication_writes(self):
+        self.assertFalse(self.pushes())
+        self.assertFalse(
+            any(
+                method != "GET"
+                for method in (
+                    argv[5] for argv, _ in self.gh_calls if argv[1:2] == ["api"]
+                )
+            )
+        )
+        self.assertFalse(
+            any(argv[1:3] == ["stack", "link"] for argv, _ in self.gh_calls)
+        )
+
+    def test_retargeted_stack_refuses_before_preservation_push_or_pr_updates(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        self.native_base = "release"
+        self.commands.clear()
+        self.gh_calls.clear()
+        with (
+            mock.patch("rwgk_wt.lifecycle.pin_snapshots") as pin,
+            self.assertRaisesRegex(
+                WTError, "retargeted this stack to release.*wt stack rebase"
+            ),
+        ):
+            self.publish_stack(repo, selected)
+        pin.assert_not_called()
+        self.assert_no_publication_writes()
+
+    def test_retargeted_stack_with_one_active_pr_refuses_before_writes(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        self.mark_first_layer_merged(repo, selected)
+        self.native_base = "release"
+        self.commands.clear()
+        self.gh_calls.clear()
+        with self.assertRaisesRegex(WTError, "retargeted this stack to release"):
+            self.publish_stack(repo, selected)
+        self.assert_no_publication_writes()
+
+    def test_partially_merged_stack_can_publish_its_remaining_layer(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        self.mark_first_layer_merged(repo, selected)
+        self.commands.clear()
+        result = self.publish_stack(repo, selected)
+        self.assertEqual(result["branches"], ["rwgk/second"])
+        self.assertEqual(len(self.pushes()), 1)
+        self.assertIn(
+            "repos/Acme/project/stacks/10", [argv[-1] for argv, _ in self.gh_calls]
+        )
+
+    def test_old_extension_refuses_stack_publication_before_api_or_preservation(self):
+        repo, selected = self.native_stack()
+        original = self.gh
+
+        def older_extension(argv, input):
+            if argv[1:3] == ["stack", "--version"]:
+                self.gh_calls.append((argv, None))
+                return subprocess.CompletedProcess(
+                    argv, 0, "gh stack version 0.2.1\n", ""
+                )
+            return original(argv, input)
+
+        with (
+            mock.patch.object(self, "gh", side_effect=older_extension),
+            mock.patch("rwgk_wt.lifecycle.pin_snapshots") as pin,
+            self.assertRaisesRegex(WTError, "gh extension upgrade stack"),
+        ):
+            self.publish_stack(repo, selected)
+        pin.assert_not_called()
+        self.assert_no_publication_writes()
+        self.assertFalse(any(argv[1:2] == ["api"] for argv, _ in self.gh_calls))
+
+    def test_native_stack_preflight_failure_prevents_publication_writes(self):
+        repo, selected = self.native_stack()
+        original = self.gh
+
+        def unavailable(argv, input):
+            if argv[-1] == "repos/Acme/project/stacks/10":
+                raise WTError("GitHub API unavailable")
+            return original(argv, input)
+
+        with (
+            mock.patch.object(self, "gh", side_effect=unavailable),
+            mock.patch("rwgk_wt.lifecycle.pin_snapshots") as pin,
+            self.assertRaisesRegex(WTError, "GitHub API unavailable"),
+        ):
+            self.publish_stack(repo, selected)
+        pin.assert_not_called()
+        self.assert_no_publication_writes()
+
+    def test_native_stack_identity_mismatch_prevents_publication(self):
+        repo, selected = self.native_stack()
+        self.native_identity["id"] = 8888
+        with self.assertRaisesRegex(WTError, "identity|Identity"):
+            self.publish_stack(repo, selected)
+        self.assert_no_publication_writes()
+
+    def test_unpublished_local_stack_can_publish_without_native_identity(self):
+        repo, selected = self.native_stack()
+        selected.pop("id")
+        selected.pop("number")
+        self.publish_stack(repo, selected)
+        self.assertEqual(len(self.pushes()), 1)
+        self.assertFalse(
+            any(argv[-1] == "repos/Acme/project/stacks/10" for argv, _ in self.gh_calls)
+        )
+        self.assertNotIn("push.pushOption=pull.stacked", self.pushes()[0])
+
+    def rewrite_stack_top(self, repo, selected):
+        old = repo.oid("HEAD")
+        new = self.rewrite(repo)
+        selected["branches"][-1]["head"] = new
+        return old, new
+
+    def test_native_stack_rewrite_sends_review_retention_option(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        old, new = self.rewrite_stack_top(repo, selected)
+        git(self.remotes["upstream"], "config", "receive.advertisePushOptions", "true")
+        self.commands.clear()
+        with mock.patch("rwgk_wt.lifecycle.pin_snapshots"):
+            self.publish_stack(repo, selected)
+        pushes = self.pushes()
+        self.assertEqual(len(pushes), 1)
+        self.assertIn("push.pushOption=pull.stacked", pushes[0])
+        self.assertEqual(self.locale_commands[-1][:2], ["env", "LC_ALL=C"])
+        self.assertIn("--atomic", pushes[0])
+        self.assertIn("--force-with-lease=refs/heads/rwgk/second:" + old, pushes[0])
+        self.assertIn(new + ":refs/heads/rwgk/second", pushes[0])
+        self.assertEqual(git(self.remotes["upstream"], "rev-parse", "rwgk/second"), new)
+
+    def test_native_stack_rewrite_preserves_configured_push_options(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        self.rewrite_stack_top(repo, selected)
+        git(self.remotes["upstream"], "config", "receive.advertisePushOptions", "true")
+        configured = ["existing.option=keep", "second.option=also-keep"]
+        for option in configured:
+            git(repo.root, "config", "--add", "push.pushOption", option)
+        received = self.root / "received-push-options.json"
+        hook = self.remotes["upstream"] / "hooks" / "pre-receive"
+        hook.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os\n"
+            "from pathlib import Path\n"
+            "options = [os.environ[f'GIT_PUSH_OPTION_{i}'] "
+            "for i in range(int(os.environ['GIT_PUSH_OPTION_COUNT']))]\n"
+            f"Path({str(received)!r}).write_text(json.dumps(options))\n"
+        )
+        hook.chmod(0o755)
+        with mock.patch("rwgk_wt.lifecycle.pin_snapshots"):
+            self.publish_stack(repo, selected)
+        self.assertEqual(
+            json.loads(received.read_text()), [*configured, "pull.stacked"]
+        )
+        self.assertEqual(
+            repo.git("config", "--get-all", "push.pushOption").splitlines(), configured
+        )
+
+    def test_unsupported_push_option_retries_identical_atomic_update_and_leases(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        self.rewrite_stack_top(repo, selected)
+        git(self.remotes["upstream"], "config", "receive.advertisePushOptions", "false")
+        self.commands.clear()
+        with mock.patch("rwgk_wt.lifecycle.pin_snapshots"):
+            self.publish_stack(repo, selected)
+        pushes = self.pushes()
+        self.assertEqual(len(pushes), 2)
+        self.assertIn("push.pushOption=pull.stacked", pushes[0])
+        without_signal = list(pushes[0])
+        signal_index = without_signal.index("-c")
+        self.assertEqual(
+            without_signal[signal_index + 1], "push.pushOption=pull.stacked"
+        )
+        del without_signal[signal_index : signal_index + 2]
+        self.assertEqual(without_signal, pushes[1])
+        self.assertIn("--atomic", pushes[1])
+        self.assertEqual(
+            git(self.remotes["upstream"], "rev-parse", "rwgk/second"), repo.oid("HEAD")
+        )
+
+    def test_native_stack_lease_rejection_does_not_retry_without_push_option(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        old, new = self.rewrite_stack_top(repo, selected)
+        git(self.remotes["upstream"], "config", "receive.advertisePushOptions", "true")
+        original = repo.run
+
+        def concurrent_writer(argv, **kwargs):
+            wire = argv[2:] if argv[:2] == ["env", "LC_ALL=C"] else argv
+            if wire[0] == "git" and "push" in wire:
+                git(
+                    self.remotes["upstream"],
+                    "update-ref",
+                    "refs/heads/rwgk/second",
+                    repo.oid("main"),
+                )
+            return original(argv, **kwargs)
+
+        self.commands.clear()
+        with (
+            mock.patch.object(repo, "run", side_effect=concurrent_writer),
+            mock.patch("rwgk_wt.lifecycle.pin_snapshots"),
+            self.assertRaisesRegex(WTError, "Fixed leases were not refreshed"),
+        ):
+            self.publish_stack(repo, selected)
+        pushes = self.pushes()
+        self.assertEqual(len(pushes), 1)
+        self.assertIn("push.pushOption=pull.stacked", pushes[0])
+        self.assertIn("--force-with-lease=refs/heads/rwgk/second:" + old, pushes[0])
+        self.assertEqual(repo.branches["rwgk/second"]["publication"]["oid"], old)
+        self.assertEqual(repo.oid("HEAD"), new)
+        self.assertEqual(
+            git(self.remotes["upstream"], "rev-parse", "rwgk/second"), repo.oid("main")
+        )
+
+    def test_native_stack_fast_forward_does_not_send_review_retention_option(self):
+        repo, selected = self.native_stack()
+        self.publish_stack(repo, selected)
+        (repo.root / "next").write_text("next commit\n")
+        git(repo.root, "add", "next")
+        git(repo.root, "commit", "-m", "Next change")
+        self.commands.clear()
+        self.publish_stack(repo, selected)
+        self.assertEqual(len(self.pushes()), 1)
+        self.assertNotIn("push.pushOption=pull.stacked", self.pushes()[0])
 
     def test_empty_change_refuses_before_any_push(self):
         path = self.repo.create("rwgk/empty", "main")

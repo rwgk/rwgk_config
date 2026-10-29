@@ -11,8 +11,9 @@ current GitHub head, or witnessed by GitHub's force-push timeline. Saved catalog
 heads and equal file contents are not publication evidence. Unknown membership
 changes, hidden edits and incomplete GitHub restacks cause an explanatory stop.
 
-Uses the POSIX operation/catalog locks of gh-stack v0.2.1. An interrupted apply
-leaves gh-stack-adopt-state in the common Git directory, with recovery details.
+Uses the POSIX operation/catalog locks and schema-1 metadata of gh-stack v0.3.0.
+An interrupted apply leaves gh-stack-adopt-state in the common Git directory,
+with recovery details.
 """
 
 from __future__ import annotations
@@ -537,7 +538,10 @@ class Adopter:
         trunk = native.get("base", {}).get("ref")
         require(
             trunk == stack["trunk"]["branch"],
-            "GitHub and local stack trunks differ; stopped.",
+            "GitHub and local stack trunks differ; stopped. Inspect the base change, "
+            "then use wt stack rebase to move onto GitHub's current base. "
+            "If the old base did not merge, use --accept-base-change only after "
+            "confirming that dropping its commits is intended.",
         )
         entries = native["pull_requests"]
         require(entries, "The native stack contains no pull requests.")
@@ -773,6 +777,13 @@ class Adopter:
             if pr is None:
                 continue
             ref = entry.setdefault("pullRequest", {})
+            if pr["merged"]:
+                require(
+                    "mergedHead" not in ref or ref["mergedHead"] == pr["head"],
+                    f"Saved merged head for PR #{pr['number']} differs from GitHub; "
+                    "inspect the local catalog and merged PR before adopting.",
+                )
+                ref["mergedHead"] = pr["head"]
             ref["number"], ref["merged"] = pr["number"], pr["merged"]
             if pr["id"]:
                 ref["id"] = pr["id"]
@@ -946,6 +957,23 @@ class Adopter:
                             self.clean(Path(row["path"]), row["branch"])
                     self.journal.unlink()
                 raise
+
+    def require_supported_extension(self):
+        # Share wt's version policy; preview/checker do not invoke the extension.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
+        from rwgk_wt.core import WTError
+        from rwgk_wt.stack_version import require_supported
+
+        def run(command, *, check=False):
+            try:
+                return self.run(command, ok=range(256))
+            except (Refusal, OSError) as error:
+                raise WTError(str(error)) from error
+
+        try:
+            require_supported(run)
+        except WTError as error:
+            raise Refusal(str(error)) from error
 
     def execute(self):
         with lock(self.common / "gh-stack-operation.lock"):
@@ -1219,6 +1247,8 @@ def main(argv=None):
     try:
         require(args.timeout > 0, "--timeout must be positive.")
         adopter = Adopter(args)
+        if args.apply:
+            adopter.require_supported_extension()
         result = adopter.execute()
     except (Refusal, checkpoint.Incomplete, OSError) as error:
         message = str(error)

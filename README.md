@@ -125,10 +125,21 @@ single `wt name` implementation handles legacy names and collisions; directory
 names are never parsed to recover branch names.
 
 Requirements: Python 3.11 or later on POSIX (including WSL), Git 2.36 or later,
-and `gh` for GitHub operations. Stack commands need a **worktree-aware gh-stack
-build** that rebases each layer in its owning worktree. Ralf's installed extension
-contains local changes; its version tag alone does not establish that support.
-Native Windows Python lacks the POSIX locking used by this engine.
+and `gh` for GitHub operations. Extension-backed stack operations require
+**gh-stack v0.3.0 or newer**, whose official release supports rebasing each layer
+in its owning worktree. The helpers check the version before making changes and
+stop with installation or upgrade instructions when necessary:
+
+```bash
+gh stack --version
+gh extension upgrade stack              # installed but too old
+gh extension install github/gh-stack     # not installed
+```
+
+The check is quiet on success and shared by the stack helpers. Local navigation,
+help, previews, and the read-only checker remain available for diagnosis without
+a compatible extension. Native Windows Python lacks the POSIX locking used by
+this engine.
 
 `wt` is a Bash function that runs the `git-wt` engine and changes directory after
 successful navigation. Start a fresh shell after installing these changes. Both
@@ -279,7 +290,23 @@ wt publish --stack
 
 `wt stack go up|down|top|bottom` navigates without switching any worktree's
 branch. `wt stack rebase` supports `--upstack`, `--downstack`, `--no-trunk`,
-`--continue`, and `--abort`. It retains recovery refs before rewriting.
+`--accept-base-change`, `--continue`, and `--abort`. It retains recovery refs before
+rewriting.
+
+If GitHub retargets a stack after deleting its old base, publication stops until
+the stack is rebased onto the new base. `wt stack rebase` supports a new base that
+matches the repository's registered trunk, with its owning worktree and submodule
+checks. Another target stops with guidance to inspect the repository configuration.
+When the old base is not known to have merged, inspect the commits before explicitly
+accepting their removal:
+
+```bash
+wt stack rebase --accept-base-change
+```
+
+This flag is never implied and cannot be combined with `--no-trunk`, `--continue`,
+or `--abort`. Stack adoption remains a separate operation and refuses a changed
+base rather than rewriting history.
 
 After GitHub changes a stack, for example by merging its lower layers:
 
@@ -298,10 +325,18 @@ publication are separate operations. Use the helper rather than
 GitHub stacks require same-repository branches; upstream-only publication is
 intentional, including pybind11.
 
-Publication checks exact destination refs and uses fixed expected-SHA leases.
-Before replacing published history it preserves the old tip when necessary.
+Publication checks exact destination refs and uses fixed expected-SHA leases
+with an atomic push. For an established native stack it checks the live stack
+identity and base before preserving history, pushing, or updating PRs, including
+when only one active PR remains. Before replacing published history it preserves
+the old tip when necessary. Rewritten native stacks send `pull.stacked` to support
+retaining approvals when the PR diff is unchanged; a remote that does not support
+push options is retried with the same fixed leases and atomic push. Independent
+PRs and fast-forward stack pushes do not send that option.
+
 Concurrent remote changes stop publication for investigation. A failed lease is
-not an invitation to refresh the expected SHA and overwrite new work.
+not an invitation to refresh the expected SHA and overwrite new work. The
+extension's atomic defaults do not replace these independently verified leases.
 
 ### Retire work and recover it
 

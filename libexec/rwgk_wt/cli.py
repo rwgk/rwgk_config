@@ -87,6 +87,11 @@ def parser():
     group.add_argument("--upstack", action="store_true")
     group.add_argument("--downstack", action="store_true")
     rebase.add_argument("--no-trunk", action="store_true")
+    rebase.add_argument(
+        "--accept-base-change",
+        action="store_true",
+        help="accept dropping an unmerged old base after GitHub retargets the stack",
+    )
     recovery = rebase.add_mutually_exclusive_group()
     recovery.add_argument("--continue", dest="continue_rebase", action="store_true")
     recovery.add_argument("--abort", action="store_true")
@@ -194,15 +199,18 @@ def _dispatch(repo, args):
             ("upstack", "--upstack"),
             ("downstack", "--downstack"),
             ("no_trunk", "--no-trunk"),
+            ("accept_base_change", "--accept-base-change"),
             ("continue_rebase", "--continue"),
             ("abort", "--abort"),
         ):
             if getattr(args, attribute):
                 flags.append(option)
         if (args.continue_rebase or args.abort) and (
-            args.upstack or args.downstack or args.no_trunk
+            args.upstack or args.downstack or args.no_trunk or args.accept_base_change
         ):
             raise WTError("Use --continue or --abort on its own.")
+        if args.accept_base_change and args.no_trunk:
+            raise WTError("Use --accept-base-change only when including trunk.")
         return stacks.rebase(repo, flags), None
     if command == "publish":
         return github.publish(

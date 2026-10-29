@@ -947,7 +947,7 @@ _wt_complete() {
         stack)
             case "${COMP_WORDS[2]:-}" in
             pull) words='--stack --apply' ;;
-            rebase) words='--upstack --downstack --no-trunk --continue --abort' ;;
+            rebase) words='--upstack --downstack --no-trunk --accept-base-change --continue --abort' ;;
             esac
             ;;
         esac

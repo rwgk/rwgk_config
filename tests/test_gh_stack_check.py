@@ -230,7 +230,7 @@ class StackCheckTests(unittest.TestCase):
     def test_clean_two_layer_stack_passes(self) -> None:
         report = self.check(expected=0)
         self.assertEqual(len(report["layers"]), 2)
-        self.assertEqual(report["supported_metadata"], "gh-stack v0.2.0 / schema 1")
+        self.assertEqual(report["supported_metadata"], "gh-stack v0.3.0 / schema 1")
         self.check("--expect-synced", expected=0)
 
     def test_ordinary_local_commit_requires_allow_ahead_and_reports_refresh(
@@ -592,6 +592,28 @@ class StackCheckTests(unittest.TestCase):
         self.write_metadata()
         report = self.check(expected=2)
         self.assert_issue(report, "incomplete", "schema")
+
+    def test_optional_merged_head_accepts_full_commit_sha(self) -> None:
+        ref = self.metadata["stacks"][0]["branches"][0]["pullRequest"]
+        for sha in (self.one, "a" * 64):
+            with self.subTest(sha=sha):
+                ref["mergedHead"] = sha
+                self.write_metadata()
+                before = self.snapshot()
+                self.check(expected=0)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_invalid_merged_head_is_incomplete_even_on_merged_layer(self) -> None:
+        ref = self.metadata["stacks"][0]["branches"][0]["pullRequest"]
+        ref["merged"] = True
+        for value in (None, 123, True, "", "not-a-sha", "a" * 39):
+            with self.subTest(value=value):
+                ref["mergedHead"] = value
+                self.write_metadata()
+                before = self.snapshot()
+                report = self.check(expected=2)
+                self.assert_issue(report, "incomplete", "mergedHead")
+                self.assertEqual(self.snapshot(), before)
 
     def test_invalid_or_missing_required_checkpoint_is_incomplete(self) -> None:
         original = copy.deepcopy(self.metadata)

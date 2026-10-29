@@ -99,6 +99,7 @@ class RetirementTests(unittest.TestCase):
                 self.repo, "create", create=True, return_value=new_path
             ) as create,
             patch.object(stacks, "_command") as command,
+            patch.object(stacks, "require_extension"),
         ):
             self.assertEqual(stacks.add(self.repo, "replacement"), new_path)
         create.assert_called_once_with("rwgk/replacement", "refs/heads/rwgk/lower")

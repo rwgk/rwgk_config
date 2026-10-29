@@ -166,6 +166,7 @@ class AdoptionPreservationTests(unittest.TestCase):
 
             repo.run = adopt
             with (
+                patch.object(stacks, "require_extension"),
                 patch.object(stacks, "_owners"),
                 patch.object(stacks, "_sync_submodules"),
                 patch(

@@ -298,6 +298,9 @@ class StackAdoptTests(unittest.TestCase):
                 with Path(os.environ["GH_STACK_ADOPT_CALLS"]).open("a") as stream:
                     stream.write(json.dumps(arguments) + "\\n")
                 fixture = json.loads(Path(os.environ["GH_STACK_ADOPT_FIXTURE"]).read_text())
+                if arguments == ["stack", "--version"]:
+                    print(fixture.get("stack_version", "gh stack version 0.3.0"))
+                    sys.exit(fixture.get("stack_version_exit", 0))
                 if "graphql" in arguments:
                     if fixture.get("graphql_error"):
                         print(json.dumps({"errors": [{"message": fixture["graphql_error"]}]}))
@@ -475,6 +478,27 @@ class StackAdoptTests(unittest.TestCase):
         )
         self.assertFalse(any(any("/pulls/" in arg for arg in args) for args in calls))
 
+    def test_old_extension_stops_apply_before_locks_fetches_or_api(self) -> None:
+        self.api["stack_version"] = "gh stack version 0.2.1"
+        self.write_api()
+        before = self.snapshot_local()
+        result = self.adopt("--apply", succeeds=False)
+        self.assert_diagnostic(result, r"0\.3\.0.*upgrade")
+        self.assertEqual(self.snapshot_local(), before)
+        self.assertEqual(self.calls(), [["stack", "--version"]])
+        self.assertFalse((self.repo / ".git" / "gh-stack-operation.lock").exists())
+        self.assertEqual(
+            self.git("rev-parse", "refs/remotes/upstream/main"), self.initial
+        )
+
+    def test_preview_does_not_require_supported_extension(self) -> None:
+        self.api["stack_version"] = "gh stack version 0.2.1"
+        self.write_api()
+        before = self.snapshot_local()
+        self.adopt()
+        self.assertEqual(self.snapshot_local(), before)
+        self.assertNotIn(["stack", "--version"], self.calls())
+
     def test_apply_adopts_changed_trees_and_is_idempotent_after_preview(self) -> None:
         self.adopt()
         self.adopt("--apply")
@@ -495,6 +519,50 @@ class StackAdoptTests(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain"), "")
         before = self.snapshot_local()
         self.adopt("--apply")
+        self.assertEqual(self.snapshot_local(), before)
+
+    def test_apply_populates_newly_observed_merged_head(self) -> None:
+        self.adopt("--apply")
+        saved = json.loads(self.metadata_path.read_text())["stacks"][0]
+        ref = saved["branches"][0]["pullRequest"]
+        self.assertTrue(ref["merged"])
+        self.assertEqual(ref["mergedHead"], self.merged)
+
+    def test_apply_preserves_matching_merged_head(self) -> None:
+        ref = self.metadata["stacks"][0]["branches"][0]["pullRequest"]
+        ref.update(merged=True, mergedHead=self.merged)
+        self.write_metadata()
+        self.adopt("--apply")
+        saved = json.loads(self.metadata_path.read_text())["stacks"][0]
+        self.assertEqual(saved["branches"][0]["pullRequest"]["mergedHead"], self.merged)
+
+    def test_conflicting_merged_head_stops_before_local_adoption(self) -> None:
+        ref = self.metadata["stacks"][0]["branches"][0]["pullRequest"]
+        ref.update(merged=True, mergedHead=self.initial)
+        self.write_metadata()
+        before = self.snapshot_local()
+        result = self.adopt("--apply", succeeds=False)
+        self.assert_diagnostic(result, r"saved merged head.*differs.*inspect")
+        self.assertEqual(self.snapshot_local(), before)
+
+    def test_invalid_merged_head_stops_before_local_adoption(self) -> None:
+        ref = self.metadata["stacks"][0]["branches"][0]["pullRequest"]
+        for value in (None, 123, "not-a-sha"):
+            with self.subTest(value=value):
+                ref["mergedHead"] = value
+                self.write_metadata()
+                before = self.snapshot_local()
+                result = self.adopt("--apply", succeeds=False)
+                self.assert_diagnostic(result, r"invalid mergedhead")
+                self.assertEqual(self.snapshot_local(), before)
+
+    def test_retargeted_base_refuses_with_rebase_guidance(self) -> None:
+        self.rest["base"]["ref"] = "new-trunk"
+        self.write_api()
+        before = self.snapshot_local()
+        result = self.adopt("--apply", succeeds=False)
+        self.assert_diagnostic(result, r"trunks differ.*wt stack rebase")
+        self.assertIn("--accept-base-change", result.stderr)
         self.assertEqual(self.snapshot_local(), before)
 
     def test_matching_heads_and_metadata_report_already_synchronized(self) -> None:
@@ -608,8 +676,9 @@ class StackAdoptTests(unittest.TestCase):
         result = self.adopt("--apply", succeeds=False)
         self.assert_diagnostic(result, r"stack")
         self.assertEqual(self.snapshot_local(), before)
-        self.assertEqual(len(self.calls()), 1)
-        self.assertIn("repos/owner/project/stacks/3179", self.calls()[0])
+        api_calls = [call for call in self.calls() if call != ["stack", "--version"]]
+        self.assertEqual(len(api_calls), 1)
+        self.assertIn("repos/owner/project/stacks/3179", api_calls[0])
 
     def test_api_authentication_failure_is_distinct_from_missing_stack(self) -> None:
         self.api["rest_error"] = ["Bad credentials", 401]

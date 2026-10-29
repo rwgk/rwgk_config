@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only Git/metadata checkpoint verification for gh-stack v0.2.0, schema 1.
+"""Read-only Git/metadata checkpoint verification for gh-stack v0.3.0, schema 1.
 
 GitHub stack membership, PR bases/status, and merge queues require separate API
 checks. No gh-stack commands, fetches (including lazy fetches), or repairs run.
@@ -115,7 +115,11 @@ def load_metadata(raw, git):
             require(
                 type(pr.get("number")) is int and pr["number"] > 0, "PR number required"
             )
-            optional_types(pr, {"id": str, "url": str, "merged": bool})
+            optional_types(
+                pr, {"id": str, "url": str, "merged": bool, "mergedHead": str}
+            )
+            if "mergedHead" in pr:
+                require(SHA.fullmatch(pr["mergedHead"]), "invalid mergedHead SHA")
 
     try:
 
@@ -132,7 +136,7 @@ def load_metadata(raw, git):
     require(type(data) is dict, "top level must be an object")
     if type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1:
         raise Incomplete(
-            "unsupported metadata schema; only schemaVersion 1 (gh-stack v0.2.0) is audited"
+            "unsupported metadata schema; only schemaVersion 1 (gh-stack v0.3.0) is audited"
         )
     optional_types(data, {"repository": str})
     require(type(data.get("stacks")) is list, "stacks array required")
@@ -175,7 +179,7 @@ class Checker:
             "remote": args.remote,
             "mode": "allow-local-ahead" if args.allow_local_ahead else "expect-synced",
             "allow_stale_trunk": args.allow_stale_trunk,
-            "supported_metadata": "gh-stack v0.2.0 / schema 1",
+            "supported_metadata": "gh-stack v0.3.0 / schema 1",
             "github_verified": False,
             "layers": [],
             "issues": [],
