@@ -23,6 +23,7 @@ class BatchCleanupTests(unittest.TestCase):
         self.common = Path(temporary.name).resolve()
         self.names = ["rwgk/lower", "rwgk/middle", "rwgk/upper"]
         self.repo = SimpleNamespace(
+            state={},
             common=self.common,
             primary=self.common,
             branches={

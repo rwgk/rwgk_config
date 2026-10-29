@@ -39,9 +39,16 @@ trunk. Each development or review branch owns one stable worktree under
 `$W/trees/<repo-key>/`; new branch names use `rwgk/<slug>`. Navigate with `wt go`
 or `wt stack go`, without switching branches in an existing worktree.
 
-All stacks publish to verified upstream, unconditionally. Independent PRs use
-the registered repository's publication destination. Publication and remote
-cleanup require task authorization; command availability grants none.
+All stacks publish to verified upstream, unconditionally. New independent PRs use
+the registered repository's publication destination. Update an associated
+independent PR with `wt push`, including an authorized contribution to another
+author's actual source branch. Use `wt pull --rebase` to replay diverged local
+contributions, then `wt pull --continue` or `wt pull --abort` when needed.
+`wt publish` retains owned PR creation, metadata changes, history rewrites, and
+stack publication. Neither push nor publication configures Git upstream tracking;
+preserve existing tracking and use `wt`'s association records instead.
+Publication and remote cleanup require task authorization; command availability
+grants none.
 
 Use `wt clean` for terminal PRs and `wt drop --local-only` for explicit local
 retirement. Preview before `--apply`. Preserve backtracking records and recovery

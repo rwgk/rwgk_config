@@ -211,6 +211,13 @@ class Repo:
         return owners[0] if owners else None
 
     def ensure_idle(self, path=None):
+        if self.state.get("pr_rebase") and not getattr(
+            self, "_wt_pr_rebase_active", False
+        ):
+            raise WTError(
+                "A PR pull rebase is pending; finish it with 'wt pull --continue' "
+                "or abort it with 'wt pull --abort'."
+            )
         if self.state.get("submodule_rebase") and not getattr(
             self, "_wt_submodule_rebase_active", False
         ):

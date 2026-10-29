@@ -302,8 +302,98 @@ def _source_remote(repo, head_repo):
     return None
 
 
+def _pr_source(pr):
+    return {
+        "base_repo": (pr.get("base_repo") or "").lower(),
+        "number": pr.get("number"),
+        "head_repo": (pr.get("head_repo") or "").lower(),
+        "head_ref": pr.get("head_ref"),
+    }
+
+
+def validate_pr_source(saved, live):
+    """A PR association never silently selects a different source branch."""
+    if _pr_source(saved) != _pr_source(live):
+        raise WTError(
+            "PR source repository or branch changed since association; "
+            "inspect the PR and 'wt doctor' before continuing."
+        )
+
+
+def _association_source(metadata, pr):
+    expected = (
+        metadata.get("associated_source")
+        or metadata.get("sync_base", {}).get("source")
+        or _pr_source(metadata.get("pr", pr))
+    )
+    actual = _pr_source(pr)
+    if actual != expected and not (
+        expected["head_repo"]
+        and not actual["head_repo"]
+        and actual == {**expected, "head_repo": ""}
+    ):
+        raise WTError(
+            "PR source repository or branch changed since association; "
+            "inspect the PR and 'wt doctor' before continuing."
+        )
+    # Deleted forks remain readable through the receiving repository's PR ref;
+    # observing their disappearance must not erase the original source identity.
+    return dict(expected)
+
+
+def record_sync(repo, branch, pr, oid):
+    """Remember an integrated/verified published head, independently of observations."""
+    if not SHA.fullmatch(oid) or repo.oid(oid) != oid:
+        raise WTError("Cannot record an invalid PR synchronization boundary")
+    metadata = repo.branches[branch]
+    source = _association_source(metadata, pr)
+    digest = hashlib.sha256(pr["base_repo"].lower().encode()).hexdigest()[:12]
+    reference = f"refs/rwgk/pr/{digest}/{pr['number']}/sync/{oid}"
+    previous = repo.oid(reference) if repo.exists(reference) else "0" * len(oid)
+    if previous not in (oid, "0" * len(oid)):
+        raise WTError("PR synchronization retention ref changed; inspect 'wt doctor'.")
+    repo.git("update-ref", reference, oid, previous)
+    metadata["associated_source"] = source
+    metadata["sync_base"] = {"oid": oid, "source": source, "ref": reference}
+    metadata["last_checked_out_head"] = oid
+    metadata["last_seen_head"] = pr["head_oid"]
+    metadata["pr"] = pr
+    repo.save()
+
+
+def replay_base(repo, branch, pr):
+    """Return a recorded replay anchor; merely observing a PR never moves it."""
+    metadata = repo.branches[branch]
+    source = _association_source(metadata, pr)
+    saved = metadata.get("sync_base")
+    if saved:
+        if saved.get("source") != source:
+            raise WTError("PR replay boundary belongs to a different source branch")
+        oid = saved.get("oid")
+        reference = saved.get("ref")
+        if not reference or not repo.exists(reference) or repo.oid(reference) != oid:
+            raise WTError("Recorded PR replay boundary changed; inspect 'wt doctor'.")
+    else:
+        # Upgrade existing catalogs only from the previous integrated checkout,
+        # never from last_seen_head or the mutable fetched PR-head reference.
+        oid = metadata.get("last_checked_out_head")
+        if oid is None:
+            publication = metadata.get("publication", {})
+            if (publication.get("repo") or "").lower() == _pr_source(pr)[
+                "head_repo"
+            ] and publication.get("ref") == f"refs/heads/{pr['head_ref']}":
+                oid = publication.get("oid")
+    if not isinstance(oid, str) or not SHA.fullmatch(oid):
+        return None
+    if _git_result(repo, "cat-file", "-e", f"{oid}^{{commit}}").returncode:
+        return None
+    return oid
+
+
 def _associate(repo, branch, pr, role, refresh=False, checked_out=None):
     metadata = repo.branches[branch]
+    source = _association_source(metadata, pr)
+    metadata["associated_source"] = source
     metadata["pr"] = pr
     metadata["role"] = role
     if role == "owned" and pr.get("head_repo"):
@@ -317,7 +407,7 @@ def _associate(repo, branch, pr, role, refresh=False, checked_out=None):
             }
     metadata["last_seen_head"] = pr["head_oid"]
     if checked_out is not None:
-        metadata["last_checked_out_head"] = checked_out
+        record_sync(repo, branch, pr, checked_out)
     repo.save()
     repo.alias(branch, pr)
 
@@ -341,6 +431,7 @@ def open_pr(repo, selector, refresh=False):
         raise WTError(f"Multiple managed branches claim PR #{number}")
     if matches:
         branch = matches[0]
+        _association_source(repo.branches[branch], pr)
         role = repo.branches[branch]["role"]
         path = repo.owner(branch)
         if not path:
@@ -408,6 +499,12 @@ def open_pr(repo, selector, refresh=False):
         repo.ensure_idle(path)
         repo.ensure_clean(path)
         local = repo.oid(f"refs/heads/{branch}")
+        previous = replay_base(repo, branch, pr)
+        rewritten = (
+            previous is not None
+            and _ancestor(repo, previous, local)
+            and not _ancestor(repo, previous, pr["head_oid"])
+        )
         if _ancestor(repo, local, pr["head_oid"]):
             submodules.validate_update(repo, path, fetched)
             repo.git(
@@ -418,14 +515,11 @@ def open_pr(repo, selector, refresh=False):
                 fetched,
                 cwd=path,
             )
-        elif not _ancestor(repo, pr["head_oid"], local):
-            metadata = repo.branches[branch]
-            previous = metadata.get(
-                "last_checked_out_head", metadata.get("publication", {}).get("oid")
-            )
+        elif rewritten or not _ancestor(repo, pr["head_oid"], local):
             if local != previous:
                 raise WTError(
-                    "PR head and local work diverged; preserve/reconcile local commits before refreshing"
+                    "PR head and local work diverged; run 'wt pull --rebase' "
+                    "to replay your local commits onto the current PR head."
                 )
             from .lifecycle import protect_local
 
@@ -466,8 +560,8 @@ def open_pr(repo, selector, refresh=False):
     return Path(path).resolve()
 
 
-def refresh_current(repo):
-    """Refresh the current independent PR through the same guarded PR-ref path."""
+def current_pr(repo, *, action="pull"):
+    """Resolve the current independent managed PR without changing its checkout."""
     from . import stacks
 
     branch = repo.current_branch()
@@ -483,12 +577,21 @@ def refresh_current(repo):
             "Current worktree does not match its registration; run 'wt doctor'."
         )
     if stacks.get_stack(repo, branch):
+        if action == "push":
+            raise WTError(
+                "Current branch belongs to a stack; use 'wt publish --stack' "
+                "for authorized stack publication."
+            )
         raise WTError(
             "Current branch belongs to a stack; use 'wt stack pull' to preview, "
             "then 'wt stack pull --apply' to adopt it."
         )
     pr = metadata.get("pr")
     if not pr:
+        if action == "push":
+            raise WTError(
+                "Current branch has no associated PR; use 'wt publish' to create one."
+            )
         raise WTError(
             "Current branch has no associated PR; use 'wt pr NUMBER' to open or associate one."
         )
@@ -496,7 +599,15 @@ def refresh_current(repo):
         raise WTError(
             "Associated PR belongs to another repository; inspect 'wt doctor'."
         )
+    _association_source(metadata, pr)
     repo.check_primary()
+    return branch, metadata
+
+
+def refresh_current(repo):
+    """Refresh the current independent PR through the same guarded PR-ref path."""
+    branch, metadata = current_pr(repo)
+    pr = metadata["pr"]
     previous = repo.oid(f"refs/heads/{branch}")
     path = open_pr(repo, pr["number"], refresh=True)
     oid = repo.oid(f"refs/heads/{branch}")
@@ -666,9 +777,7 @@ def _verify_native_stack(repo, selected, entries, prs):
     return native
 
 
-def publish(
-    repo, stack=False, title=None, body_file=None, ready=False, set_upstream=False
-):
+def publish(repo, stack=False, title=None, body_file=None, ready=False):
     """Publish committed tips atomically, then create/link PRs without hidden pushes."""
     from . import lifecycle, stacks
 
@@ -777,11 +886,6 @@ def publish(
                 raise WTError(
                     f"Rewriting {branch} requires a previously recorded publication tip; inspect and adopt the remote first"
                 )
-        upstream = repo.git("for-each-ref", "--format=%(upstream)", ref)
-        if force and not upstream and not set_upstream:
-            raise WTError(
-                f"Rewriting existing {head_repo}:{branch} with no local upstream requires an explicit choice: rerun with --set-upstream to track {remote}/{branch}"
-            )
         if force:
             snapshots.append(
                 {"oid": old, "label": f"published-{branch}", "branch": branch, "pr": pr}
@@ -793,7 +897,6 @@ def publish(
                 "oid": oid,
                 "old": old,
                 "ref": ref,
-                "upstream": upstream,
                 "force": force,
                 "pr": pr,
                 "auto_text": _auto_text(repo, branch, base) if pr is None else None,
@@ -830,7 +933,7 @@ def publish(
             raise WTError(
                 "A local branch changed during publication preflight; no push was attempted"
             )
-    command = ["push", "--atomic"]
+    command = ["push", "--atomic", "--no-follow-tags", "--recurse-submodules=no"]
     command.extend(
         f"--force-with-lease={item['ref']}:{item['old'] or ''}" for item in entries
     )
@@ -858,17 +961,12 @@ def publish(
                 "Remote publication verification failed; inspect all destination refs before retrying"
             )
         metadata = repo.branches[entry["branch"]]
-        metadata["last_checked_out_head"] = entry["oid"]
         metadata["publication"] = {
             "remote": remote,
             "repo": head_repo,
             "ref": entry["ref"],
             "oid": entry["oid"],
         }
-        if not entry["upstream"]:
-            # Explicit config avoids git push -u changing an existing upstream.
-            repo.git("config", f"branch.{entry['branch']}.remote", remote)
-            repo.git("config", f"branch.{entry['branch']}.merge", entry["ref"])
         repo.save()
     prs = []
     for entry in entries:
@@ -878,17 +976,14 @@ def publish(
         repo.alias(entry["branch"], pr)
         prs.append(pr)
     if stack and len(prs) >= 2:
-        repo.run(
-            [
-                "gh",
-                "stack",
-                "link",
-                "--remote",
-                remote,
-                "--base",
-                selected["trunk"]["branch"],
-                *[item["url"] for item in prs],
-            ]
+        stacks._command(
+            repo,
+            "link",
+            "--remote",
+            remote,
+            "--base",
+            selected["trunk"]["branch"],
+            *[item["url"] for item in prs],
         )
     # API proof is separate from the local catalog: re-read heads, bases, and
     # draft state after linking (which may adjust the base chain).
@@ -905,7 +1000,7 @@ def publish(
             raise WTError(
                 "GitHub PR verification failed; publication may have completed, inspect it before retrying"
             )
-        repo.branches[entry["branch"]]["pr"] = actual
+        record_sync(repo, entry["branch"], actual, entry["oid"])
     repo.save()
     if stack and len(prs) >= 2:
         native = _verify_native_stack(repo, selected, entries, prs)

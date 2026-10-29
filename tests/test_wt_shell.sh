@@ -85,6 +85,16 @@ wt pull >"$test_root/output"
 [[ "$(cat "$WT_TEST_ARGUMENTS")" == pull ]] || fail 'pull was altered'
 [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail 'pull output was hidden'
 
+# Synchronization commands preserve the current directory and all mode flags.
+for mode in --rebase --continue --abort; do
+    wt pull "$mode" >"$test_root/output"
+    [[ "$PWD" == "$test_root/from" ]] || fail 'pull mode changed directories'
+    [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == "$mode" ]] || fail 'pull mode was altered'
+done
+wt push >"$test_root/output"
+[[ "$PWD" == "$test_root/from" ]] || fail 'push changed directories'
+[[ "$(cat "$WT_TEST_ARGUMENTS")" == push ]] || fail 'push was altered'
+
 # A late journal/catalog failure can occur after cleanup removes our CWD.
 cd "$test_root/from"
 export WT_TEST_REMOVE_ROOT="$test_root/from" WT_TEST_STATUS=17

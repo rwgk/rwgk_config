@@ -36,7 +36,12 @@ class FixtureRepo(Repo):
         prefix = []
         if argv[:2] == ["env", "LC_ALL=C"]:
             self.fixture.locale_commands.append(list(argv))
-            prefix, argv = argv[:2], argv[2:]
+        if argv[0] == "env":
+            prefix = [argv.pop(0)]
+            while argv and "=" in argv[0]:
+                prefix.append(argv.pop(0))
+            if any(value.startswith("GH_REPO=") for value in prefix):
+                self.fixture.extension_env.append(prefix)
         if argv[0] == "gh":
             return self.fixture.gh(argv, input)
         # Git endpoints remain actual bare repos. Only identity observation is
@@ -94,6 +99,7 @@ class GitHubTests(unittest.TestCase):
         self.push_identities = {}
         self.commands = []
         self.locale_commands = []
+        self.extension_env = []
         self.gh_calls = []
         self.prs = {}
         self.native_base = "main"
@@ -332,6 +338,87 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(f"HEAD {local}", stdout)
         self.assertEqual((path / "valuable").read_text(), "local contribution\n")
 
+    def test_pull_rebase_cli_replays_local_commit_and_prints_pr_url(self):
+        path = self.review_pair()
+        original = git(path, "rev-parse", "HEAD")
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local contribution")
+        remote_head = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            original,
+            "-m",
+            "Remote update",
+        )
+        self.prs[42]["head"]["sha"] = remote_head
+        git(self.primary, "push", "upstream", remote_head + ":refs/pull/42/head")
+        status, stdout, stderr = self.invoke_pull(path, ["--rebase"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(git(path, "rev-parse", "HEAD^"), remote_head)
+        self.assertIn("Rebased local commits onto PR #42", stdout)
+        self.assertIn("HEAD " + git(path, "rev-parse", "HEAD"), stdout)
+        self.assertEqual(
+            stdout.splitlines()[-1], "https://github.com/Acme/project/pull/42"
+        )
+        self.assertEqual((path / "valuable").read_text(), "local contribution\n")
+
+    def advance_review_head(self, path):
+        original = git(path, "rev-parse", "HEAD")
+        advanced = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            original,
+            "-m",
+            "Author commit",
+        )
+        self.prs[42]["head"]["sha"] = advanced
+        git(self.primary, "push", "upstream", advanced + ":refs/pull/42/head")
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
+        return original, advanced
+
+    def test_plain_pull_does_not_forget_replay_boundary_after_remote_rewind(self):
+        path = self.review_pair()
+        original, advanced = self.advance_review_head(path)
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local contribution")
+        local = git(path, "rev-parse", "HEAD")
+        self.prs[42]["head"]["sha"] = original
+        git(
+            self.primary, "push", "--force", "upstream", original + ":refs/pull/42/head"
+        )
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual(status, 1)
+        self.assertIn("wt pull --rebase", stderr)
+        current = FixtureRepo(self, path)
+        self.assertEqual(
+            current.branches["rwgk/review-pr42"]["sync_base"]["oid"], advanced
+        )
+        self.assertEqual(git(path, "rev-parse", "HEAD"), local)
+
+    def test_plain_pull_adopts_remote_rewind_when_no_local_work_would_be_lost(self):
+        path = self.review_pair()
+        original, advanced = self.advance_review_head(path)
+        self.prs[42]["head"]["sha"] = original
+        git(
+            self.primary, "push", "--force", "upstream", original + ":refs/pull/42/head"
+        )
+        status, _, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+        self.assertIn(
+            advanced,
+            git(
+                path, "for-each-ref", "--format=%(objectname)", "refs/rwgk/backtracking"
+            ),
+        )
+
     def test_pull_machine_output_retains_pr_and_commit_identity(self):
         path = self.review_pair()
         oid = git(path, "rev-parse", "HEAD")
@@ -344,6 +431,71 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual((value["previous_oid"], value["oid"]), (oid, oid))
         status, stdout, stderr = self.invoke_pull(path, flags=["--print-path"])
         self.assertEqual((status, stderr, stdout), (0, "", str(path) + "\n"))
+
+    def test_resuming_pr_observes_new_head_without_moving_replay_boundary(self):
+        path = self.review_pair()
+        branch = "rwgk/review-pr42"
+        original = git(path, "rev-parse", "HEAD")
+        value = self.repo.branches[branch]["sync_base"]
+        updated = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            original,
+            "-m",
+            "Updated PR",
+        )
+        self.prs[42]["head"]["sha"] = updated
+        github.open_pr(self.repo, "42")
+        self.assertEqual(self.repo.branches[branch]["last_seen_head"], updated)
+        self.assertEqual(self.repo.branches[branch]["sync_base"], value)
+        self.assertEqual(self.repo.oid(value["ref"]), original)
+        self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+
+    def test_changed_pr_source_is_refused_on_resume_and_plain_pull(self):
+        self.review_pair()
+        original = copy.deepcopy(self.repo.branches["rwgk/review-pr42"])
+        for field, value in (
+            ("ref", "different-branch"),
+            ("repo", {"full_name": "Someone/project"}),
+        ):
+            for refresh in (False, True):
+                with self.subTest(field=field, refresh=refresh):
+                    saved = copy.deepcopy(self.prs[42])
+                    self.prs[42]["head"][field] = value
+                    with self.assertRaisesRegex(
+                        WTError, "source repository or branch changed"
+                    ):
+                        github.open_pr(self.repo, "42", refresh=refresh)
+                    self.assertEqual(self.repo.branches["rwgk/review-pr42"], original)
+                    self.prs[42] = saved
+
+    def test_failed_checkpoint_save_keeps_previous_replay_boundary_reachable(self):
+        self.review_pair()
+        branch = "rwgk/review-pr42"
+        previous = copy.deepcopy(self.repo.branches[branch]["sync_base"])
+        updated = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            previous["oid"],
+            "-m",
+            "New PR head",
+        )
+        live = copy.deepcopy(self.repo.branches[branch]["pr"])
+        live["head_oid"] = updated
+        with (
+            mock.patch.object(
+                self.repo, "save", side_effect=OSError("interrupted save")
+            ),
+            self.assertRaisesRegex(OSError, "interrupted save"),
+        ):
+            github.record_sync(self.repo, branch, live, updated)
+        reloaded = FixtureRepo(self)
+        self.assertEqual(reloaded.branches[branch]["sync_base"], previous)
+        self.assertEqual(github.replay_base(reloaded, branch, live), previous["oid"])
 
     def test_pull_requires_pr_and_directs_trunk_to_its_update_command(self):
         status, _, stderr = self.invoke_pull(self.primary)
@@ -377,6 +529,43 @@ class GitHubTests(unittest.TestCase):
         self.assertIn("wt stack pull", stderr)
         self.assertEqual(len(self.gh_calls), before)
 
+    def test_pending_rebase_blocks_writes_and_plain_pull_but_allows_trunk_navigation(
+        self,
+    ):
+        path = self.review_pair()
+        self.repo.state["pr_rebase"] = {
+            "branch": "rwgk/review-pr42",
+            "phase": "rebasing",
+        }
+        self.repo.save()
+        for args in (
+            ("pull",),
+            ("push",),
+            ("publish",),
+            ("trunk", "update"),
+            ("drop", "--local-only"),
+        ):
+            with self.subTest(command=args):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    mock.patch.object(
+                        cli, "Repo", return_value=FixtureRepo(self, path)
+                    ),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    self.assertEqual(cli.main(list(args)), 1)
+                self.assertIn("wt pull --continue", stderr.getvalue())
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.object(cli, "Repo", return_value=FixtureRepo(self, path)),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(cli.main(["trunk", "--print-path"]), 0)
+        self.assertEqual(stdout.getvalue(), str(self.primary.resolve()) + "\n")
+        self.assertFalse(stderr.getvalue())
+
     def test_pull_rejects_wrong_pr_repository_or_registration_before_fetch(self):
         path = self.review_pair()
         saved = copy.deepcopy(self.repo.branches["rwgk/review-pr42"])
@@ -408,8 +597,9 @@ class GitHubTests(unittest.TestCase):
         self.assertIn("Detached HEAD", stderr)
         self.assertFalse(self.gh_calls)
 
-    def test_new_publication_uses_fixed_empty_lease_and_tracks_destination(self):
+    def test_new_publication_uses_fixed_empty_lease_without_setting_tracking(self):
         repo = self.branch()
+        repo.git("config", "push.autoSetupRemote", "true")
         result = self.publish(repo)
         oid = repo.oid("HEAD")
         push = self.pushes()[-1]
@@ -419,7 +609,10 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(
             git(self.remotes["origin"], "rev-parse", "refs/heads/rwgk/change"), oid
         )
-        self.assertEqual(repo.git("config", "branch.rwgk/change.remote"), "origin")
+        self.assertEqual(
+            repo.git("config", "--get-regexp", r"^branch\.rwgk/change\.", check=False),
+            "",
+        )
         self.assertEqual(repo.branches["rwgk/change"]["publication"]["oid"], oid)
         self.assertEqual(result["repo"], "ralf/project")
         self.assertTrue(result["prs"][0]["is_draft"])
@@ -493,18 +686,18 @@ class GitHubTests(unittest.TestCase):
             git(self.remotes["origin"], "rev-parse", "refs/heads/rwgk/change"), new
         )
 
-    def test_rewrite_without_upstream_requires_explicit_tracking_choice(self):
+    def test_rewrite_without_upstream_preserves_missing_tracking(self):
         repo = self.branch()
         self.publish(repo)
-        repo.git("config", "--remove-section", "branch.rwgk/change")
         self.rewrite(repo)
         before = len(self.pushes())
-        with self.assertRaisesRegex(WTError, "--set-upstream"):
-            self.publish(repo)
-        self.assertEqual(before, len(self.pushes()))
         with mock.patch("rwgk_wt.lifecycle.pin_snapshots"):
-            self.publish(repo, set_upstream=True)
-        self.assertEqual(repo.git("config", "branch.rwgk/change.remote"), "origin")
+            self.publish(repo)
+        self.assertEqual(before + 1, len(self.pushes()))
+        self.assertEqual(
+            repo.git("config", "--get-regexp", r"^branch\.rwgk/change\.", check=False),
+            "",
+        )
 
     def test_unrecorded_divergence_refuses_force_push(self):
         repo = self.branch()
@@ -604,6 +797,16 @@ class GitHubTests(unittest.TestCase):
             )
             self.assertNotEqual(missing.returncode, 0)
         link = next(argv for argv, _ in self.gh_calls if argv[1:3] == ["stack", "link"])
+        self.assertIn("GH_REPO=Acme/project", self.extension_env[-1])
+        for branch in ("rwgk/first", "rwgk/second"):
+            self.assertFalse(
+                git(
+                    self.primary,
+                    "for-each-ref",
+                    "--format=%(upstream)",
+                    f"refs/heads/{branch}",
+                )
+            )
         self.assertNotIn("--open", link)
         self.assertTrue(
             all(

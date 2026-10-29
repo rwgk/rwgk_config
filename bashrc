@@ -931,7 +931,7 @@ _wt_complete() {
     local words= branch
     COMPREPLY=()
     if [[ "$COMP_CWORD" -eq 1 ]]; then
-        words='init new pr pull go list trunk stack publish clean drop restore doctor path name --help'
+        words='init new pr pull push go list trunk stack publish clean drop restore doctor path name --help'
     elif [[ "$first" == stack && "$COMP_CWORD" -eq 2 ]]; then
         words='init add pull rebase go'
     elif [[ "$first" == stack && "${COMP_WORDS[2]:-}" == go ]]; then
@@ -941,7 +941,8 @@ _wt_complete() {
     elif [[ "$cur" == -* ]]; then
         case "$first" in
         init) words='--key --trunk --upstream --publish --archive --trees --backtracking' ;;
-        publish) words='--stack --title --body-file --ready --set-upstream' ;;
+        pull) words='--rebase --continue --abort' ;;
+        publish) words='--stack --title --body-file --ready' ;;
         clean) words='--apply --archive-local --discard-builds --resume' ;;
         drop) words='--local-only --apply --resume' ;;
         stack)

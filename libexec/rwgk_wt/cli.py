@@ -40,10 +40,33 @@ def parser():
         "pr", help="open or resume a PR worktree and attach its alias"
     )
     pr.add_argument("selector")
-    commands.add_parser(
+    pull = commands.add_parser(
         "pull",
         help="update the current independent PR worktree safely",
         description="Pull the PR's current head into this worktree, preserving local work.",
+    )
+    pull_mode = pull.add_mutually_exclusive_group()
+    pull_mode.add_argument(
+        "--rebase",
+        action="store_true",
+        help="replay local commits onto the current PR head",
+    )
+    pull_mode.add_argument(
+        "--continue",
+        dest="continue_rebase",
+        action="store_true",
+        help="continue a paused pull rebase or finish submodule alignment",
+    )
+    pull_mode.add_argument(
+        "--abort", action="store_true", help="abort a paused pull rebase"
+    )
+    commands.add_parser(
+        "push",
+        help="fast-forward the current PR's source branch without setting Git tracking",
+        description=(
+            "Push committed HEAD to the associated PR's verified source branch. "
+            "Only fast-forward updates are allowed; Git upstream tracking is unchanged."
+        ),
     )
     for name in ("go", "path"):
         command = commands.add_parser(name, help="resolve an existing owning worktree")
@@ -103,11 +126,6 @@ def parser():
     publish.add_argument("--title")
     publish.add_argument("--body-file")
     publish.add_argument("--ready", action="store_true")
-    publish.add_argument(
-        "--set-upstream",
-        action="store_true",
-        help="explicitly approve tracking a preexisting force-push destination",
-    )
     for name in ("clean", "drop"):
         command = commands.add_parser(
             name,
@@ -136,8 +154,22 @@ def parser():
     return result
 
 
+def _readonly(args):
+    return (
+        args.command in ("go", "path", "list", "doctor")
+        or args.command == "trunk"
+        and args.action is None
+        or args.command == "stack"
+        and args.action == "go"
+    )
+
+
 def _dispatch(repo, args):
     command = args.command
+    if repo.state.get("pr_rebase"):
+        resuming = command == "pull" and (args.continue_rebase or args.abort)
+        if not resuming and not _readonly(args):
+            repo.ensure_idle()
     if command == "init":
         config = repo.initialize(
             **{
@@ -162,11 +194,26 @@ def _dispatch(repo, args):
         path = github.open_pr(repo, args.selector)
         return {"path": str(path)}, path
     if command == "pull":
-        result = github.refresh_current(repo)
+        from . import pr_rebase
+
+        if args.continue_rebase or args.abort:
+            result = pr_rebase.resume(repo, abort=args.abort)
+        elif args.rebase:
+            result = pr_rebase.start(repo)
+        else:
+            result = github.refresh_current(repo)
         return result, Path(result["path"])
+    if command == "push":
+        from . import pr_push
+
+        return pr_push.push(repo), None
     if command in ("go", "path"):
         branch = repo.resolve(args.selector)
         path = repo.owner(branch)
+        if path is None and repo.state.get("pr_rebase"):
+            from .pr_rebase import navigation_path
+
+            path = navigation_path(repo, branch)
         if (
             path is None
             or path != Path(repo.branches[branch]["path"]).resolve()
@@ -219,7 +266,6 @@ def _dispatch(repo, args):
             title=args.title,
             body_file=args.body_file,
             ready=args.ready,
-            set_upstream=args.set_upstream,
         ), None
     if command in ("clean", "drop"):
         if args.resume:
@@ -424,13 +470,27 @@ def _display(args, value, repo=None):
         print(value["path"])
         print(f"{value['trunk']} {value['oid']}")
     elif args.command == "pull":
-        if value["oid"] != value["pr"]["head_oid"]:
+        if value["result"] == "aborted":
+            action = "Aborted pull rebase for"
+        elif value["result"] == "rebased":
+            action = "Rebased local commits onto"
+        elif value["oid"] != value["pr"]["head_oid"]:
             action = "Kept local commits ahead of"
         elif value["oid"] == value["previous_oid"]:
             action = "Already up to date with"
         else:
             action = "Updated from"
         print(f"{action} PR #{value['pr']['number']}: {value['branch']}")
+        if value.get("recovery_record"):
+            recovery = lifecycle._backtracking_dir(repo) / (
+                value["recovery_record"] + ".json"
+            )
+            print(f"Recovery: {recovery.resolve()}")
+        print(f"HEAD {value['oid']}")
+        print(value["pr"]["url"])
+    elif args.command == "push":
+        action = "Already up to date" if value["result"] == "unchanged" else "Pushed"
+        print(f"{action}: {value['repo']}:{value['ref'].removeprefix('refs/heads/')}")
         print(f"HEAD {value['oid']}")
         print(value["pr"]["url"])
     elif "path" in value:
@@ -464,13 +524,7 @@ def main(argv=None):
                 options.append("--list")
             return logbook_main(options)
         repo = Repo(initialized=args.command != "init")
-        readonly = (
-            args.command in ("go", "path", "list", "doctor")
-            or args.command == "trunk"
-            and args.action is None
-            or args.command == "stack"
-            and args.action == "go"
-        )
+        readonly = _readonly(args)
         import contextlib
 
         with contextlib.nullcontext() if readonly else repo.locked():

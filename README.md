@@ -203,10 +203,14 @@ branch and PR, then attaches the PR alias. New PRs default to draft; `--ready`
 requests a ready PR. Existing PR readiness is preserved. Publication and merging
 remain separate operations.
 
-Tracking is established after a successful new or fast-forward publication when
-missing. Existing tracking is preserved. A rewritten existing remote branch with
-no local upstream needs an explicit tracking choice (`--set-upstream`); inspect
-the reported destination before making that choice.
+`wt` uses its PR associations and publication records rather than Git upstream
+tracking. `wt push` and `wt publish`, including stack publication, leave existing
+branch tracking unchanged and do not configure missing tracking. Use `wt pull`
+and `wt push` for independent PR synchronization.
+
+Once an independent PR is associated, `wt push` updates its branch without
+changing its title, description, or draft status. Use `wt publish` to create a PR,
+update owned PR metadata, publish an owned history rewrite, or publish a stack.
 
 ```bash
 wt list                         # branches, worktrees, PR associations
@@ -223,20 +227,59 @@ wt pr 1234                      # or the full PR URL
 # review and test in the resulting worktree
 wt pr 1234                      # resume the same pair
 wt pull                         # update this worktree's PR; no number needed
+# edit, test, commit a contribution
+wt push                         # fast-forward the associated PR's source branch
+# if local commits diverge from an updated PR:
+wt pull --rebase                 # replay local work on the PR's current head
+# test the combined result
+wt push
 ```
 
 Your own PR reuses its local branch when available. Another author's PR gets a
 local `rwgk/review-pr1234` branch. PR head identity is recorded separately from
 the local branch name, and the receiving repository's PR head ref permits
-checkout after a contributor fork or branch disappears. Pull stops when local
-work cannot be updated safely. Publishing changes to another author's branch
-requires a separate explicit action; ordinary `wt publish` does not imply that.
+checkout after a contributor fork or branch disappears.
+
+`wt push` works for your own independent PRs and authorized contributions to
+another author's PR. It reads the current PR identity, verifies its actual source
+repository and branch, and pushes the captured local commit only when that is a
+fast-forward update. It needs neither Git upstream tracking nor a contributor
+remote. An existing remote is used only after its destination is verified;
+otherwise `wt` uses the PR's repository endpoint directly. A review contribution
+stays classified as a review, so cleanup never claims ownership of the author's
+remote branch. Permission failures, a changed or missing source, and concurrent
+updates stop with guidance; there is no automatic force push or fallback to origin.
+The result includes the destination, full commit hash, and PR URL. Ordinary
+uncommitted files are not included in a push.
 
 Use `wt pull` instead of `git pull` in an independent PR worktree. It reports
 the PR and full resulting commit hash, follows rewritten PR history with recovery
-records, and stops on conflicting local work. Local commits ahead of the PR are
-kept. It preserves your current directory, including subdirectories. Trunk uses
-`wt trunk update`; stack layers use `wt stack pull` and its explicit `--apply`.
+records when no local work would be lost, and stops on divergence. Local commits
+ahead of the PR are kept. `wt pull --rebase` explicitly replays local commits on
+the fetched PR head, preserving the old tip first. It uses the recorded replay
+boundary to distinguish local contributions from the author's old history after
+a rewrite. Merely resuming `wt pr` does not advance that boundary.
+
+Redundant local merges already represented on the incoming PR head can be
+omitted during rebase; this includes independently merging the same main commit
+with identical parents and contents. Other local merges stop for deliberate
+reconciliation so merge-only resolutions are not silently discarded. Dirty
+working files must be committed or preserved before pulling with rebase.
+If conflicts stop a rebase:
+
+```bash
+# resolve conflicts, then stage the resolved files
+git add <resolved-files>
+wt pull --continue
+# or restore the pre-rebase state
+wt pull --abort
+```
+
+Continuation uses the saved operation and frozen target rather than fetching a
+new PR head. Recovery state remains available if submodule alignment is
+interrupted. Pull preserves your current directory, including subdirectories.
+Trunk uses `wt trunk update`; stack layers use `wt stack pull` and its explicit
+`--apply`, local `wt stack rebase`, and authorized `wt publish --stack`.
 
 ### Submodules
 
@@ -271,7 +314,7 @@ This retention is local; cleanup does not push submodule refs.
 
 Interrupted initialization leaves a pending journal. Retry the same creation or
 update command; unexpected local changes stop recovery for inspection.
-Other lifecycle operations wait for an interrupted restack to finish.
+Other lifecycle operations wait for an interrupted PR rebase or restack to finish.
 
 ### Stacked PRs
 
