@@ -50,6 +50,12 @@ preserve existing tracking and use `wt`'s association records instead.
 Publication and remote cleanup require task authorization; command availability
 grants none.
 
+Use `wt housekeeping` for a repository-wide inventory and conservative cleanup
+preview; authorized `--apply` retires only proven obsolete managed pairs and
+reports what remains. Additional local commits remain visible even when explicit
+`wt clean` could preserve and retire them. Recognized ignored builds require
+`--discard-builds`; unknown material and legacy worktrees require inspection.
+
 Use `wt clean` for terminal PRs and `wt drop --local-only` for explicit local
 retirement. Preview before `--apply`. Preserve backtracking records and recovery
 refs; never substitute extension pruning or raw branch deletion for standard

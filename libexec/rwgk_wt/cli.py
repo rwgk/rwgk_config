@@ -83,6 +83,20 @@ def parser():
     )
     commands.add_parser("list", help="list managed branch/worktree pairs")
     commands.add_parser("doctor", help="check managed pairs and report legacy work")
+    housekeeping = commands.add_parser(
+        "housekeeping",
+        help="preview obsolete pairs and explain retained workspaces",
+        description=(
+            "Inventory this repository's workspaces. Remove only clearly obsolete "
+            "managed PR pairs with --apply; report all remaining work with next steps."
+        ),
+    )
+    housekeeping.add_argument("--apply", action="store_true")
+    housekeeping.add_argument(
+        "--discard-builds",
+        action="store_true",
+        help="allow recognized ignored build outputs and caches to be discarded",
+    )
     trunk = commands.add_parser(
         "trunk", help="navigate to trunk or update it by fast-forward"
     )
@@ -168,7 +182,8 @@ def _dispatch(repo, args):
     command = args.command
     if repo.state.get("pr_rebase"):
         resuming = command == "pull" and (args.continue_rebase or args.abort)
-        if not resuming and not _readonly(args):
+        reporting = command == "housekeeping" and not args.apply
+        if not resuming and not reporting and not _readonly(args):
             repo.ensure_idle()
     if command == "init":
         config = repo.initialize(
@@ -225,6 +240,13 @@ def _dispatch(repo, args):
         return repo.listing(), None
     if command == "doctor":
         return repo.doctor(), None
+    if command == "housekeeping":
+        from . import housekeeping
+
+        result = housekeeping.run(
+            repo, apply=args.apply, discard_builds=args.discard_builds
+        )
+        return result, repo.primary if args.apply else None
     if command == "trunk":
         repo.check_primary()
         if args.action == "update":
@@ -425,6 +447,71 @@ def _cleanup_lines(repo, value):
     return lines
 
 
+def _housekeeping_lines(repo, value):
+    operations = value.get("operations", [])
+    preview = value["result"] == "preview"
+    lines = []
+    if preview:
+        lines.append(f"Would clean {len(operations)} pair(s):")
+        for record in operations:
+            pr = record.get("pr") or {}
+            label = f"pr{pr['number']} {pr['state']} " if pr else ""
+            lines.append(f"  {label}{record['branch']}")
+            lines.append(f"    {record['path']}")
+            if record.get("source", {}).get("oid"):
+                source = record["source"]
+                lines.append(f"    delete source: {source['repo']}:{source['ref']}")
+            for snapshot in record.get("archive_snapshots", []):
+                lines.append(
+                    f"    archive on {repo.config['archive_remote']}: {snapshot['oid']}"
+                )
+            if pr.get("url"):
+                lines.append(f"    {pr['url']}")
+    else:
+        lines.extend(_cleanup_lines(repo, {"operations": operations}))
+    for issue in value.get("issues", []):
+        lines.append(f"Attention: {issue['message']}")
+        if issue.get("hint"):
+            lines.append(f"  Next: {issue['hint']}")
+    remaining = value.get("remaining", [])
+    lines.append(f"Remaining workspaces/branches: {len(remaining)}")
+    for entry in remaining:
+        pr = entry.get("pr") or {}
+        label = ""
+        if pr.get("number"):
+            state = pr.get("state", "UNKNOWN")
+            if not entry.get("pr_verified"):
+                state += " (unchecked)"
+            label = f"pr{pr['number']} {state} "
+        name = entry.get("branch") or "detached worktree"
+        lines.append(f"  {label}{name}")
+        if entry.get("path"):
+            lines.append(f"    {entry['path']}")
+        for reason in entry.get("reasons", []):
+            lines.append(f"    {reason['message']}")
+        facts = entry.get("facts", {})
+        if pr.get("state") == "OPEN" and {"ahead", "behind"} <= facts.keys():
+            lines.append(
+                f"    Commits relative to PR: {facts['ahead']} local-only, "
+                f"{facts['behind']} PR-only"
+            )
+        for hint in dict.fromkeys(entry.get("hints", [])):
+            lines.append(f"    Next: {hint}")
+        if pr.get("url"):
+            lines.append(f"    {pr['url']}")
+        if entry.get("recovery_path"):
+            lines.append(f"    Recovery: {entry['recovery_path']}")
+    lines.append(
+        f"{'Eligible' if preview else 'Cleaned'}: {len(operations)}; "
+        f"retained: {len(remaining)}; errors: {len(value.get('errors', []))}"
+    )
+    if preview and operations:
+        lines.append(
+            "Use --apply to execute the eligible cleanup after reviewing this report."
+        )
+    return lines
+
+
 def _display(args, value, repo=None):
     if args.command == "list":
         print(
@@ -445,6 +532,8 @@ def _display(args, value, repo=None):
                 "Detached worktrees (unchanged): "
                 + ", ".join(value["detached_worktrees"])
             )
+    elif args.command == "housekeeping":
+        print("\n".join(_housekeeping_lines(repo, value)))
     elif args.command in ("clean", "drop") and args.apply:
         print("\n".join(_cleanup_lines(repo, value)))
     elif args.command in ("clean", "drop") and "operations" in value:
@@ -534,11 +623,15 @@ def main(argv=None):
                 raise WTError("This invocation does not produce a navigation path.")
             if args.command in ("clean", "drop") and args.apply:
                 print("\n".join(_cleanup_lines(repo, value)), file=sys.stderr)
+            elif args.command == "housekeeping" and args.apply:
+                print("\n".join(_housekeeping_lines(repo, value)), file=sys.stderr)
             print(Path(path).resolve())
         elif as_json:
             print(json.dumps(value, indent=2))
         else:
             _display(args, value, repo)
+        if args.command == "housekeeping":
+            return int(bool(value.get("errors")))
         return 1 if args.command == "doctor" and not value["ok"] else 0
     except (WTError, OSError, ValueError, KeyError) as error:
         if as_json:

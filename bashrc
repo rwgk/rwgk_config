@@ -867,7 +867,7 @@ wt() {
         add | go) navigate=1 ;;
         esac
         ;;
-    clean | drop)
+    clean | drop | housekeeping)
         for argument in "$@"; do
             [[ "$argument" == --apply ]] && navigate=1
         done
@@ -878,7 +878,7 @@ wt() {
         return $?
     fi
     case "${1:-}" in
-    clean | drop)
+    clean | drop | housekeeping)
         # Once cleanup removes this checkout, even a later error must leave a
         # usable shell. Cache the primary before the engine can remove our CWD.
         if cleanup_primary=$(command git-wt trunk --print-path); then
@@ -931,7 +931,7 @@ _wt_complete() {
     local words= branch
     COMPREPLY=()
     if [[ "$COMP_CWORD" -eq 1 ]]; then
-        words='init new pr pull push go list trunk stack publish clean drop restore doctor path name --help'
+        words='init new pr pull push go list trunk stack publish clean drop housekeeping restore doctor path name --help'
     elif [[ "$first" == stack && "$COMP_CWORD" -eq 2 ]]; then
         words='init add pull rebase go'
     elif [[ "$first" == stack && "${COMP_WORDS[2]:-}" == go ]]; then
@@ -944,6 +944,7 @@ _wt_complete() {
         pull) words='--rebase --continue --abort' ;;
         publish) words='--stack --title --body-file --ready' ;;
         clean) words='--apply --archive-local --discard-builds --resume' ;;
+        housekeeping) words='--apply --discard-builds' ;;
         drop) words='--local-only --apply --resume' ;;
         stack)
             case "${COMP_WORDS[2]:-}" in

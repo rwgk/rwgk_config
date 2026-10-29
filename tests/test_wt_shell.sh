@@ -78,6 +78,16 @@ wt trunk update >"$test_root/output"
 wt trunk
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'trunk navigation did not enter primary'
 
+# Housekeeping shares cleanup navigation while preview and JSON stay put.
+cd "$test_root/from"
+wt housekeeping >"$test_root/output"
+[[ "$PWD" == "$test_root/from" ]] || fail 'housekeeping preview changed directories'
+wt housekeeping --apply --json >"$test_root/output"
+[[ "$PWD" == "$test_root/from" ]] || fail 'housekeeping JSON changed directories'
+wt housekeeping --apply --discard-builds >"$test_root/output"
+[[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'housekeeping apply did not leave the removed checkout'
+[[ "$(head -1 "$WT_TEST_ARGUMENTS")" == housekeeping ]] || fail 'housekeeping was altered'
+
 # Pull updates the current worktree without moving out of a nested directory.
 cd "$test_root/from"
 wt pull >"$test_root/output"
@@ -104,6 +114,19 @@ else
     [[ "$?" -eq 17 ]] || fail 'late cleanup failure status was lost'
 fi
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'late cleanup failure left the shell in a deleted directory'
+unset WT_TEST_REMOVE_ROOT
+WT_TEST_STATUS=0
+
+# A partially failed housekeeping pass must also recover from a removed CWD.
+mkdir -- "$test_root/housekeeping-from"
+cd "$test_root/housekeeping-from"
+export WT_TEST_REMOVE_ROOT="$test_root/housekeeping-from" WT_TEST_STATUS=19
+if wt housekeeping --apply >"$test_root/output" 2>"$test_root/error"; then
+    fail 'late housekeeping failure succeeded'
+else
+    [[ "$?" -eq 19 ]] || fail 'late housekeeping failure status was lost'
+fi
+[[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'late housekeeping failure left the shell in a deleted directory'
 unset WT_TEST_REMOVE_ROOT
 WT_TEST_STATUS=0
 printf 'PASS: wt shell navigation\n'

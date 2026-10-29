@@ -747,6 +747,7 @@ def _apply_retirement_locked(repo, record):
         current_pr = github.get_pr(
             repo, expected_pr["number"], base_repo=expected_pr["base_repo"]
         )
+        github._association_source({"pr": expected_pr}, current_pr)
         if current_pr["state"] not in ("CLOSED", "MERGED"):
             raise WTError("PR was reopened; preserving remaining local and remote work")
         if current_pr["head_oid"] != expected_pr["head_oid"]:

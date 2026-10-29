@@ -254,5 +254,154 @@ class CleanupOutputTests(unittest.TestCase):
         self.assertNotIn("Removed local branch", text)
 
 
+class HousekeepingOutputTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = SimpleNamespace(
+            config={
+                "upstream_remote": "upstream",
+                "archive_remote": "origin",
+                "backtracking": "/records",
+            },
+            primary=Path("/primary"),
+            locked=contextlib.nullcontext,
+        )
+        self.record = {
+            "id": "housekeeping-clean",
+            "branch": "rwgk/finished",
+            "path": "/trees/rwgk-finished",
+            "completed": [],
+            "backtracking_path": "/records/housekeeping-clean.json",
+            "snapshots": [{"recovery_ref": "refs/rwgk/backtracking/kept"}],
+            "pr": {
+                "number": 42,
+                "state": "MERGED",
+                "url": "https://github.com/Acme/project/pull/42",
+            },
+            "archives": [],
+            "remote_actions": [],
+        }
+        self.value = {
+            "result": "preview",
+            "operations": [self.record],
+            "errors": [],
+            "remaining": [
+                {
+                    "branch": "rwgk/still-working",
+                    "path": "/trees/rwgk-still-working",
+                    "pr": {
+                        "number": 43,
+                        "state": "MERGED",
+                        "url": "https://github.com/Acme/project/pull/43",
+                    },
+                    "reasons": [
+                        {
+                            "code": "local-history",
+                            "message": "2 commits outside the final PR history",
+                        }
+                    ],
+                    "hints": ["wt go pr43"],
+                }
+            ],
+        }
+
+    def invoke(self, flags=()):
+        value = copy.deepcopy(self.value)
+        if "--apply" in flags:
+            value["result"] = "housekeeping"
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(cli, "Repo", return_value=self.repo),
+            patch.object(cli, "_dispatch", return_value=(value, self.repo.primary)),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = cli.main(["housekeeping", *flags])
+        return status, stdout.getvalue(), stderr.getvalue(), value
+
+    def test_preview_distinguishes_candidates_from_retained_work_and_shows_hints(self):
+        status, stdout, stderr, _ = self.invoke()
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Would clean 1 pair(s)", stdout)
+        self.assertIn("pr42 MERGED rwgk/finished", stdout)
+        self.assertIn("/trees/rwgk-still-working", stdout)
+        self.assertIn("2 commits outside the final PR history", stdout)
+        self.assertIn("Next: wt go pr43", stdout)
+        self.assertIn("https://github.com/Acme/project/pull/43", stdout)
+        self.assertNotIn("Removed local branch", stdout)
+        self.assertIn("Use --apply", stdout)
+
+    def test_applied_feedback_includes_recovery_remote_outcomes_and_retained_work(self):
+        status, stdout, stderr, _ = self.invoke(["--apply"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Removed local branch rwgk/finished", stdout)
+        self.assertIn("Backtracking: /records/housekeeping-clean.json", stdout)
+        self.assertIn("upstream: no changes", stdout)
+        self.assertIn("origin: no changes", stdout)
+        self.assertIn("2 commits outside the final PR history", stdout)
+        self.assertIn("Cleaned: 1; retained: 1; errors: 0", stdout)
+
+    def test_retained_pr_state_is_verified_or_explicitly_unchecked(self):
+        entry = self.value["remaining"][0]
+        entry["pr_verified"] = True
+        _, stdout, _, _ = self.invoke()
+        self.assertIn("pr43 MERGED rwgk/still-working", stdout)
+        entry["pr_verified"] = False
+        _, stdout, _, _ = self.invoke()
+        self.assertIn("pr43 MERGED (unchecked) rwgk/still-working", stdout)
+
+    def test_open_pr_commit_counts_are_visible_with_the_navigation_hint(self):
+        entry = self.value["remaining"][0]
+        entry["pr"].update(state="OPEN")
+        entry.update(pr_verified=True, facts={"ahead": 2, "behind": 1})
+        entry["reasons"] = [{"code": "pr-open", "message": "PR #43 is open"}]
+        _, stdout, _, _ = self.invoke()
+        self.assertIn("pr43 OPEN rwgk/still-working", stdout)
+        self.assertIn("2 local-only, 1 PR-only", stdout)
+        self.assertIn("Next: wt go pr43", stdout)
+
+    def test_json_has_no_human_output_and_retains_diagnostics(self):
+        status, stdout, stderr, value = self.invoke(["--json"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout), value)
+
+    def test_apply_path_mode_keeps_stdout_reserved_for_shell_navigation(self):
+        status, stdout, stderr, _ = self.invoke(["--apply", "--print-path"])
+        self.assertEqual(status, 0)
+        self.assertEqual(stdout, "/primary\n")
+        self.assertIn("Backtracking:", stderr)
+        self.assertIn("retained: 1", stderr)
+
+    def test_failure_after_other_successes_remains_visible_and_returns_nonzero(self):
+        entry = self.value["remaining"][0]
+        entry["error"] = True
+        entry["reasons"] = [
+            {"code": "cleanup-failed", "message": "Archive verification failed"}
+        ]
+        entry["recovery_path"] = "/records/interrupted-clean.json"
+        self.value["errors"] = [entry]
+        status, stdout, stderr, _ = self.invoke(["--apply"])
+        self.assertEqual((status, stderr), (1, ""))
+        self.assertIn("Archive verification failed", stdout)
+        self.assertIn("Recovery: /records/interrupted-clean.json", stdout)
+        self.assertIn("errors: 1", stdout)
+
+    def test_global_problem_is_reported_even_without_any_workspaces(self):
+        self.value.update(
+            operations=[],
+            remaining=[],
+            issues=[
+                {
+                    "code": "pending-operation",
+                    "message": "A pull rebase is pending",
+                    "hint": "wt pull --continue",
+                }
+            ],
+        )
+        status, stdout, stderr, _ = self.invoke()
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("A pull rebase is pending", stdout)
+        self.assertIn("Next: wt pull --continue", stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,30 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotEqual(self.git("rev-parse", "HEAD", cwd=self.path), self.tip)
         self.assertTrue(self.has_ref(self.upstream, "refs/heads/" + self.branch))
 
+    def test_apply_rechecks_source_identity_even_when_terminal_head_is_unchanged(self):
+        for key, value in (
+            ("head_ref", "rwgk/renamed"),
+            ("head_repo", "someone/project"),
+        ):
+            with self.subTest(field=key):
+                plan = lifecycle.retire(self.repo, self.branch)
+                previous = self.pr[key]
+                self.pr[key] = value
+                try:
+                    with self.assertRaisesRegex(
+                        core.WTError, "source repository or branch changed"
+                    ):
+                        lifecycle._apply_retirement(self.repo, plan)
+                finally:
+                    self.pr[key] = previous
+                self.assertTrue(self.path.is_dir())
+                self.assertTrue(
+                    self.has_ref(self.upstream, "refs/heads/" + self.branch)
+                )
+                self.assertFalse(
+                    self.git("--git-dir=" + str(self.origin), "show-ref", check=False)
+                )
+
     def test_preview_does_not_publish_or_remove_anything(self):
         plan = lifecycle.retire(self.repo, self.branch)
         self.assertEqual(plan["archive_snapshots"][0]["oid"], self.tip)

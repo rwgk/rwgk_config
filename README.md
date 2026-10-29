@@ -381,6 +381,47 @@ Concurrent remote changes stop publication for investigation. A failed lease is
 not an invitation to refresh the expected SHA and overwrite new work. The
 extension's atomic defaults do not replace these independently verified leases.
 
+### Repository housekeeping
+
+```bash
+wt housekeeping                 # preview eligible cleanup and explain what remains
+wt housekeeping --apply          # retire clearly obsolete pairs and report the rest
+wt housekeeping --apply --discard-builds
+wt housekeeping --json          # structured inventory and proposed cleanup
+```
+
+Housekeeping inventories the current repository's managed pairs, Git-registered
+worktrees, and unpaired local branches. It keeps the primary checkout and reports
+legacy, unmanaged, detached, or missing worktrees for inspection. PR aliases are
+navigation links, not additional workspaces. It does not scan arbitrary filesystem
+directories for things to delete.
+
+Automatic retirement requires a freshly verified merged or closed PR, a clean
+owning worktree and submodules, and local history contained in the final PR head
+or verified upstream trunk. The PR-head comparison also covers squash merges,
+whose original commits may not be ancestors of trunk. Additional local commits,
+private submodule history (including stashes), unfinished operations, ownership
+problems, and surviving stack dependencies keep a workspace visible for a decision.
+
+The report includes each remaining workspace's reason, PR URL when available,
+path, and useful next commands: for example, `wt push` for local commits on an
+open PR, `wt pull --rebase` for divergence, or `wt go pr1234` to inspect modified
+files. An inaccessible PR is reported as unchecked, never assumed obsolete.
+One blocked workspace does not prevent independent eligible cleanup; stack
+layers still retire from top to bottom while respecting retained dependencies.
+
+Ignored files follow the same policy as `wt clean`: recognized generated builds
+and caches require `--discard-builds`, while unknown ignored material stays
+protected. Apply uses the existing cleanup engine and reports its backtracking
+record paths, recovery refs, archives, and remote outcomes. Another author's
+source branch is never deleted.
+
+Housekeeping is deliberately stricter than an explicit `wt clean`: a terminal
+PR with additional local commits remains in the report even when those commits
+could be archived safely. After inspecting that work, use the deliberate
+retirement commands below. Command availability does not authorize applying
+cleanup or changing remotes; preview and apply within the requested scope.
+
 ### Retire work and recover it
 
 ```bash
