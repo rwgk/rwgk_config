@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
 from rwgk_wt import github, housekeeping, lifecycle
@@ -31,7 +33,7 @@ class GitLabLifecycleTests(GitLabFixture):
         self.assertEqual(record["status"], "complete")
         self.assertFalse(path.exists())
         self.assertNotIn(branch, repo.branches)
-        self.assertFalse((path.parent / "pr42").exists())
+        self.assertFalse((path.parent / "mr42").exists())
         self.assertEqual(git(self.remotes["contributor"], "rev-parse", "topic"), before)
         self.assertFalse(self.pushes())
         refs = repo.git(
@@ -43,9 +45,95 @@ class GitLabLifecycleTests(GitLabFixture):
         self.assertTrue(path.exists())
         self.assertEqual(git(path, "rev-parse", "HEAD"), tip)
         self.assertEqual(repo.branches[branch]["role"], "review")
-        self.assertEqual((path.parent / "pr42").resolve(), path)
+        self.assertEqual((path.parent / "mr42").resolve(), path)
         self.assertTrue(restored)
         self.assert_checkouts()
+
+    def test_cleanup_removes_and_restores_only_matching_mr_and_legacy_aliases(self):
+        review, repo = self.closed_review()
+        path, branch = review.root, review.current_branch()
+        (path.parent / "pr42").symlink_to(path.name, target_is_directory=True)
+        unrelated = path.parent / "pr99"
+        unrelated.symlink_to(path.name, target_is_directory=True)
+        other = path.parent / "mr99"
+        other.symlink_to(repo.primary, target_is_directory=True)
+        record = lifecycle.retire(repo, branch, apply=True)
+        self.assertFalse((path.parent / "mr42").is_symlink())
+        self.assertFalse((path.parent / "pr42").is_symlink())
+        self.assertTrue(unrelated.is_symlink())
+        self.assertEqual(other.resolve(), repo.primary)
+        self.assertEqual(set(record["removed_aliases"]), {"mr42", "pr42"})
+        restored = lifecycle.restore(repo, record["id"])
+        self.assertEqual(restored, path)
+        self.assertEqual((path.parent / "mr42").resolve(), path)
+        self.assertEqual((path.parent / "pr42").resolve(), path)
+        self.assertTrue(unrelated.is_symlink())
+        self.assertEqual(other.resolve(), repo.primary)
+
+    def test_interrupted_alias_cleanup_retains_both_names_for_retry_and_restore(self):
+        review, repo = self.closed_review()
+        path, branch = review.root, review.current_branch()
+        preferred, legacy = path.parent / "mr42", path.parent / "pr42"
+        legacy.symlink_to(path.name, target_is_directory=True)
+        unrelated = path.parent / "pr99"
+        unrelated.symlink_to(path.name, target_is_directory=True)
+        unlink = Path.unlink
+
+        def interrupted(alias, *args, **kwargs):
+            if alias in (preferred, legacy):
+                records = [
+                    json.loads(item.read_text())
+                    for item in lifecycle._operation_dir(repo).glob("*.json")
+                ]
+                record = next(
+                    item
+                    for item in records
+                    if item["kind"] == "retire" and item["branch"] == branch
+                )
+                self.assertEqual(set(record["removed_aliases"]), {"mr42", "pr42"})
+            if alias == legacy:
+                raise OSError("simulated interruption between alias removals")
+            return unlink(alias, *args, **kwargs)
+
+        with (
+            patch.object(Path, "unlink", new=interrupted),
+            self.assertRaisesRegex(OSError, "simulated interruption"),
+        ):
+            lifecycle.retire(repo, branch, apply=True)
+        records = [
+            json.loads(item.read_text())
+            for item in lifecycle._operation_dir(repo).glob("*.json")
+        ]
+        record = next(
+            item
+            for item in records
+            if item["kind"] == "retire" and item["branch"] == branch
+        )
+        self.assertEqual(set(record["removed_aliases"]), {"mr42", "pr42"})
+        self.assertFalse(preferred.is_symlink())
+        self.assertTrue(legacy.is_symlink())
+        self.assertTrue(unrelated.is_symlink())
+        resumed = lifecycle.resume(repo, record["id"])
+        self.assertEqual(resumed["status"], "complete")
+        self.assertEqual(set(resumed["removed_aliases"]), {"mr42", "pr42"})
+        self.assertFalse(legacy.is_symlink())
+        self.assertTrue(unrelated.is_symlink())
+        self.assertEqual(lifecycle.restore(repo, record["id"]), path)
+        self.assertEqual(preferred.resolve(), path)
+        self.assertEqual(legacy.resolve(), path)
+        self.assertTrue(unrelated.is_symlink())
+
+    def test_housekeeping_uses_mr_labels_and_navigation_hints(self):
+        self.contributor_mr()
+        review = self.open_review()
+        repo = GitLabRepo(self)
+        status, output, error = self.invoke(repo, ["housekeeping"])
+        self.assertEqual(status, 0, error)
+        self.assertIn("mr42 OPEN", output)
+        self.assertIn("MR !42 is open", output)
+        self.assertIn("wt go mr42", output)
+        self.assertNotIn("wt go pr42", output)
+        self.assertTrue(review.root.exists())
 
     def test_housekeeping_retires_terminal_review_without_any_source_push(self):
         review, repo = self.closed_review()

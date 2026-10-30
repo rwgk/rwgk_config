@@ -287,15 +287,20 @@ Trunk uses `wt trunk update`; stack layers use `wt stack pull` and its explicit
 
 The same independent-worktree commands support GitLab.com and self-hosted GitLab.
 The upstream remote selects the host and project, including nested namespaces and
-custom SSH ports. HTTP(S) API access currently uses standard ports. `wt pr`
-accepts a merge request IID or a full merge request URL;
-the existing `prNUMBER` aliases and `rwgk/review-prNUMBER` branch names also apply
-to GitLab so navigation stays consistent.
+custom SSH ports. HTTP(S) API access currently uses standard ports. `wt mr`
+accepts a merge request IID or a full merge request URL. GitHub uses `wt pr`;
+using the wrong command stops before opening or changing a pair and gives the
+correct command.
+
+New GitLab review pairs use `rwgk/review-mrNUMBER`, with an `mrNUMBER` navigation
+alias. Existing review branches and physical paths remain fixed. `wt mr` resumes
+their saved MR association and adds the MR alias; older `prNUMBER` navigation
+aliases remain usable. Cleanup and restore recognize both spellings.
 
 ```bash
 glab auth login --hostname gitlab.example.com
-wt pr 42
-# or: wt pr https://gitlab.example.com/group/subgroup/project/-/merge_requests/42
+wt mr 42
+# or: wt mr https://gitlab.example.com/group/subgroup/project/-/merge_requests/42
 wt pull
 wt pull --rebase                 # when local contributions diverged
 wt push                         # publish an authorized contribution to the MR source
@@ -315,10 +320,11 @@ and keeps the worktree classified as a review. Git upstream tracking is unchange
 by default. `wt clean` and `wt housekeeping` use the same preservation and ownership
 checks for GitLab as for GitHub.
 
-If you already created the canonical review branch/worktree manually, `wt pr NUMBER`
+If you already created the canonical review branch/worktree manually, `wt mr NUMBER`
 can adopt that pair when its checkout is clean, idle, at the verified MR head, and
-at the expected path. It refuses a different checkout, extra commits, or pending
-work rather than overwriting them. No private catalog editing is needed.
+at the expected path. A legacy `rwgk/review-prNUMBER` pair can also be adopted
+when no new MR pair conflicts. It refuses a different checkout, extra commits, or
+pending work rather than overwriting them. No private catalog editing is needed.
 
 Native stack commands require GitHub and `gh-stack`; they stop on GitLab before
 creating branches or rewriting history. Independent GitLab MR workflows do not

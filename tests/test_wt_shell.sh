@@ -38,6 +38,11 @@ wt new example
 [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == --print-path ]] || fail 'navigation did not request a path'
 
 cd "$test_root/from"
+wt mr 607
+[[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'mr did not enter its worktree'
+[[ "$(head -1 "$WT_TEST_ARGUMENTS")" == mr ]] || fail 'mr command was altered'
+
+cd "$test_root/from"
 wt go example --json >"$test_root/output"
 [[ "$PWD" == "$test_root/from" ]] || fail 'JSON output changed directories'
 [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == --json ]] || fail 'JSON request was altered'

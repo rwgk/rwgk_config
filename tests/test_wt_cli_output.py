@@ -11,10 +11,36 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
 from rwgk_wt import cli
+
+
+class RequestCommandTests(unittest.TestCase):
+    def test_wrong_provider_command_stops_before_lock_or_api(self):
+        for command, provider, identity, expected in (
+            ("pr", "gitlab", "gitlab.example/group/project", "mr"),
+            ("mr", "github", "owner/project", "pr"),
+        ):
+            with self.subTest(command=command):
+                repo = SimpleNamespace(
+                    config={"provider": provider, "upstream_repo": identity},
+                    locked=Mock(),
+                )
+                output, errors = io.StringIO(), io.StringIO()
+                with (
+                    patch.object(cli, "Repo", return_value=repo),
+                    patch.object(cli.github, "open_pr") as open_pr,
+                    contextlib.redirect_stdout(output),
+                    contextlib.redirect_stderr(errors),
+                ):
+                    result = cli.main([command, "42"])
+                self.assertEqual(result, 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn(f"wt {expected} 42", errors.getvalue())
+                open_pr.assert_not_called()
+                repo.locked.assert_not_called()
 
 
 class CleanupOutputTests(unittest.TestCase):

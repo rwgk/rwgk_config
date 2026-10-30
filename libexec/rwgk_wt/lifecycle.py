@@ -16,7 +16,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from .core import WTError
+from .core import WTError, request_prefix
 
 
 def _git(repo, *args, cwd=None):
@@ -886,9 +886,29 @@ def _apply_retirement_locked(repo, record):
         # Remove aliases only when they still resolve to this retiring worktree.
         trees = Path(repo.config["trees_root"]).expanduser() / repo.config["key"]
         if path is not None and trees.exists():
-            for alias in trees.glob("pr[0-9]*"):
-                if alias.is_symlink() and alias.resolve() == path.resolve():
-                    alias.unlink()
+            pr = record.get("pr") or record.get("metadata", {}).get("pr")
+            if pr:
+                prefixes = (
+                    ("mr", "pr") if request_prefix(pr, repo.config) == "mr" else ("pr",)
+                )
+                aliases = [trees / f"{prefix}{pr['number']}" for prefix in prefixes]
+                matching = [
+                    alias
+                    for alias in aliases
+                    if alias.is_symlink() and alias.resolve() == path.resolve()
+                ]
+                removed = record.setdefault("removed_aliases", [])
+                planned = [
+                    alias.name for alias in matching if alias.name not in removed
+                ]
+                if planned:
+                    removed.extend(planned)
+                    # Retain every intended alias before the first unlink, so
+                    # interruption/retry cannot erase legacy restoration data.
+                    _save_record(repo, record)
+                for alias in matching:
+                    if alias.is_symlink() and alias.resolve() == path.resolve():
+                        alias.unlink()
         stacks.retired(repo, branch)
         repo.branches.pop(branch, None)
         repo.save()
@@ -964,7 +984,18 @@ def restore(repo, record_id):
         remote_branch = tracking.removeprefix("refs/remotes/")
         _git_result(repo, "branch", f"--set-upstream-to={remote_branch}", branch)
     if metadata.get("pr"):
-        repo.alias(branch, metadata["pr"])
+        pr = metadata["pr"]
+        repo.alias(branch, pr)
+        if request_prefix(pr, repo.config) == "mr":
+            aliases = record.get("removed_aliases", [])
+            if (
+                "removed_aliases" not in record
+                and branch == f"rwgk/review-pr{pr['number']}"
+            ):
+                aliases = [f"pr{pr['number']}"]
+            for prefix in ("mr", "pr"):
+                if f"{prefix}{pr['number']}" in aliases:
+                    repo.alias(branch, pr, prefix=prefix)
     record["restored_at"] = dt.datetime.now(dt.UTC).isoformat()
     record["restored_path"] = str(path)
     _save_record(repo, record)

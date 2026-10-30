@@ -860,7 +860,7 @@ wt() {
         esac
     done
     case "${1:-}" in
-    new | pr | go | restore) navigate=1 ;;
+    new | pr | mr | go | restore) navigate=1 ;;
     trunk) [[ $# -eq 1 ]] && navigate=1 ;;
     stack)
         case "${2:-}" in
@@ -931,7 +931,7 @@ _wt_complete() {
     local words= branch
     COMPREPLY=()
     if [[ "$COMP_CWORD" -eq 1 ]]; then
-        words='init new pr pull push go list trunk stack publish clean drop housekeeping restore doctor path name --help'
+        words='init new pr mr pull push go list trunk stack publish clean drop housekeeping restore doctor path name --help'
     elif [[ "$first" == stack && "$COMP_CWORD" -eq 2 ]]; then
         words='init add pull rebase go'
     elif [[ "$first" == stack && "${COMP_WORDS[2]:-}" == go ]]; then

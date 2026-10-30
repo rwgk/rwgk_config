@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from .core import WTError
+from .core import WTError, request_prefix
 
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
@@ -29,6 +29,19 @@ def provider(repo):
     raise WTError(
         "Cannot identify the repository's forge; inspect the upstream endpoint and wt registration."
     )
+
+
+def require_request_command(repo, command, selector):
+    expected = "mr" if provider(repo) == "gitlab" else "pr"
+    if command != expected:
+        match = re.fullmatch(r"(?:pr|mr)?([1-9][0-9]*)", str(selector))
+        number = match[1] if match else "NUMBER"
+        service, noun = (
+            ("GitLab", "merge requests")
+            if expected == "mr"
+            else ("GitHub", "pull requests")
+        )
+        raise WTError(f"{service} uses {noun}; use 'wt {expected} {number}'.")
 
 
 def pr_head_ref(repo, number):
@@ -546,6 +559,7 @@ def open_pr(repo, selector, refresh=False):
     from . import submodules
 
     manual_review = False
+    noun = request_prefix(config=repo.config).upper()
     number = _pr_selector(repo, selector)
     base_repo = repo.config["upstream_repo"]
     remote = repo.config["upstream_remote"]
@@ -558,7 +572,7 @@ def open_pr(repo, selector, refresh=False):
         and metadata.get("pr", {}).get("base_repo", "").lower() == base_repo.lower()
     ]
     if len(matches) > 1:
-        raise WTError(f"Multiple managed branches claim PR #{number}")
+        raise WTError(f"Multiple managed branches claim {noun} {number}")
     if matches:
         branch = matches[0]
         _association_source(repo.branches[branch], pr)
@@ -580,7 +594,25 @@ def open_pr(repo, selector, refresh=False):
         if own and pr["head_ref"] != repo.config["trunk"]:
             branch, role = pr["head_ref"], "owned"
         else:
-            branch, role = f"rwgk/review-pr{number}", "review"
+            branch, role = (
+                f"rwgk/review-{request_prefix(config=repo.config)}{number}",
+                "review",
+            )
+            if provider(repo) == "gitlab":
+                legacy = f"rwgk/review-pr{number}"
+                legacy_pair = legacy in repo.branches or repo.owner(legacy) is not None
+                if legacy_pair:
+                    if (
+                        branch in repo.branches
+                        or repo.owner(branch) is not None
+                        or repo.exists("refs/heads/" + branch)
+                        or repo.canonical_path(branch).exists()
+                        or repo.canonical_path(branch).is_symlink()
+                    ):
+                        raise WTError(
+                            "Legacy PR review pair and canonical MR pair collide; inspect 'wt doctor' before associating either checkout."
+                        )
+                    branch = legacy
         previous = repo.branches.get(branch)
         if (
             previous
@@ -590,7 +622,7 @@ def open_pr(repo, selector, refresh=False):
                 or previous["pr"]["base_repo"].lower() != base_repo.lower()
             )
         ):
-            raise WTError(f"Branch {branch} belongs to another PR")
+            raise WTError(f"Branch {branch} belongs to another {noun}")
         path = repo.owner(branch)
         if role == "review":
             manual_review = _manual_review_pair(repo, branch, path, previous, pr)
@@ -626,7 +658,9 @@ def open_pr(repo, selector, refresh=False):
         f"+{pr_head_ref(repo, number)}:{fetched}",
     )
     if repo.oid(fetched) != pr["head_oid"]:
-        raise WTError("PR head changed while opening it; retry after inspecting the PR")
+        raise WTError(
+            f"{noun} head changed while opening it; retry after inspecting it"
+        )
     checked_out = None
     if manual_review:
         _manual_review_pair(repo, branch, path, repo.branches.get(branch), pr)
@@ -707,13 +741,18 @@ def current_pr(repo, *, action="pull"):
     """Resolve the current independent managed PR without changing its checkout."""
     from . import stacks
 
+    command = request_prefix(config=repo.config)
     branch = repo.current_branch()
     if branch == repo.config["trunk"]:
         raise WTError("On trunk; use 'wt trunk update' to fast-forward it.")
     if branch is None:
-        raise WTError("Detached HEAD; use 'wt go' to enter a managed PR worktree.")
+        raise WTError(
+            f"Detached HEAD; use 'wt go' to enter a managed {command.upper()} worktree."
+        )
     if branch not in repo.branches:
-        raise WTError("Current branch is unmanaged; use 'wt pr NUMBER' to open its PR.")
+        raise WTError(
+            f"Current branch is unmanaged; use 'wt {command} NUMBER' to open its {command.upper()}."
+        )
     metadata = repo.branches[branch]
     if repo.owner(branch) != repo.root or Path(metadata["path"]).resolve() != repo.root:
         raise WTError(
@@ -733,14 +772,14 @@ def current_pr(repo, *, action="pull"):
     if not pr:
         if action == "push":
             raise WTError(
-                "Current branch has no associated PR; use 'wt publish' to create one."
+                f"Current branch has no associated {command.upper()}; use 'wt publish' to create one."
             )
         raise WTError(
-            "Current branch has no associated PR; use 'wt pr NUMBER' to open or associate one."
+            f"Current branch has no associated {command.upper()}; use 'wt {command} NUMBER' to open or associate one."
         )
     if (pr.get("base_repo") or "").lower() != repo.config["upstream_repo"].lower():
         raise WTError(
-            "Associated PR belongs to another repository; inspect 'wt doctor'."
+            f"Associated {command.upper()} belongs to another repository; inspect 'wt doctor'."
         )
     _association_source(metadata, pr)
     repo.check_primary()

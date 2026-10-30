@@ -412,7 +412,7 @@ class GitLabFixture(unittest.TestCase):
                 self.mrs[42]["source_branch"],
             )
         if repo:
-            self.assertEqual(repo.current_branch(), "rwgk/review-pr42")
+            self.assertEqual(repo.current_branch(), "rwgk/review-mr42")
 
     def invoke(self, repo, args):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -457,13 +457,13 @@ class GitLabTests(GitLabFixture):
     def test_review_checkout_uses_mr_iid_retained_ref_and_idempotent_alias(self):
         mr = self.contributor_mr()
         path = github.open_pr(self.repo, mr["web_url"])
-        metadata = self.repo.branches["rwgk/review-pr42"]
+        metadata = self.repo.branches["rwgk/review-mr42"]
         self.assertEqual(metadata["role"], "review")
         self.assertEqual(metadata["pr"]["number"], 42)
         self.assertEqual(metadata["pr"]["head_repo"], CONTRIBUTOR)
         self.assertEqual(git(path, "rev-parse", "HEAD"), mr["sha"])
-        self.assertEqual((path.parent / "pr42").resolve(), path)
-        self.assertEqual(github.open_pr(self.repo, "pr42"), path)
+        self.assertEqual((path.parent / "mr42").resolve(), path)
+        self.assertEqual(github.open_pr(self.repo, "mr42"), path)
         self.assertEqual(len(self.repo.worktrees()), 2)
         self.assertTrue(
             any(
@@ -477,6 +477,49 @@ class GitLabTests(GitLabFixture):
         self.assertFalse(self.tracking(GitLabRepo(self, path)))
         self.assert_checkouts()
 
+    def test_mr_command_opens_new_mr_branch_and_pr_command_refuses_before_writes(self):
+        self.contributor_mr()
+        before = self.repo.state_path.read_bytes()
+        lock = self.repo.common / "rwgk-wt.lock"
+        had_lock = lock.exists()
+        self.api_calls.clear()
+        status, output, error = self.invoke(self.repo, ["pr", "42"])
+        self.assertEqual(status, 1)
+        self.assertEqual(output, "")
+        self.assertIn("wt mr 42", error)
+        self.assertFalse(self.api_calls)
+        self.assertEqual(self.repo.state_path.read_bytes(), before)
+        self.assertEqual(lock.exists(), had_lock)
+        status, output, error = self.invoke(self.repo, ["mr", "42", "--json"])
+        self.assertEqual(status, 0, error)
+        path = Path(json.loads(output)["path"])
+        self.assertEqual(path.name, "rwgk-review-mr42")
+        self.assertEqual((path.parent / "mr42").resolve(), path)
+        self.assertFalse((path.parent / "pr42").exists())
+        status, output, error = self.invoke(GitLabRepo(self), ["list"])
+        self.assertEqual(status, 0, error)
+        self.assertIn("mr42 OPEN", output)
+        self.assertNotIn("pr42 OPEN", output)
+
+    def test_legacy_manual_pair_collision_with_mr_pair_stops_before_adoption(self):
+        mr = self.contributor_mr()
+        git(
+            self.primary,
+            "fetch",
+            str(self.remotes["upstream"]),
+            "refs/merge-requests/42/head",
+        )
+        legacy = self.repo.create("rwgk/review-pr42", mr["sha"])
+        current = self.repo.create("rwgk/review-mr42", mr["sha"])
+        before = self.repo.state_path.read_bytes()
+        with self.assertRaisesRegex(WTError, "collide"):
+            github.open_pr(self.repo, 42)
+        self.assertEqual(self.repo.state_path.read_bytes(), before)
+        self.assertEqual(git(legacy, "rev-parse", "HEAD"), mr["sha"])
+        self.assertEqual(git(current, "rev-parse", "HEAD"), mr["sha"])
+        self.assertNotIn("pr", self.repo.branches["rwgk/review-pr42"])
+        self.assertNotIn("pr", self.repo.branches["rwgk/review-mr42"])
+
     def test_clean_registered_manual_review_pair_is_adopted_without_switching(self):
         mr = self.contributor_mr()
         git(
@@ -487,9 +530,21 @@ class GitLabTests(GitLabFixture):
         )
         path = self.repo.create("rwgk/review-pr42", mr["sha"])
         self.assertEqual(self.repo.branches["rwgk/review-pr42"]["role"], "owned")
+        (path.parent / "pr42").symlink_to(path.name, target_is_directory=True)
+        status, output, error = self.invoke(self.repo, ["mr", "42", "--print-path"])
+        self.assertEqual(status, 0, error)
+        self.assertEqual(Path(output.strip()), path)
+        self.assertEqual((path.parent / "pr42").resolve(), path)
+        self.assertEqual((path.parent / "mr42").resolve(), path)
         self.assertEqual(github.open_pr(self.repo, 42), path)
         self.assertEqual(self.repo.branches["rwgk/review-pr42"]["role"], "review")
-        self.assertEqual(github.open_pr(self.repo, "pr42"), path)
+        (path.parent / "mr42").unlink()
+        self.assertFalse(
+            any("alias" in issue.lower() for issue in self.repo.doctor()["issues"])
+        )
+        self.assertEqual(github.open_pr(self.repo, "mr42"), path)
+        self.assertEqual((path.parent / "mr42").resolve(), path)
+        self.assertEqual((path.parent / "pr42").resolve(), path)
         self.assertEqual(git(path, "rev-parse", "HEAD"), mr["sha"])
         self.assert_checkouts()
 
@@ -508,7 +563,7 @@ class GitLabTests(GitLabFixture):
         self.assertNotIn(branch, self.repo.branches)
         self.assertEqual(github.open_pr(self.repo, 42), path)
         self.assertEqual(self.repo.branches[branch]["role"], "review")
-        self.assertEqual(github.open_pr(self.repo, "pr42"), path)
+        self.assertEqual(github.open_pr(self.repo, "mr42"), path)
         self.assertEqual(git(path, "rev-parse", "HEAD"), mr["sha"])
         self.assert_checkouts()
 
@@ -558,7 +613,7 @@ class GitLabTests(GitLabFixture):
         mr["source_project_id"] = None
         with self.assertRaisesRegex(WTError, "head changed|head.*differ"):
             github.open_pr(self.repo, 42)
-        self.assertNotIn("rwgk/review-pr42", self.repo.branches)
+        self.assertNotIn("rwgk/review-mr42", self.repo.branches)
         self.assertEqual(len(self.repo.worktrees()), 1)
         self.assertFalse(self.pushes())
 

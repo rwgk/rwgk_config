@@ -8,7 +8,7 @@ import shlex
 from pathlib import Path
 
 from . import github, lifecycle, stacks, submodules
-from .core import WTError
+from .core import WTError, request_prefix
 
 
 def _reason(entry, code, message, hint=None, *, error=False):
@@ -138,6 +138,7 @@ def _module_work(repo, root, modules):
 
 
 def _fetch_pr(repo, pr):
+    noun = request_prefix(pr, repo.config).upper()
     remote = repo.config["upstream_remote"]
     github._checked_remote(repo, remote, repo.config["upstream_repo"])
     digest = hashlib.sha256(pr["base_repo"].lower().encode()).hexdigest()[:12]
@@ -152,7 +153,7 @@ def _fetch_pr(repo, pr):
     )
     if repo.oid(reference) != pr["head_oid"]:
         raise WTError(
-            "PR head changed during housekeeping inspection; retry after inspecting the PR"
+            f"{noun} head changed during housekeeping inspection; retry after inspecting it"
         )
     return pr["head_oid"]
 
@@ -164,6 +165,7 @@ def _trunk(repo):
 
 
 def _history(repo, entry, metadata, pr):
+    noun = request_prefix(pr, repo.config).upper()
     head = _fetch_pr(repo, pr)
     local = entry["local_oid"]
     ahead, behind = map(
@@ -172,7 +174,11 @@ def _history(repo, entry, metadata, pr):
     )
     entry["facts"].update(ahead=ahead, behind=behind)
     if pr["state"] == "OPEN":
-        _reason(entry, "pr-open", f"PR #{pr['number']} is open")
+        _reason(
+            entry,
+            "pr-open",
+            f"{request_prefix(pr, repo.config).upper()} {'!' if request_prefix(pr, repo.config) == 'mr' else '#'}{pr['number']} is open",
+        )
         if stacks.get_stack(repo, entry["branch"]):
             entry["facts"]["stack"] = True
             if behind:
@@ -202,7 +208,7 @@ def _history(repo, entry, metadata, pr):
             )
         elif behind:
             entry["hints"].append(
-                "Use 'wt pull' in this worktree to adopt the current PR head."
+                f"Use 'wt pull' in this worktree to adopt the current {noun} head."
             )
         return
     if github._ancestor(repo, local, head):
@@ -219,7 +225,7 @@ def _history(repo, entry, metadata, pr):
     _reason(
         entry,
         "local-history",
-        f"{count} local commit(s) outside the final PR history and upstream trunk",
+        f"{count} local commit(s) outside the final {noun} history and upstream trunk",
         "Inspect these commits before deliberate retirement with 'wt clean'.",
     )
 
@@ -227,6 +233,7 @@ def _history(repo, entry, metadata, pr):
 def assess(repo, branch, *, discard_builds=False):
     """Return facts and blockers without deleting, resetting, or changing a catalog."""
     metadata = repo.branches[branch]
+    noun = request_prefix(metadata.get("pr"), repo.config).upper()
     path = Path(metadata["path"]).resolve()
     entry = {
         "kind": "managed",
@@ -255,7 +262,11 @@ def assess(repo, branch, *, discard_builds=False):
             error=True,
         )
         return entry
-    selector = f"pr{entry['pr']['number']}" if entry["pr"] else branch
+    selector = (
+        f"{request_prefix(entry['pr'], repo.config)}{entry['pr']['number']}"
+        if entry["pr"]
+        else branch
+    )
     entry["hints"].append(f"wt go {shlex.quote(selector)}")
     if metadata.get("creating"):
         _reason(
@@ -297,7 +308,7 @@ def assess(repo, branch, *, discard_builds=False):
             _reason(
                 entry,
                 "unfinished-operation",
-                "A PR pull rebase is paused in this worktree",
+                f"A {noun} pull rebase is paused in this worktree",
                 "Use 'wt pull --continue' or 'wt pull --abort' there.",
             )
         else:
@@ -408,7 +419,7 @@ def assess(repo, branch, *, discard_builds=False):
         _reason(
             entry,
             "no-pr",
-            "No associated PR; unpublished work stays visible",
+            f"No associated {noun}; unpublished work stays visible",
             "Use 'wt publish', or explicitly 'wt drop --local-only' after inspecting it.",
         )
         return entry
@@ -420,8 +431,8 @@ def assess(repo, branch, *, discard_builds=False):
         _reason(
             entry,
             "foreign-pr",
-            "Associated PR belongs to another repository",
-            "Inspect 'wt doctor' and correct the PR association before cleanup.",
+            f"Associated {noun} belongs to another repository",
+            f"Inspect 'wt doctor' and correct the {noun} association before cleanup.",
             error=True,
         )
         return entry
@@ -436,7 +447,7 @@ def assess(repo, branch, *, discard_builds=False):
             entry,
             "pr-check-failed",
             error,
-            "Verify the PR and retry; its state was not assumed terminal.",
+            f"Verify the {noun} and retry; its state was not assumed terminal.",
             error=True,
         )
     entry["eligible"] = bool(entry["coverage"]) and not entry["reasons"]

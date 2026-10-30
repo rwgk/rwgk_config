@@ -24,6 +24,7 @@ class BatchCleanupTests(unittest.TestCase):
         self.names = ["rwgk/lower", "rwgk/middle", "rwgk/upper"]
         self.repo = SimpleNamespace(
             state={},
+            config={"upstream_repo": "owner/repo"},
             common=self.common,
             primary=self.common,
             branches={

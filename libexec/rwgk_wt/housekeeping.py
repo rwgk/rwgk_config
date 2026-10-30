@@ -8,7 +8,7 @@ import shlex
 from pathlib import Path
 
 from . import github, lifecycle, stacks
-from .core import WTError
+from .core import WTError, request_prefix
 
 
 def _assess(repo, branch, discard_builds):
@@ -166,7 +166,7 @@ def _preview(repo, entries, discard_builds, order):
                         entries[name],
                         "cleanup-preflight",
                         error,
-                        f"wt clean pr{entries[name]['pr']['number']}",
+                        f"wt clean {request_prefix(entries[name]['pr'], repo.config)}{entries[name]['pr']['number']}",
                         error=True,
                     )
                     rejected.add(name)

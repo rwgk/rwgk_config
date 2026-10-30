@@ -84,6 +84,16 @@ def repository_identity(url):
     return ("gitlab", gitlab) if gitlab else (None, "")
 
 
+def request_prefix(pr=None, config=None):
+    """Use forge terminology without changing normalized association metadata."""
+    return (
+        "mr"
+        if (pr or {}).get("provider") == "gitlab"
+        or (config or {}).get("provider") == "gitlab"
+        else "pr"
+    )
+
+
 def run_command(argv, *, cwd=None, check=True, input=None):
     env = os.environ.copy()
     for key in tuple(env):
@@ -412,18 +422,24 @@ class Repo:
         self.save()
         return path
 
-    def alias(self, branch, pr):
+    def alias(self, branch, pr, *, prefix=None):
         if pr["base_repo"].lower() != self.config["upstream_repo"].lower():
-            raise WTError("PR belongs to a different base repository.")
+            raise WTError("Request belongs to a different base repository.")
         target = self.owner(branch)
         if target is None:
             raise WTError(f"Branch has no owning worktree: {branch}")
-        alias = self.canonical_path(branch).parent / f"pr{pr['number']}"
+        preferred = request_prefix(pr, self.config)
+        prefix = prefix or preferred
+        if prefix not in (("mr", "pr") if preferred == "mr" else ("pr",)):
+            raise WTError("Alias prefix does not match the repository provider.")
+        alias = self.canonical_path(branch).parent / f"{prefix}{pr['number']}"
         if alias.is_symlink():
             if alias.resolve() != target:
-                raise WTError(f"PR alias points elsewhere: {alias}")
+                raise WTError(f"{prefix.upper()} alias points elsewhere: {alias}")
         elif alias.exists():
-            raise WTError(f"PR alias collides with an existing directory: {alias}")
+            raise WTError(
+                f"{prefix.upper()} alias collides with an existing directory: {alias}"
+            )
         else:
             alias.symlink_to(
                 os.path.relpath(target, alias.parent), target_is_directory=True
@@ -605,12 +621,24 @@ class Repo:
             ):
                 issues.append(f"Noncanonical path: {name} ({owner['path']})")
             if entry.get("pr"):
-                alias = self.canonical_path(name).parent / f"pr{entry['pr']['number']}"
+                prefix = request_prefix(entry["pr"], self.config)
+                aliases = self.canonical_path(name).parent
+                alias = aliases / f"{prefix}{entry['pr']['number']}"
+                # Legacy GitLab pairs keep their original prN alias and path.
+                if prefix == "mr" and not alias.exists() and not alias.is_symlink():
+                    legacy = aliases / f"pr{entry['pr']['number']}"
+                    if (
+                        legacy.is_symlink()
+                        and legacy.resolve() == Path(entry["path"]).resolve()
+                    ):
+                        alias = legacy
                 if (
                     not alias.is_symlink()
                     or alias.resolve() != Path(entry["path"]).resolve()
                 ):
-                    issues.append(f"Missing or mismatched PR alias: {alias}")
+                    issues.append(
+                        f"Missing or mismatched {prefix.upper()} alias: {alias}"
+                    )
         legacy = [
             name
             for name in self.git(

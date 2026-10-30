@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import github, lifecycle, stacks
-from .core import Repo, WTError, branch_name, directory_name
+from .core import Repo, WTError, branch_name, directory_name, request_prefix
 
 
 def parser():
@@ -36,20 +36,22 @@ def parser():
         "new", help="create a branch and owning worktree from trunk"
     )
     new.add_argument("slug")
-    pr = commands.add_parser(
-        "pr", help="open or resume a PR worktree and attach its alias"
-    )
-    pr.add_argument("selector")
+    for command, service, noun in (("pr", "GitHub", "PR"), ("mr", "GitLab", "MR")):
+        request = commands.add_parser(
+            command,
+            help=f"open or resume a {service} {noun} worktree and attach its alias",
+        )
+        request.add_argument("selector")
     pull = commands.add_parser(
         "pull",
-        help="update the current independent PR worktree safely",
-        description="Pull the PR's current head into this worktree, preserving local work.",
+        help="update the current independent PR/MR worktree safely",
+        description="Pull the PR/MR's current head into this worktree, preserving local work.",
     )
     pull_mode = pull.add_mutually_exclusive_group()
     pull_mode.add_argument(
         "--rebase",
         action="store_true",
-        help="replay local commits onto the current PR head",
+        help="replay local commits onto the current PR/MR head",
     )
     pull_mode.add_argument(
         "--continue",
@@ -62,9 +64,9 @@ def parser():
     )
     commands.add_parser(
         "push",
-        help="fast-forward the current PR's source branch without setting Git tracking",
+        help="fast-forward the current PR/MR's source branch without setting Git tracking",
         description=(
-            "Push committed HEAD to the associated PR's verified source branch. "
+            "Push committed HEAD to the associated PR/MR's verified source branch. "
             "Only fast-forward updates are allowed; Git upstream tracking is unchanged."
         ),
     )
@@ -76,7 +78,8 @@ def parser():
     )
     name.add_argument("branch")
     codex = commands.add_parser(
-        "codex", help="find and resume Codex sessions for the current PR or workspace"
+        "codex",
+        help="find and resume Codex sessions for the current PR/MR or workspace",
     )
     codex.add_argument(
         "--list", action="store_true", help="list matches without resuming"
@@ -88,7 +91,7 @@ def parser():
         help="preview obsolete pairs and explain retained workspaces",
         description=(
             "Inventory this repository's workspaces. Remove only clearly obsolete "
-            "managed PR pairs with --apply; report all remaining work with next steps."
+            "managed PR/MR pairs with --apply; report all remaining work with next steps."
         ),
     )
     housekeeping.add_argument("--apply", action="store_true")
@@ -134,7 +137,7 @@ def parser():
     recovery.add_argument("--abort", action="store_true")
     publish = commands.add_parser(
         "publish",
-        help="push exact refs and create/update PRs; stacks always use upstream",
+        help="push exact refs and create/update PRs/MRs; stacks always use upstream",
     )
     publish.add_argument("--stack", action="store_true")
     publish.add_argument("--title")
@@ -205,7 +208,8 @@ def _dispatch(repo, args):
     if command == "new":
         path = repo.create(branch_name(args.slug), "refs/heads/" + repo.config["trunk"])
         return {"branch": branch_name(args.slug), "path": str(path)}, path
-    if command == "pr":
+    if command in ("pr", "mr"):
+        github.require_request_command(repo, command, args.selector)
         path = github.open_pr(repo, args.selector)
         return {"path": str(path)}, path
     if command == "pull":
@@ -315,14 +319,30 @@ def _dispatch(repo, args):
                 saved = repo.branches[name].get("pr")
                 if not saved:
                     if args.selector:
-                        raise WTError("Branch has no PR. Use 'wt drop --local-only'.")
-                    skipped.append({"branch": name, "reason": "no PR"})
+                        raise WTError(
+                            f"Branch has no {request_prefix(config=repo.config).upper()}. Use 'wt drop --local-only'."
+                        )
+                    skipped.append(
+                        {
+                            "branch": name,
+                            "reason": "no "
+                            + request_prefix(config=repo.config).upper(),
+                        }
+                    )
                     continue
                 live = github.get_pr(repo, saved["number"], saved["base_repo"])
                 if live["state"] not in ("CLOSED", "MERGED"):
                     if args.selector:
-                        raise WTError("PR is still open; cleanup leaves it intact.")
-                    skipped.append({"branch": name, "reason": "PR is open"})
+                        raise WTError(
+                            f"{request_prefix(config=repo.config).upper()} is still open; cleanup leaves it intact."
+                        )
+                    skipped.append(
+                        {
+                            "branch": name,
+                            "reason": request_prefix(config=repo.config).upper()
+                            + " is open",
+                        }
+                    )
                     continue
             selected.append(name)
         if command == "clean":
@@ -455,7 +475,11 @@ def _housekeeping_lines(repo, value):
         lines.append(f"Would clean {len(operations)} pair(s):")
         for record in operations:
             pr = record.get("pr") or {}
-            label = f"pr{pr['number']} {pr['state']} " if pr else ""
+            label = (
+                f"{request_prefix(pr, repo.config)}{pr['number']} {pr['state']} "
+                if pr
+                else ""
+            )
             lines.append(f"  {label}{record['branch']}")
             lines.append(f"    {record['path']}")
             if record.get("source", {}).get("oid"):
@@ -482,7 +506,7 @@ def _housekeeping_lines(repo, value):
             state = pr.get("state", "UNKNOWN")
             if not entry.get("pr_verified"):
                 state += " (unchecked)"
-            label = f"pr{pr['number']} {state} "
+            label = f"{request_prefix(pr, repo.config)}{pr['number']} {state} "
         name = entry.get("branch") or "detached worktree"
         lines.append(f"  {label}{name}")
         if entry.get("path"):
@@ -492,8 +516,8 @@ def _housekeeping_lines(repo, value):
         facts = entry.get("facts", {})
         if pr.get("state") == "OPEN" and {"ahead", "behind"} <= facts.keys():
             lines.append(
-                f"    Commits relative to PR: {facts['ahead']} local-only, "
-                f"{facts['behind']} PR-only"
+                f"    Commits relative to {request_prefix(pr, repo.config).upper()}: {facts['ahead']} local-only, "
+                f"{facts['behind']} {request_prefix(pr, repo.config).upper()}-only"
             )
         for hint in dict.fromkeys(entry.get("hints", [])):
             lines.append(f"    Next: {hint}")
@@ -519,7 +543,11 @@ def _display(args, value, repo=None):
         )
         for row in value["branches"]:
             pr = row.get("pr") or {}
-            label = f"pr{pr['number']} {pr.get('state', '')}" if pr else "unpublished"
+            label = (
+                f"{request_prefix(pr, value['config'])}{pr['number']} {pr.get('state', '')}"
+                if pr
+                else "unpublished"
+            )
             print(f"{row['branch']}  {label}  {row['path']}")
     elif args.command == "doctor":
         print("Managed pairs: " + ("OK" if value["ok"] else "NEED ATTENTION"))
@@ -569,7 +597,11 @@ def _display(args, value, repo=None):
             action = "Already up to date with"
         else:
             action = "Updated from"
-        print(f"{action} PR #{value['pr']['number']}: {value['branch']}")
+        prefix = request_prefix(value["pr"], repo.config)
+        marker = "!" if prefix == "mr" else "#"
+        print(
+            f"{action} {prefix.upper()} {marker}{value['pr']['number']}: {value['branch']}"
+        )
         if value.get("recovery_record"):
             recovery = lifecycle._backtracking_dir(repo) / (
                 value["recovery_record"] + ".json"
@@ -613,6 +645,8 @@ def main(argv=None):
                 options.append("--list")
             return logbook_main(options)
         repo = Repo(initialized=args.command != "init")
+        if args.command in ("pr", "mr"):
+            github.require_request_command(repo, args.command, args.selector)
         readonly = _readonly(args)
         import contextlib
 
