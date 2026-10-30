@@ -808,10 +808,12 @@ class GitHubTests(unittest.TestCase):
                 )
             )
         self.assertNotIn("--open", link)
+        self.assertNotIn("--base", link)
+        self.assertEqual(link[5], "10")
         self.assertTrue(
             all(
                 value.startswith("https://github.com/Acme/project/pull/")
-                for value in link[7:]
+                for value in link[6:]
             )
         )
 
@@ -900,6 +902,8 @@ class GitHubTests(unittest.TestCase):
         repo, selected = self.native_stack()
         self.publish_stack(repo, selected)
         self.mark_first_layer_merged(repo, selected)
+        # No link is needed for a single active PR, so numeric branches are harmless.
+        git(self.primary, "branch", "10", "main")
         self.commands.clear()
         result = self.publish_stack(repo, selected)
         self.assertEqual(result["branches"], ["rwgk/second"])
@@ -907,6 +911,87 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(
             "repos/Acme/project/stacks/10", [argv[-1] for argv, _ in self.gh_calls]
         )
+
+    def test_existing_stack_link_retains_merged_prefix_without_second_push(self):
+        _, selected = self.native_stack()
+        repo = self.branch("rwgk/third", "rwgk/second")
+        selected["branches"].append(
+            {
+                "branch": "rwgk/third",
+                "head": repo.oid("HEAD"),
+                "base": repo.oid("rwgk/second"),
+            }
+        )
+        self.publish_stack(repo, selected)
+        self.mark_first_layer_merged(repo, selected)
+        merged = next(
+            pr for pr in self.prs.values() if pr["head"]["ref"] == "rwgk/first"
+        )
+        merged["head"]["sha"] = selected["branches"][0]["head"]
+        merged_base = merged["base"]["ref"]
+        git(self.remotes["upstream"], "update-ref", "-d", "refs/heads/rwgk/first")
+        active = [
+            repo.branches[row["branch"]]["pr"] for row in selected["branches"][1:]
+        ]
+        self.prs[active[0]["number"]]["draft"] = False
+        drafts = {number: pr["draft"] for number, pr in self.prs.items()}
+        urls = [pr["url"] for pr in active]
+        (repo.root / "next").write_text("next commit\n")
+        git(repo.root, "add", "next")
+        git(repo.root, "commit", "-m", "Next change")
+        selected["branches"][-1]["head"] = repo.oid("HEAD")
+        original = self.gh
+
+        def additive_link(argv, input):
+            if argv[1:3] == ["stack", "link"]:
+                args = argv[5:]
+                if not args or args[0] != "10":
+                    raise WTError(
+                        "Cannot update stack: would remove the merged PR prefix"
+                    )
+                self.assertEqual(args[1:], urls)
+                self.assertNotIn("--base", argv)
+            return original(argv, input)
+
+        self.commands.clear()
+        self.gh_calls.clear()
+        with mock.patch.object(self, "gh", side_effect=additive_link):
+            result = self.publish_stack(repo, selected)
+        self.assertEqual(result["branches"], ["rwgk/second", "rwgk/third"])
+        self.assertEqual(len(self.pushes()), 1)
+        missing = subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(self.remotes["upstream"]),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/rwgk/first",
+            ],
+            check=False,
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertEqual(merged["base"]["ref"], merged_base)
+        self.assertEqual(self.prs[active[0]["number"]]["base"]["ref"], "main")
+        self.assertEqual(self.prs[active[1]["number"]]["base"]["ref"], "rwgk/second")
+        self.assertEqual(
+            {number: pr["draft"] for number, pr in self.prs.items()}, drafts
+        )
+        self.assertFalse(
+            any(
+                argv[5] == "PATCH" and argv[6].endswith(f"/pulls/{merged['number']}")
+                for argv, _ in self.gh_calls
+                if argv[1:2] == ["api"]
+            )
+        )
+
+    def test_native_stack_number_branch_collision_refuses_before_writes(self):
+        repo, selected = self.native_stack()
+        git(self.primary, "branch", "10", "main")
+        with self.assertRaisesRegex(WTError, "collides with a local branch"):
+            self.publish_stack(repo, selected)
+        self.assert_no_publication_writes()
 
     def test_old_extension_refuses_stack_publication_before_api_or_preservation(self):
         repo, selected = self.native_stack()
@@ -965,6 +1050,14 @@ class GitHubTests(unittest.TestCase):
             any(argv[-1] == "repos/Acme/project/stacks/10" for argv, _ in self.gh_calls)
         )
         self.assertNotIn("push.pushOption=pull.stacked", self.pushes()[0])
+        link = next(argv for argv, _ in self.gh_calls if argv[1:3] == ["stack", "link"])
+        self.assertEqual(link[5:7], ["--base", "main"])
+        self.assertTrue(
+            all(
+                value.startswith("https://github.com/Acme/project/pull/")
+                for value in link[7:]
+            )
+        )
 
     def rewrite_stack_top(self, repo, selected):
         old = repo.oid("HEAD")

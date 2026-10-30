@@ -905,6 +905,16 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
         base = branch
     if not entries:
         raise WTError("No active branches to publish")
+    if (
+        native_base is not None
+        and len(entries) >= 2
+        and repo.exists(f"refs/heads/{selected['number']}")
+    ):
+        # gh-stack interprets a numeric local branch before a stack number.
+        raise WTError(
+            f"Native stack number {selected['number']} collides with a local branch; "
+            "inspect it before publishing. No publication push or PR update was attempted."
+        )
 
     # Preserve the old published history before any rewrite. The lifecycle layer
     # skips snapshots already reachable from upstream trunk or an archive tag.
@@ -976,15 +986,13 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
         repo.alias(entry["branch"], pr)
         prs.append(pr)
     if stack and len(prs) >= 2:
-        stacks._command(
-            repo,
-            "link",
-            "--remote",
-            remote,
-            "--base",
-            selected["trunk"]["branch"],
-            *[item["url"] for item in prs],
-        )
+        link_args = ["link", "--remote", remote]
+        if native_base is not None:
+            # Add mode retains merged members and skips already linked PRs.
+            link_args.append(str(selected["number"]))
+        else:
+            link_args.extend(("--base", selected["trunk"]["branch"]))
+        stacks._command(repo, *link_args, *[item["url"] for item in prs])
     # API proof is separate from the local catalog: re-read heads, bases, and
     # draft state after linking (which may adjust the base chain).
     for entry, expected in zip(entries, prs, strict=True):
