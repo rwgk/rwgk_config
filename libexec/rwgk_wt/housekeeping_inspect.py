@@ -148,7 +148,7 @@ def _fetch_pr(repo, pr):
         "--no-write-fetch-head",
         "--recurse-submodules=no",
         remote,
-        f"+refs/pull/{pr['number']}/head:{reference}",
+        f"+{github.pr_head_ref(repo, pr['number'])}:{reference}",
     )
     if repo.oid(reference) != pr["head_oid"]:
         raise WTError(

@@ -564,6 +564,7 @@ def _branch_config(repo, branch):
 def _source_snapshot(repo, metadata, pr):
     from . import github
 
+    github.verify_source_project(repo, pr)
     publication = metadata.get("publication")
     if not publication:
         raise WTError("Owned PR has no recorded publication destination")
@@ -659,7 +660,7 @@ def retire(
                 _fetch_exact(
                     repo,
                     _remote_url(repo, repo.config["upstream_remote"]),
-                    f"refs/pull/{pr['number']}/head",
+                    github.pr_head_ref(repo, pr["number"]),
                     source_oid,
                 )
             if not any(
@@ -926,6 +927,8 @@ def restore(repo, record_id):
             if _exists(repo, oid):
                 break
     if not _exists(repo, oid):
+        from . import github
+
         pr = record.get("pr")
         if pr:
             remote = repo.config["upstream_remote"]
@@ -937,7 +940,7 @@ def restore(repo, record_id):
                 "--no-write-fetch-head",
                 "--",
                 url,
-                f"refs/pull/{pr['number']}/head",
+                github.pr_head_ref(repo, pr["number"]),
             )
     if not _exists(repo, oid):
         raise WTError(

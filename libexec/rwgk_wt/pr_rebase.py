@@ -313,7 +313,7 @@ def start(repo):
         "--recurse-submodules=no",
         "--no-tags",
         remote,
-        f"+refs/pull/{pr['number']}/head:{fetched}",
+        f"+{github.pr_head_ref(repo, pr['number'])}:{fetched}",
     )
     target = repo.oid(fetched)
     if target != pr["head_oid"]:

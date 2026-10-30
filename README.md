@@ -125,7 +125,9 @@ single `wt name` implementation handles legacy names and collisions; directory
 names are never parsed to recover branch names.
 
 Requirements: Python 3.11 or later on POSIX (including WSL), Git 2.36 or later,
-and `gh` for GitHub operations. Extension-backed stack operations require
+and the hosting service's CLI: `gh` for GitHub, `glab` for GitLab. GitLab
+access uses the credentials configured in `glab`; compatibility was checked with
+version 1.36.0. Extension-backed GitHub stack operations require
 **gh-stack v0.3.0 or newer**, whose official release supports rebasing each layer
 in its owning worktree. The helpers check the version before making changes and
 stop with installation or upgrade instructions when necessary:
@@ -280,6 +282,47 @@ new PR head. Recovery state remains available if submodule alignment is
 interrupted. Pull preserves your current directory, including subdirectories.
 Trunk uses `wt trunk update`; stack layers use `wt stack pull` and its explicit
 `--apply`, local `wt stack rebase`, and authorized `wt publish --stack`.
+
+### GitLab merge requests
+
+The same independent-worktree commands support GitLab.com and self-hosted GitLab.
+The upstream remote selects the host and project, including nested namespaces and
+custom SSH ports. HTTP(S) API access currently uses standard ports. `wt pr`
+accepts a merge request IID or a full merge request URL;
+the existing `prNUMBER` aliases and `rwgk/review-prNUMBER` branch names also apply
+to GitLab so navigation stays consistent.
+
+```bash
+glab auth login --hostname gitlab.example.com
+wt pr 42
+# or: wt pr https://gitlab.example.com/group/subgroup/project/-/merge_requests/42
+wt pull
+wt pull --rebase                 # when local contributions diverged
+wt push                         # publish an authorized contribution to the MR source
+```
+
+GitLab projects are recorded as `HOST/GROUP/PROJECT`, keeping host identity separate
+from a GitHub `OWNER/REPO`. Existing registrations with an empty upstream identity
+infer it from the configured upstream remote; a new checkout uses `wt init` as
+usual. Cross-host and cross-project selectors stop rather than changing the
+publication destination.
+
+An MR is fetched through the receiving project's `refs/merge-requests/NUMBER/head`,
+so review checkout does not require adding a contributor remote. `wt push` verifies
+the current source project and branch, preserves custom SSH transport settings,
+and keeps the worktree classified as a review. Git upstream tracking is unchanged.
+`wt publish` supports owned MR creation and metadata updates, with new MRs draft
+by default. `wt clean` and `wt housekeeping` use the same preservation and ownership
+checks for GitLab as for GitHub.
+
+If you already created the canonical review branch/worktree manually, `wt pr NUMBER`
+can adopt that pair when its checkout is clean, idle, at the verified MR head, and
+at the expected path. It refuses a different checkout, extra commits, or pending
+work rather than overwriting them. No private catalog editing is needed.
+
+Native stack commands require GitHub and `gh-stack`; they stop on GitLab before
+creating branches or rewriting history. Independent GitLab MR workflows do not
+require `gh` or the stack extension.
 
 ### Submodules
 

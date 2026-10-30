@@ -1,7 +1,7 @@
-"""GitHub PR association and publication with independently fixed push leases.
+"""Forge PR association and publication with independently fixed push leases.
 
-Git is authoritative for worktree ownership. GitHub is authoritative for PR
-identity and state; a directory name or a remote alias is never that identity.
+Git is authoritative for worktree ownership. The hosting service is authoritative
+for PR identity and state; a directory name or a remote alias is never that identity.
 """
 
 from __future__ import annotations
@@ -18,7 +18,64 @@ SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 
 
+def provider(repo):
+    configured = repo.config.get("provider")
+    if configured == "gitlab":
+        return configured
+    if configured not in (None, "github"):
+        raise WTError(f"Unsupported repository provider: {configured}")
+    if REPO.fullmatch(repo.config.get("upstream_repo", "")):
+        return "github"
+    raise WTError(
+        "Cannot identify the repository's forge; inspect the upstream endpoint and wt registration."
+    )
+
+
+def pr_head_ref(repo, number):
+    return (
+        f"refs/merge-requests/{number}/head"
+        if provider(repo) == "gitlab"
+        else f"refs/pull/{number}/head"
+    )
+
+
+def source_endpoint(repo, identity, *, push=False, expected_id=None):
+    if provider(repo) == "gitlab":
+        from . import gitlab
+
+        return gitlab.source_endpoint(
+            repo, identity, push=push, expected_id=expected_id
+        )
+    remote = _source_remote(repo, identity)
+    return (
+        _remote_url(repo, remote, push=push)
+        if remote
+        else f"git@github.com:{identity}.git"
+    )
+
+
+def verify_source_project(repo, pr):
+    """Bind GitLab transport identity to the MR's immutable source project ID."""
+    if provider(repo) == "gitlab":
+        from .gitlab import project
+
+        identifier = pr.get("head_project_id")
+        if type(identifier) is not int or not pr.get("head_repo"):
+            raise WTError(
+                "GitLab MR source project is unavailable; no source branch was changed."
+            )
+        if project(repo, pr["head_repo"])["id"] != identifier:
+            raise WTError(
+                "GitLab source project identity changed; inspect the MR and source project before continuing."
+            )
+
+
 def _identity(url):
+    from .gitlab import parse_identity
+
+    gitlab = parse_identity(url)
+    if gitlab:
+        return gitlab
     if "://" in url:
         parsed = urlsplit(url)
         if (
@@ -70,6 +127,10 @@ def _checked_remote(repo, remote, expected=None):
         raise WTError(f"Remote {remote!r} has different fetch and push repositories")
     if expected and push.lower() != expected.lower():
         raise WTError(f"Remote {remote!r} points to {push}, expected {expected}")
+    if provider(repo) == "gitlab":
+        from .gitlab import project
+
+        project(repo, push)
     return push
 
 
@@ -85,6 +146,10 @@ def _api(repo, endpoint, method="GET", payload=None):
 
 
 def _viewer(repo):
+    if provider(repo) == "gitlab":
+        from .gitlab import viewer
+
+        return viewer(repo)
     data = _api(repo, "user")
     login = data.get("login") if isinstance(data, dict) else None
     if not isinstance(login, str) or not login:
@@ -94,6 +159,10 @@ def _viewer(repo):
 
 def validate_archive_remote(repo):
     """Require the configured archive endpoint to be the user's/admin's fork."""
+    if provider(repo) == "gitlab":
+        from .gitlab import validate_archive_remote as validate
+
+        return validate(repo)
     remote = repo.config["archive_remote"]
     identity = _checked_remote(repo, remote)
     data = _api(repo, f"repos/{identity}")
@@ -175,6 +244,10 @@ def _normalize_pr(data, base_repo, number=None):
 
 
 def get_pr(repo, number, base_repo=None):
+    if provider(repo) == "gitlab":
+        from .gitlab import get_pr as read
+
+        return read(repo, number, base_repo)
     base_repo = base_repo or repo.config["upstream_repo"]
     if not REPO.fullmatch(base_repo) or type(number) is not int or number <= 0:
         raise WTError("A GitHub repository and positive PR number are required")
@@ -185,6 +258,10 @@ def get_pr(repo, number, base_repo=None):
 
 def ensure_source_unused(repo, pr):
     """Refuse source deletion while any open PR still uses its head or base."""
+    if provider(repo) == "gitlab":
+        from .gitlab import ensure_source_unused as check
+
+        return check(repo, pr)
     base_repo = repo.config["upstream_repo"]
     head_repo, branch = pr.get("head_repo"), pr.get("head_ref")
     if (
@@ -269,6 +346,10 @@ def _ancestor(repo, old, new):
 
 
 def _pr_selector(repo, selector):
+    if provider(repo) == "gitlab":
+        from .gitlab import selector as parse
+
+        return parse(repo, selector)
     value = str(selector)
     match = re.fullmatch(r"(?:pr)?([1-9][0-9]*)", value)
     if match:
@@ -303,12 +384,20 @@ def _source_remote(repo, head_repo):
 
 
 def _pr_source(pr):
-    return {
+    source = {
         "base_repo": (pr.get("base_repo") or "").lower(),
         "number": pr.get("number"),
         "head_repo": (pr.get("head_repo") or "").lower(),
         "head_ref": pr.get("head_ref"),
     }
+    if pr.get("provider") == "gitlab":
+        source.update(
+            provider="gitlab",
+            host=pr.get("host"),
+            base_project_id=pr.get("base_project_id"),
+            head_project_id=pr.get("head_project_id"),
+        )
+    return source
 
 
 def validate_pr_source(saved, live):
@@ -327,10 +416,13 @@ def _association_source(metadata, pr):
         or _pr_source(metadata.get("pr", pr))
     )
     actual = _pr_source(pr)
+    unavailable_source = {**expected, "head_repo": ""}
+    if expected.get("provider") == "gitlab" and actual.get("head_project_id") is None:
+        unavailable_source["head_project_id"] = None
     if actual != expected and not (
         expected["head_repo"]
         and not actual["head_repo"]
-        and actual == {**expected, "head_repo": ""}
+        and actual == unavailable_source
     ):
         raise WTError(
             "PR source repository or branch changed since association; "
@@ -412,10 +504,48 @@ def _associate(repo, branch, pr, role, refresh=False, checked_out=None):
     repo.alias(branch, pr)
 
 
+def _manual_review_pair(repo, branch, path, metadata, pr):
+    """Validate a manual canonical GitLab review checkout before associating it."""
+    if provider(repo) != "gitlab" or path is None or metadata and metadata.get("pr"):
+        return False
+    if metadata and (
+        metadata.get("role") not in ("owned", "review")
+        or any(
+            metadata.get(key)
+            for key in ("publication", "associated_source", "sync_base", "creating")
+        )
+    ):
+        raise WTError(
+            "Manual review pair has existing ownership or recovery metadata; inspect 'wt doctor' before associating it."
+        )
+    expected = repo.canonical_path(branch).resolve()
+    if (
+        Path(path).resolve() != expected
+        or metadata
+        and Path(metadata["path"]).resolve() != expected
+    ):
+        raise WTError(
+            "Manual review worktree is outside its canonical wt path; inspect it before associating the merge request."
+        )
+    repo.check_primary()
+    repo.ensure_idle(path)
+    repo.ensure_clean(path)
+    if (
+        repo.git("symbolic-ref", "--quiet", "HEAD", cwd=path) != "refs/heads/" + branch
+        or repo.owner(branch) != expected
+        or repo.oid("refs/heads/" + branch) != pr["head_oid"]
+    ):
+        raise WTError(
+            "Manual review pair must be on its expected branch at the exact live MR head; no checkout was overwritten."
+        )
+    return True
+
+
 def open_pr(repo, selector, refresh=False):
     """Open/resume a PR through its retained upstream ref, including deleted forks."""
     from . import submodules
 
+    manual_review = False
     number = _pr_selector(repo, selector)
     base_repo = repo.config["upstream_repo"]
     remote = repo.config["upstream_remote"]
@@ -461,10 +591,17 @@ def open_pr(repo, selector, refresh=False):
             )
         ):
             raise WTError(f"Branch {branch} belongs to another PR")
-        if previous and role == "review" and previous.get("role") != "review":
-            raise WTError(f"Review branch {branch} already contains unrelated work")
         path = repo.owner(branch)
-        if path and not previous:
+        if role == "review":
+            manual_review = _manual_review_pair(repo, branch, path, previous, pr)
+        if (
+            previous
+            and role == "review"
+            and previous.get("role") != "review"
+            and not manual_review
+        ):
+            raise WTError(f"Review branch {branch} already contains unrelated work")
+        if path and not previous and not manual_review:
             raise WTError(
                 f"Branch {branch} has an unmanaged worktree at {path}; adopt it deliberately before opening its PR"
             )
@@ -474,7 +611,7 @@ def open_pr(repo, selector, refresh=False):
             ).returncode
             == 0
         )
-        if role == "review" and existing_review and not previous:
+        if role == "review" and existing_review and not previous and not manual_review:
             raise WTError(
                 f"Review branch {branch} already exists outside the managed catalog"
             )
@@ -486,11 +623,17 @@ def open_pr(repo, selector, refresh=False):
         "--recurse-submodules=no",
         "--no-tags",
         remote,
-        f"+refs/pull/{number}/head:{fetched}",
+        f"+{pr_head_ref(repo, number)}:{fetched}",
     )
     if repo.oid(fetched) != pr["head_oid"]:
         raise WTError("PR head changed while opening it; retry after inspecting the PR")
     checked_out = None
+    if manual_review:
+        _manual_review_pair(repo, branch, path, repo.branches.get(branch), pr)
+        submodules.initialize(repo, path)
+        if branch not in repo.branches:
+            repo.branches[branch] = {"path": str(path), "role": "review"}
+        checked_out = pr["head_oid"]
     if not path:
         path = repo.create(branch, fetched, role=role)
         checked_out = pr["head_oid"]
@@ -642,11 +785,16 @@ def _existing_pr(repo, metadata, base_repo, head_repo, branch):
         if associated["base_repo"].lower() != base_repo.lower():
             raise WTError("Existing PR targets a different repository")
         pr = get_pr(repo, associated["number"], base_repo)
+        validate_pr_source(associated, pr)
         if pr["state"] != "OPEN":
             raise WTError(
                 f"PR #{pr['number']} is {pr['state'].lower()}; use a new branch for follow-up work"
             )
         candidates = [pr]
+    elif provider(repo) == "gitlab":
+        from .gitlab import find_open
+
+        candidates = find_open(repo, head_repo, branch, base_repo)
     else:
         owner = head_repo.split("/", 1)[0]
         query = quote(f"{owner}:{branch}", safe="")
@@ -685,6 +833,10 @@ def _auto_text(repo, branch, base):
 
 
 def _update_pr(repo, entry, base_repo, head_repo, title, body, ready):
+    if provider(repo) == "gitlab":
+        from .gitlab import update_pr
+
+        return update_pr(repo, entry, base_repo, head_repo, title, body, ready)
     branch, base, pr = entry["branch"], entry["base"], entry["pr"]
     if pr:
         changes = {}
@@ -781,6 +933,8 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
     """Publish committed tips atomically, then create/link PRs without hidden pushes."""
     from . import lifecycle, stacks
 
+    if stack:
+        stacks.require_github(repo)
     current = repo.current_branch()
     selected = stacks.get_stack(repo)
     if selected and not stack:
@@ -865,9 +1019,11 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
                 f"Remote {head_repo}:{branch} changed since the recorded publication; inspect and adopt that work before retrying"
             )
         pr = _existing_pr(repo, metadata, base_repo, head_repo, branch)
+        if pr:
+            verify_source_project(repo, pr)
         if pr and pr["head_oid"] != old:
             raise WTError(
-                "GitHub's PR head and the publication endpoint disagree; inspect before publishing"
+                "The PR head and the publication endpoint disagree; inspect before publishing"
             )
         if pr and pr["author"].lower() != viewer.lower():
             raise WTError(
@@ -1006,7 +1162,7 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
             or actual["is_draft"] != expected["is_draft"]
         ):
             raise WTError(
-                "GitHub PR verification failed; publication may have completed, inspect it before retrying"
+                "PR verification failed; publication may have completed, inspect it before retrying"
             )
         record_sync(repo, entry["branch"], actual, entry["oid"])
     repo.save()

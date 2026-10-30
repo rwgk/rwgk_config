@@ -14,8 +14,16 @@ from .stack_version import require_supported
 BIN = Path(__file__).resolve().parents[2] / "bin"
 
 
+def require_github(repo):
+    if getattr(repo, "config", {}).get("provider") == "gitlab":
+        raise WTError(
+            "Native stack operations are GitHub-only; use independent GitLab merge-request worktrees."
+        )
+
+
 def require_extension(repo):
     """Require the supported extension quietly, once per repository instance."""
+    require_github(repo)
     if not getattr(repo, "_wt_stack_version_checked", False):
         require_supported(repo.run)
         repo._wt_stack_version_checked = True
@@ -353,6 +361,7 @@ def _rebase(repo, flags=()):
 
 
 def pull(repo, number=None, apply=False):
+    require_github(repo)
     if apply:
         require_extension(repo)
     stack = get_stack(repo)

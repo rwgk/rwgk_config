@@ -53,19 +53,23 @@ def _effective_url(repo, url, expected):
     seen = set()
     for _ in range(8):
         if url in seen:
-            raise WTError(
-                "GitHub push URL rewrites form a cycle; inspect Git configuration"
-            )
+            raise WTError("Push URL rewrites form a cycle; inspect Git configuration")
         seen.add(url)
         pushed = checked(rewritten(url, "pushinsteadof"))
         effective = checked(rewritten(pushed, "insteadof"))
         if effective == url:
             return url
         url = effective
-    raise WTError("Too many GitHub push URL rewrites; inspect Git configuration")
+    raise WTError("Too many push URL rewrites; inspect Git configuration")
 
 
-def _endpoint(repo, identity):
+def _endpoint(repo, identity, *, expected_id=None):
+    if github.provider(repo) == "gitlab":
+        return _effective_url(
+            repo,
+            github.source_endpoint(repo, identity, push=True, expected_id=expected_id),
+            identity,
+        )
     available = repo.git("remote").splitlines()
     preferred = (
         repo.config.get("publish_remote"),
@@ -99,7 +103,7 @@ def _local_unchanged(repo, branch, oid):
         )
 
 
-def _push_error(result):
+def _push_error(result, *, provider="github"):
     detail = (result.stderr or result.stdout).strip()
     detail = re.sub(r"(https?://)[^/\s@]+@", r"\1[redacted]@", detail)
     lower = detail.lower()
@@ -112,9 +116,17 @@ def _push_error(result):
         word in lower
         for word in ("permission", "denied", "403", "write access", "not allowed")
     ):
+        guidance = (
+            "GitLab refused the MR push. Check source-project write access and the "
+            "MR's 'Allow commits from members who can merge to the target branch' "
+            "(allow_collaboration) setting for maintainer commits. "
+            if provider == "gitlab"
+            else "GitHub refused the PR push. Check write access and the contributor's "
+            "'Allow edits from maintainers' setting. "
+        )
         raise WTError(
-            "GitHub refused the PR push. Check write access and the contributor's "
-            "'Allow edits from maintainers' setting. No alternate branch was created."
+            guidance
+            + "No alternate branch was created."
             + (f"\n{detail}" if detail else "")
         )
     raise WTError(
@@ -142,8 +154,8 @@ def push(repo):
         )
     ref = "refs/heads/" + pr["head_ref"]
     if github._git_result(repo, "check-ref-format", ref).returncode:
-        raise WTError("GitHub returned an invalid PR source branch")
-    endpoint = _endpoint(repo, identity)
+        raise WTError("The hosting service returned an invalid PR source branch")
+    endpoint = _endpoint(repo, identity, expected_id=pr.get("head_project_id"))
     old = github._remote_tip(repo, endpoint, ref)
     if old is None:
         raise WTError(
@@ -151,7 +163,7 @@ def push(repo):
         )
     if old != pr["head_oid"]:
         raise WTError(
-            "GitHub and the PR source branch disagree; run 'wt pull' and inspect before pushing"
+            "The hosting service and the PR source branch disagree; run 'wt pull' and inspect before pushing"
         )
     digest = hashlib.sha256((identity.lower() + ":" + ref).encode()).hexdigest()
     observed = f"refs/rwgk/pr-push/{digest}/observed"
@@ -201,7 +213,7 @@ def push(repo):
             c_locale=True,
         )
         if result.returncode:
-            _push_error(result)
+            _push_error(result, provider=github.provider(repo))
     if github._remote_tip(repo, endpoint, ref) != oid:
         raise WTError(
             "PR push verification failed; the source branch moved. Inspect it before retrying"
@@ -210,7 +222,7 @@ def push(repo):
     github.validate_pr_source(saved, actual)
     if actual["state"] != "OPEN" or actual["head_oid"] != oid:
         raise WTError(
-            "The source branch was verified, but GitHub's PR state differs. "
+            "The source branch was verified, but its PR state differs. "
             "The push may have completed; inspect the PR before retrying."
         )
     _local_unchanged(repo, branch, oid)

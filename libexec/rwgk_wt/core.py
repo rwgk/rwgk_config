@@ -73,6 +73,17 @@ def github_repository(url):
     return name if re.fullmatch(r"[^/\s]+/[^/\s]+", name) else ""
 
 
+def repository_identity(url):
+    """Infer supported forge identity without treating arbitrary hosts as GitHub."""
+    github = github_repository(url)
+    if github:
+        return "github", github
+    from .gitlab import parse_identity
+
+    gitlab = parse_identity(url)
+    return ("gitlab", gitlab) if gitlab else (None, "")
+
+
 def run_command(argv, *, cwd=None, check=True, input=None):
     env = os.environ.copy()
     for key in tuple(env):
@@ -124,6 +135,24 @@ class Repo:
             raise WTError("Repository is not registered. Run 'wt init' first.")
         self.config = self.state["config"]
         self.branches = self.state["branches"]
+        self._infer_provider()
+
+    def _infer_provider(self):
+        # Legacy GitLab registrations have no forge/project identity. Infer in
+        # memory; read-only commands never save the amended configuration.
+        if self.config and not self.config.get("provider"):
+            upstream = self.config.get("upstream_remote", "upstream")
+            url = self.git("remote", "get-url", upstream, check=False)
+            provider, identity = repository_identity(url)
+            if provider == "gitlab" and self.config.get("upstream_repo", "") in (
+                "",
+                identity,
+            ):
+                self.config.update(
+                    provider=provider,
+                    host=identity.split("/", 1)[0],
+                    upstream_repo=identity,
+                )
 
     @property
     def primary(self):
@@ -159,6 +188,7 @@ class Repo:
                 self.state = json.loads(self.state_path.read_text())
                 self.config = self.state["config"]
                 self.branches = self.state["branches"]
+                self._infer_provider()
             yield
 
     def oid(self, ref):
@@ -297,7 +327,7 @@ class Repo:
             return selector
         if selector and "rwgk/" + selector in self.branches:
             return "rwgk/" + selector
-        if selector and re.fullmatch(r"pr[1-9][0-9]*", selector):
+        if selector and re.fullmatch(r"(?:pr|mr)[1-9][0-9]*", selector):
             candidates = [
                 name
                 for name, row in self.branches.items()
@@ -420,7 +450,12 @@ class Repo:
             if upstream in remotes
             else ""
         )
-        repository = options.get("repo") or github_repository(url)
+        provider, inferred = repository_identity(url)
+        repository = options.get("repo") or inferred
+        if provider == "gitlab" and options.get("repo") and repository != inferred:
+            raise WTError(
+                "Explicit GitLab repository must match the upstream endpoint's host/project identity."
+            )
         defaults_path = Path(
             os.environ.get(
                 "RWGK_WT_DEFAULTS",
@@ -486,6 +521,8 @@ class Repo:
                 .absolute()
             ),
         )
+        if provider == "gitlab":
+            self.config.update(provider=provider, host=repository.split("/", 1)[0])
         self.save()
         return self.config
 
