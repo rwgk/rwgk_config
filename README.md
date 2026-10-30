@@ -471,6 +471,29 @@ could be archived safely. After inspecting that work, use the deliberate
 retirement commands below. Command availability does not authorize applying
 cleanup or changing remotes; preview and apply within the requested scope.
 
+### Guard accidental Git pushes
+
+Managed development and review worktrees use `wt push` for an associated independent
+PR/MR, and `wt publish` for new owned work or stack publication. A pre-push guard
+rejects raw `git push` from these worktrees and explicit pushes of managed branch
+refs from another checkout. The error names the appropriate `wt` command. This
+prevents Git's default push destination from creating a branch named after a local
+review checkout.
+
+`wt` installs the guard during registration and normal mutating commands. Run
+`wt init` in an already registered repository to install it explicitly. Existing
+pre-push hooks are preserved and still receive their original arguments and input;
+`core.hooksPath`, remotes, and Git branch tracking are unchanged. The primary trunk
+keeps its existing push behavior. A tracked custom hook needs deliberate integration
+rather than automatic modification of maintained source.
+
+Validated `wt` pushes receive a permit only for that push's exact ref updates;
+other hooks, including existing dirty-tree and protected-branch rules, still run.
+For deliberate raw-Git recovery after inspecting the destination and refs, the
+single-command override is `RWGK_WT_ALLOW_RAW_PUSH=1 git push <remote> <refspec>`.
+It bypasses only this guard and grants no authorization for remote changes. Avoid
+exporting the override or using `--no-verify`, which skips other hook checks too.
+
 ### Retire work and recover it
 
 ```bash

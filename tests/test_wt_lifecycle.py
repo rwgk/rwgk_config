@@ -666,13 +666,13 @@ class LifecycleTests(unittest.TestCase):
             "upstream",
             replacement + ":refs/heads/concurrent-fixture",
         )
-        original = self.repo.git
+        original = self.repo.run
 
-        def race(*args, **kwargs):
+        def race(argv, **kwargs):
             if (
-                args
-                and args[0] == "push"
-                and any(arg == ":refs/heads/" + self.branch for arg in args)
+                argv[0] == "git"
+                and "push" in argv
+                and ":refs/heads/" + self.branch in argv
             ):
                 self.git(
                     "update-ref",
@@ -681,10 +681,10 @@ class LifecycleTests(unittest.TestCase):
                     self.tip,
                     cwd=self.upstream,
                 )
-            return original(*args, **kwargs)
+            return original(argv, **kwargs)
 
         with (
-            mock.patch.object(self.repo, "git", side_effect=race),
+            mock.patch.object(self.repo, "run", side_effect=race),
             self.assertRaises(core.WTError),
         ):
             lifecycle.retire(self.repo, self.branch, apply=True)

@@ -80,6 +80,7 @@ class CleanupOutputTests(unittest.TestCase):
         with (
             patch.object(cli, "Repo", return_value=self.repo),
             patch.object(cli, "_dispatch", return_value=(result, self.repo.primary)),
+            patch("rwgk_wt.push_guard.install"),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
@@ -338,6 +339,7 @@ class HousekeepingOutputTests(unittest.TestCase):
         with (
             patch.object(cli, "Repo", return_value=self.repo),
             patch.object(cli, "_dispatch", return_value=(value, self.repo.primary)),
+            patch("rwgk_wt.push_guard.install"),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):

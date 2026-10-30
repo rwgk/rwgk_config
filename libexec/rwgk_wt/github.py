@@ -351,6 +351,18 @@ def _git_result(repo, *args, c_locale=False):
     return repo.run(command, check=False)
 
 
+def _push_result(repo, *args, destination, updates, c_locale=False):
+    """Authorize only the exact Git push after its caller's normal preflight."""
+    from . import push_guard
+
+    command = ["git", "-C", str(repo.root), *args]
+    if c_locale:
+        command = ["env", "LC_ALL=C", *command]
+    return push_guard.run(
+        repo, command, destination=destination, updates=updates, check=False
+    )
+
+
 def _ancestor(repo, old, new):
     result = _git_result(repo, "merge-base", "--is-ancestor", old, new)
     if result.returncode not in (0, 1):
@@ -1144,18 +1156,35 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
     )
     command.append(push_url)
     command.extend(f"{item['oid']}:{item['ref']}" for item in entries)
+    push_updates = [
+        {"ref": item["ref"], "old": item["old"], "new": item["oid"]} for item in entries
+    ]
     if native_base is not None and any(item["force"] for item in entries):
         # Let GitHub preserve approvals for a native-stack rebase whose diff did
         # not change, preserving any configured push options. Only an
         # unsupported-option error permits a retry, using
         # the identical atomic ref update and independently inspected leases.
-        pushed = _git_result(
-            repo, "-c", "push.pushOption=pull.stacked", *command, c_locale=True
+        pushed = _push_result(
+            repo,
+            "-c",
+            "push.pushOption=pull.stacked",
+            *command,
+            destination=push_url,
+            updates=push_updates,
+            c_locale=True,
         )
         if pushed.returncode and "does not support push options" in pushed.stderr:
-            pushed = _git_result(repo, *command, c_locale=True)
+            pushed = _push_result(
+                repo,
+                *command,
+                destination=push_url,
+                updates=push_updates,
+                c_locale=True,
+            )
     else:
-        pushed = _git_result(repo, *command)
+        pushed = _push_result(
+            repo, *command, destination=push_url, updates=push_updates
+        )
     if pushed.returncode:
         raise WTError(
             "Publication push failed. Fixed leases were not refreshed; inspect remote refs/authentication before retrying."

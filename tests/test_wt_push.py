@@ -319,7 +319,7 @@ class PushTests(unittest.TestCase):
         repo = self.pair()
         self.commit(repo)
         old = git(self.remotes["contributor"], "rev-parse", "topic")
-        original = github._git_result
+        original = github._push_result
 
         def rewind_before_push(target, *args, **kwargs):
             if "push" in args:
@@ -333,7 +333,7 @@ class PushTests(unittest.TestCase):
             return original(target, *args, **kwargs)
 
         with (
-            mock.patch.object(github, "_git_result", side_effect=rewind_before_push),
+            mock.patch.object(github, "_push_result", side_effect=rewind_before_push),
             self.assertRaisesRegex(WTError, "changed during push.*wt pull"),
         ):
             pr_push.push(repo)
@@ -346,7 +346,7 @@ class PushTests(unittest.TestCase):
         repo = self.pair()
         old = repo.oid("HEAD")
         self.commit(repo)
-        original = github._git_result
+        original = github._push_result
 
         def deny_push(target, *args, **kwargs):
             if "push" in args:
@@ -356,7 +356,7 @@ class PushTests(unittest.TestCase):
             return original(target, *args, **kwargs)
 
         with (
-            mock.patch.object(github, "_git_result", side_effect=deny_push),
+            mock.patch.object(github, "_push_result", side_effect=deny_push),
             self.assertRaisesRegex(WTError, "Allow edits from maintainers"),
         ):
             pr_push.push(repo)

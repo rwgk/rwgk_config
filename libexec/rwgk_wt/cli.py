@@ -651,6 +651,10 @@ def main(argv=None):
         import contextlib
 
         with contextlib.nullcontext() if readonly else repo.locked():
+            if not readonly and args.command != "init":
+                from .push_guard import install
+
+                install(repo)
             value, path = _dispatch(repo, args)
         if print_path:
             if path is None:

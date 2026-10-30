@@ -23,6 +23,18 @@ def _git(repo, *args, cwd=None):
     return repo.git(*args, cwd=cwd or repo.primary)
 
 
+def _push(repo, *args, destination, updates):
+    from . import push_guard
+
+    return push_guard.run(
+        repo,
+        ["git", "push", "--no-follow-tags", "--recurse-submodules=no", *map(str, args)],
+        destination=destination,
+        updates=updates,
+        cwd=repo.primary,
+    )
+
+
 def _git_result(repo, *args, cwd=None):
     return repo.run(["git", *map(str, args)], cwd=cwd or repo.primary, check=False)
 
@@ -245,13 +257,14 @@ def _pin(repo, snapshots, pr=None, destination=None, *, on_archive=None):
                     on_archive(existing, created=False)
                 continue
             # Empty expected value means creation only. Never move an existing tag.
-            _git(
+            _push(
                 repo,
-                "push",
                 f"--force-with-lease={ref}:",
                 "--",
                 actual_url,
                 f"{oid}:{ref}",
+                destination=actual_url,
+                updates=[{"ref": ref, "old": None, "new": oid}],
             )
         if _remote_tip(repo, actual_url, ref) != oid:
             raise WTError(f"Remote archive verification failed for {ref}")
@@ -823,13 +836,14 @@ def _apply_retirement_locked(repo, record):
                     "Archive ref disappeared or changed; refusing source deletion"
                 )
         if current:
-            _git(
+            _push(
                 repo,
-                "push",
                 f"--force-with-lease={source['ref']}:{source['oid']}",
                 "--",
                 source["url"],
                 f":{source['ref']}",
+                destination=source["url"],
+                updates=[{"ref": source["ref"], "old": source["oid"], "new": None}],
             )
         record.setdefault("remote_actions", []).append(
             {

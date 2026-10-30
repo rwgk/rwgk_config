@@ -100,6 +100,9 @@ def run_command(argv, *, cwd=None, check=True, input=None):
         if key.startswith("GIT_") and key not in ("GIT_SSH_COMMAND", "GIT_SSH"):
             env.pop(key)
     env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1", GH_PAGER="cat")
+    from .push_guard import subprocess_env
+
+    env = subprocess_env(argv, env)
     try:
         result = subprocess.run(
             list(map(str, argv)),
@@ -454,6 +457,9 @@ class Repo:
                 raise WTError(
                     "Repository is already registered; edit its explicit configuration deliberately."
                 )
+            from .push_guard import install
+
+            install(self)
             return self.config
         trees = self.worktrees()
         primary = Path(trees[0]["path"]).resolve()
@@ -540,6 +546,9 @@ class Repo:
         if provider == "gitlab":
             self.config.update(provider=provider, host=repository.split("/", 1)[0])
         self.save()
+        from .push_guard import install
+
+        install(self)
         return self.config
 
     def trunk_update(self):

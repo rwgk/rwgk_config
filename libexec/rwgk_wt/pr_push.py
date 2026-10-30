@@ -199,7 +199,7 @@ def push(repo):
     if not unchanged:
         # The ancestry proof permits only fast-forward history. Its fixed lease
         # additionally rejects a concurrent remote update, including a rewind.
-        result = github._git_result(
+        result = github._push_result(
             repo,
             "-c",
             "push.autoSetupRemote=false",
@@ -210,6 +210,8 @@ def push(repo):
             f"--force-with-lease={ref}:{old}",
             endpoint,
             f"{oid}:{ref}",
+            destination=endpoint,
+            updates=[{"ref": ref, "old": old, "new": oid}],
             c_locale=True,
         )
         if result.returncode:
