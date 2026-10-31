@@ -10,7 +10,7 @@ function assertIcon(h, state, kind = "reviews") {
   assert.equal(h.icon().href, `chrome-extension://test/icons/${kind}-${state}.svg`);
 }
 
-function harness(initialState = { status: "ok", count: 3, message: "" }, initialUrl = core.URLS.reviews) {
+function harness(initialState = { status: "ok", count: 3, message: "" }, initialUrl = core.URLS.reviews, readDocument = null) {
   const { document } = parseHTML('<!doctype html><html><head><title>GitHub original title</title><link rel="icon" href="original.svg"></head><body><main></main></body></html>');
   let timestamp = 1000;
   let state = initialState;
@@ -56,7 +56,7 @@ function harness(initialState = { status: "ok", count: 3, message: "" }, initial
     },
   } };
   const controller = createController(document, window, chrome, {
-    ...core, readDocument: () => ({ ...state }),
+    ...core, readDocument: readDocument || (() => ({ ...state })),
   });
   return {
     document, window, reports, timers, controller, documentListeners,
@@ -100,22 +100,22 @@ test("content shows a queue-specific red badge for nonempty and green for verifi
 });
 
 for (const kind of core.KINDS) {
-  for (const count of [...Array.from({ length: 11 }, (_, i) => i), 99, Number.MAX_SAFE_INTEGER]) {
+  for (const count of [0, 1, 9, 10, 24, 25, 26, 100]) {
     test(`${kind}: verified count ${count} uses the correct queue-specific badge`, () => {
       const h = harness({ status: "ok", count, message: "" }, core.URLS[kind]);
-      const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
+      const icon = count === 0 ? "clear" : count <= 25 ? `count-${count}` : "count-overflow";
       assertIcon(h, icon, kind);
       h.controller.dispose();
     });
   }
 
-  test(`${kind}: count transitions preserve the queue identity across one-digit, ten-plus, and zero boundaries`, () => {
+  test(`${kind}: count transitions preserve the queue identity across two digits, overflow, and zero`, () => {
     const h = harness({ status: "ok", count: 8, message: "" }, core.URLS[kind]);
     assertIcon(h, "count-8", kind);
-    for (const count of [9, 10, 11, 1, 0]) {
+    for (const count of [9, 10, 24, 25, 26, 25, 0]) {
       h.setState({ status: "ok", count, message: "" });
       h.controller.check();
-      const icon = count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`;
+      const icon = count === 0 ? "clear" : count <= 25 ? `count-${count}` : "count-overflow";
       assertIcon(h, icon, kind);
       assert.equal(h.reports.at(-1).state.count, count);
       assert.equal(h.reports.at(-1).kind, kind);
@@ -123,6 +123,33 @@ for (const kind of core.KINDS) {
     h.controller.dispose();
   });
 }
+
+test("25 exact notification threads show 25, while the same 25 with Next show the overflow badge", () => {
+  const h = harness(undefined, core.URLS.notifications, core.readDocument);
+  const login = h.document.createElement("meta");
+  login.setAttribute("name", "user-login");
+  login.setAttribute("content", "example-user");
+  h.document.head.appendChild(login);
+  h.document.querySelector("main").innerHTML = `<ul class="js-notifications-list">${'<li class="notifications-list-item"></li>'.repeat(25)}</ul>`;
+  h.controller.check();
+  assertIcon(h, "count-25", "notifications");
+  assert.equal(h.reports.at(-1).state.count, 25);
+  assert.notEqual(h.reports.at(-1).state.countIsLowerBound, true);
+  const next = h.document.createElement("a");
+  next.setAttribute("rel", "next");
+  next.setAttribute("href", "/notifications?page=2");
+  next.textContent = "Next";
+  h.document.querySelector("main").appendChild(next);
+  h.controller.check();
+  assertIcon(h, "count-overflow", "notifications");
+  assert.equal(h.reports.at(-1).state.count, 25);
+  assert.equal(h.reports.at(-1).state.countIsLowerBound, true);
+  next.remove();
+  h.controller.check();
+  assertIcon(h, "count-25", "notifications");
+  assert.notEqual(h.reports.at(-1).state.countIsLowerBound, true);
+  h.controller.dispose();
+});
 
 test("all four watched queues independently display their own counts", () => {
   const kinds = ["reviews", "approved", "mentions", "notifications"];
@@ -142,10 +169,10 @@ test("all four watched queues independently display their own counts", () => {
 });
 
 for (const kind of core.KINDS) {
-  for (const count of [0, 1, 9, 10]) {
+  for (const count of [0, 25, 26]) {
     test(`${kind}: stale count ${count} becomes amber without losing queue identity, then recovers`, () => {
       const h = harness({ status: "ok", count, message: "" }, core.URLS[kind]);
-      assertIcon(h, count === 0 ? "clear" : `count-${count < 10 ? count : "x"}`, kind);
+      assertIcon(h, count === 0 ? "clear" : count <= 25 ? `count-${count}` : "count-overflow", kind);
       h.advance(core.STALE_MS);
       h.interval();
       assertIcon(h, "error", kind);
@@ -153,7 +180,7 @@ for (const kind of core.KINDS) {
       assert.match(h.reports.at(-1).state.message, /stale/i);
       h.setState({ status: "ok", count: count + 1, message: "" });
       h.controller.check();
-      assertIcon(h, `count-${count + 1 < 10 ? count + 1 : "x"}`, kind);
+      assertIcon(h, count + 1 <= 25 ? `count-${count + 1}` : "count-overflow", kind);
       assert.equal(h.reports.at(-1).kind, kind);
       h.controller.dispose();
     });

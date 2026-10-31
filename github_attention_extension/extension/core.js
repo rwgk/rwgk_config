@@ -12,6 +12,7 @@
   const REFRESH_MINUTES = 2;
   const STALE_MS = 6 * 60 * 1000;
   const ACTIVE_IDLE_MS = 60 * 1000;
+  const MAX_BADGE_COUNT = 25;
 
   function sameTokens(query, expected) {
     const tokens = String(query || "").trim().toLowerCase().split(/\s+/).sort();
@@ -113,11 +114,13 @@
         control.classList.contains("next_page") || /\b(next|older|load more)\b/i.test(label);
     });
     // Small numbers must not imply an exact total if another page is known to
-    // exist. Once ten rows are proven, the favicon's X is a safe lower bound.
-    if (hasMore && rows.length < 10) return error("More notification pages exist; a count below ten could not be verified.");
+    // exist. A full 25-item page with more results can safely show overflow.
+    if (hasMore && rows.length < MAX_BADGE_COUNT) return error("More notification pages exist; a count below 25 could not be verified.");
     if (rows.length) {
       const scope = kind === "reviews" ? "review-request" : kind === "mentions" ? "mention" : "inbox";
-      return ok(rows.length, `${hasMore ? "At least " : ""}${rows.length} ${scope} threads shown on the first page; read and unread, until Done.`);
+      const state = ok(rows.length, `${hasMore ? "At least " : ""}${rows.length} ${scope} threads shown on the first page; read and unread, until Done.`);
+      if (hasMore) state.countIsLowerBound = true;
+      return state;
     }
     // Empty is accepted only from a specific empty-state panel in the notifications
     // page, never from absent rows, generic body text, or the global inbox badge.
@@ -140,7 +143,7 @@
     return kind === "approved" ? readApproved(document) : readNotifications(document, kind);
   }
 
-  const api = {KINDS, URLS, REFRESH_MINUTES, STALE_MS, ACTIVE_IDLE_MS, classifyUrl, readDocument};
+  const api = {KINDS, URLS, REFRESH_MINUTES, STALE_MS, ACTIVE_IDLE_MS, MAX_BADGE_COUNT, classifyUrl, readDocument};
   root.GitHubAttention = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })(globalThis);

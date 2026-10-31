@@ -22,7 +22,7 @@ assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self
 assert.deepEqual(Object.keys(KIND_GLYPHS), core.KINDS, "Every queue must have an icon glyph.");
 assert.deepEqual(Object.values(KIND_GLYPHS), ["R", "A", "M", "*"], "Queue glyphs must follow priority order.");
 const iconFiles = core.KINDS.flatMap((kind) => ICON_STATES.map((state) => `${kind}-${state}.svg`));
-assert.equal(iconFiles.length, 48, "Every queue must have clear, error, and ten count icons.");
+assert.equal(iconFiles.length, core.KINDS.length * (core.MAX_BADGE_COUNT + 3), "Every queue must have clear, error, exact-count, and overflow icons.");
 assert.deepEqual(fs.readdirSync(path.join(root, "icons")).sort(), [...iconFiles].sort(), "Packaged icons must match the queue/state matrix exactly.");
 for (const file of [manifest.background.service_worker, manifest.action.default_popup, ...manifest.content_scripts[0].js, "popup.js", "popup.css", ...iconFiles.map((icon) => `icons/${icon}`)]) {
   assert.ok(fs.statSync(path.join(root, file)).isFile(), `Missing manifest/UI resource: ${file}`);
@@ -35,7 +35,7 @@ for (const kind of core.KINDS) {
     const queueGlyphs = [...svg.matchAll(/<text\b[^>]*\bid="queue-glyph"[^>]*>([^<]*)<\/text>/g)].map((match) => match[1]);
     assert.deepEqual(queueGlyphs, [KIND_GLYPHS[kind]], `Wrong queue glyph in ${icon}`);
     const badgeGlyphs = [...svg.matchAll(/<text\b[^>]*\bid="badge-glyph"[^>]*>([^<]*)<\/text>/g)].map((match) => match[1]);
-    const badgeGlyph = state === "error" ? "!" : state === "count-x" ? "X" : state.slice("count-".length);
+    const badgeGlyph = state === "error" ? "!" : state === "count-overflow" ? "**" : state.slice("count-".length);
     assert.deepEqual(badgeGlyphs, state === "clear" ? [] : [badgeGlyph], `Wrong badge glyph in ${icon}`);
     assert.ok(!/<script\b|<foreignObject\b|(?:href|src)\s*=|\bon\w+\s*=|\burl\s*\(/i.test(svg), `Icon must be self-contained: ${icon}`);
   }

@@ -23,7 +23,7 @@
     let badge = null;
 
     function send(state) {
-      const signature = JSON.stringify([currentKind, state.status, state.count, state.message]);
+      const signature = JSON.stringify([currentKind, state.status, state.count, state.message, state.countIsLowerBound === true]);
       if (signature === lastReport) return;
       lastReport = signature;
       try {
@@ -54,7 +54,7 @@
       // count elsewhere, but must never make an unverified queue look current.
       const verified = state.status === "ok" && Number.isSafeInteger(state.count) && state.count >= 0;
       const icon = !verified ? "error" : state.count === 0 ? "clear"
-        : `count-${state.count < 10 ? state.count : "x"}`;
+        : `count-${state.count <= core.MAX_BADGE_COUNT && !state.countIsLowerBound ? state.count : "overflow"}`;
       // Each packaged icon keeps this queue's letter visible under its badge.
       const href = chrome.runtime.getURL(`icons/${currentKind}-${icon}.svg`);
       if (!badge || !badge.isConnected) {
@@ -98,7 +98,7 @@
           state = { status: "error", count: null, message: "Could not read this GitHub page." };
         }
       }
-      const readSignature = JSON.stringify([state.status, state.count, state.message]);
+      const readSignature = JSON.stringify([state.status, state.count, state.message, state.countIsLowerBound === true]);
       if (state.status === "ok" && readSignature !== lastRead) lastVerifiedAt = now();
       lastRead = readSignature;
       if (!changedDocumentRoute && state.status !== "ok" && now() - beganAt < GRACE_MS) {

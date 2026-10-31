@@ -116,26 +116,45 @@ test("a hidden or stale blankslate cannot hide nonempty sibling groups", () => {
   assert.equal(core.readDocument(doc, "notifications").count, 5);
 });
 
-test("pagination below ten is unknown, while ten proven rows safely show X", () => {
+test("pagination below 25 is unknown, while 25 or more visible rows are explicitly lower bounds", () => {
+  const pagination = '<a rel="next" href="/notifications?page=2">Next</a>';
+  for (const count of [0, 24, 25, 26]) {
+    const doc = page(`<div class="js-notifications-list">${rows(count)}<div class="blankslate"><h3>No notifications</h3></div></div>${pagination}`);
+    const result = core.readDocument(doc, "notifications");
+    if (count < 25) {
+      assert.equal(result.status, "error");
+      assert.equal(result.count, null);
+    } else {
+      assert.equal(result.status, "ok");
+      assert.equal(result.count, count);
+      assert.equal(result.countIsLowerBound, true);
+      assert.match(result.message, /At least/);
+    }
+  }
+});
+
+test("supported next-page controls mark 25 visible notification threads as a lower bound", () => {
   for (const pagination of [
     '<a rel="next" href="/notifications?page=2">Next</a>',
     '<div class="paginate-container"><a href="/notifications?after=cursor">Older</a></div>',
     '<div class="pagination"><button aria-label="Next page">→</button></div>',
     '<button class="next_page">Load more</button>',
   ]) {
-    for (const kind of notificationKinds) {
-      for (const count of [0, 1, 9]) {
-        const doc = page(`<div class="js-notifications-list">${rows(count)}<div class="blankslate"><h3>No notifications</h3></div></div>${pagination}`);
-        const result = core.readDocument(doc, kind);
-        assert.equal(result.status, "error");
-        assert.equal(result.count, null);
-      }
-      for (const count of [10, 25]) {
-        const result = core.readDocument(page(`<div class="js-notifications-list">${rows(count)}</div>${pagination}`), kind);
-        assert.equal(result.count, count);
-        assert.match(result.message, /At least/);
-      }
-    }
+    const result = core.readDocument(page(`<div class="js-notifications-list">${rows(25)}</div>${pagination}`), "notifications");
+    assert.equal(result.status, "ok");
+    assert.equal(result.count, 25);
+    assert.equal(result.countIsLowerBound, true);
+  }
+});
+
+test("unpaginated notification counts remain exact on both sides of the badge limit", () => {
+  assert.equal(core.MAX_BADGE_COUNT, 25);
+  for (const count of [24, 25, 26]) {
+    const result = core.readDocument(page(`<div class="js-notifications-list">${rows(count)}</div>`), "notifications");
+    assert.equal(result.status, "ok");
+    assert.equal(result.count, count);
+    assert.notEqual(result.countIsLowerBound, true);
+    assert.doesNotMatch(result.message, /At least/);
   }
 });
 
