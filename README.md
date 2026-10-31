@@ -257,7 +257,9 @@ uncommitted files are not included in a push.
 Use `wt pull` instead of `git pull` in an independent PR worktree. It reports
 the PR and full resulting commit hash, follows rewritten PR history with recovery
 records when no local work would be lost, and stops on divergence. Local commits
-ahead of the PR are kept. `wt pull --rebase` explicitly replays local commits on
+ahead of the PR are kept. When adopting rewritten history, it explicitly reports
+the rewrite, previous full commit hash, and recovery record path.
+`wt pull --rebase` explicitly replays local commits on
 the fetched PR head, preserving the old tip first. It uses the recorded replay
 boundary to distinguish local contributions from the author's old history after
 a rewrite. Merely resuming `wt pr` does not advance that boundary.

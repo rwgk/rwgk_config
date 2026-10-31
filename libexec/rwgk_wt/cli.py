@@ -591,6 +591,8 @@ def _display(args, value, repo=None):
             action = "Aborted pull rebase for"
         elif value["result"] == "rebased":
             action = "Rebased local commits onto"
+        elif value["result"] == "rewritten":
+            action = "Adopted rewritten history from"
         elif value["oid"] != value["pr"]["head_oid"]:
             action = "Kept local commits ahead of"
         elif value["oid"] == value["previous_oid"]:
@@ -602,6 +604,8 @@ def _display(args, value, repo=None):
         print(
             f"{action} {prefix.upper()} {marker}{value['pr']['number']}: {value['branch']}"
         )
+        if value["result"] == "rewritten":
+            print(f"Previous HEAD {value['previous_oid']}")
         if value.get("recovery_record"):
             recovery = lifecycle._backtracking_dir(repo) / (
                 value["recovery_record"] + ".json"

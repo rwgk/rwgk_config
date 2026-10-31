@@ -568,9 +568,15 @@ def _manual_review_pair(repo, branch, path, metadata, pr):
 
 def open_pr(repo, selector, refresh=False):
     """Open/resume a PR through its retained upstream ref, including deleted forks."""
+    path, _ = _open_pr(repo, selector, refresh=refresh)
+    return path
+
+
+def _open_pr(repo, selector, refresh=False):
     from . import submodules
 
     manual_review = False
+    recovery_record = None
     noun = request_prefix(config=repo.config).upper()
     number = _pr_selector(repo, selector)
     base_repo = repo.config["upstream_repo"]
@@ -596,7 +602,7 @@ def open_pr(repo, selector, refresh=False):
             if repo.branches[branch].get("creating"):
                 path = repo.create(branch, branch, role=role)
             _associate(repo, branch, pr, role)
-            return Path(path).resolve()
+            return Path(path).resolve(), recovery_record
     else:
         viewer = _viewer(repo)
         own = (
@@ -712,11 +718,12 @@ def open_pr(repo, selector, refresh=False):
                 )
             from .lifecycle import protect_local
 
-            protect_local(
+            recovery = protect_local(
                 repo,
                 [{"oid": local, "label": branch, "branch": branch, "pr": pr}],
                 kind="pr-refresh",
             )
+            recovery_record = recovery["id"]
             repo.ensure_clean(path)
             submodules.validate_update(repo, path, fetched)
             if (
@@ -746,7 +753,7 @@ def open_pr(repo, selector, refresh=False):
         path = repo.create(branch, branch, role=role)
         checked_out = repo.oid(f"refs/heads/{branch}")
     _associate(repo, branch, pr, role, refresh=refresh, checked_out=checked_out)
-    return Path(path).resolve()
+    return Path(path).resolve(), recovery_record
 
 
 def current_pr(repo, *, action="pull"):
@@ -803,9 +810,9 @@ def refresh_current(repo):
     branch, metadata = current_pr(repo)
     pr = metadata["pr"]
     previous = repo.oid(f"refs/heads/{branch}")
-    path = open_pr(repo, pr["number"], refresh=True)
+    path, recovery_record = _open_pr(repo, pr["number"], refresh=True)
     oid = repo.oid(f"refs/heads/{branch}")
-    return {
+    result = {
         "result": "unchanged" if oid == previous else "refreshed",
         "branch": branch,
         "path": str(path),
@@ -813,6 +820,9 @@ def refresh_current(repo):
         "previous_oid": previous,
         "oid": oid,
     }
+    if recovery_record is not None:
+        result.update(result="rewritten", recovery_record=recovery_record)
+    return result
 
 
 def _remote_tip(repo, url, ref):

@@ -247,7 +247,11 @@ def _finish(repo, operation, *, aborted=False):
         if oid == operation["previous_oid"]:
             result = "unchanged"
         elif oid == operation["target_oid"]:
-            result = "refreshed"
+            result = (
+                "refreshed"
+                if github._ancestor(repo, operation["upstream_oid"], oid)
+                else "rewritten"
+            )
         else:
             result = "rebased"
     repo.state.pop("pr_rebase", None)

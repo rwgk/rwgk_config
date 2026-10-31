@@ -319,6 +319,8 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual((status, stderr), (0, ""))
         self.assertIn("Updated from PR #42: rwgk/review-pr42", stdout)
         self.assertIn(f"HEAD {oid}", stdout)
+        self.assertNotIn("rewritten", stdout)
+        self.assertNotIn("Recovery:", stdout)
         self.assertEqual(git(path, "rev-parse", "HEAD"), oid)
         self.assertEqual(git(self.primary, "symbolic-ref", "--short", "HEAD"), "main")
         status, stdout, stderr = self.invoke_pull(path)
@@ -409,9 +411,15 @@ class GitHubTests(unittest.TestCase):
         git(
             self.primary, "push", "--force", "upstream", original + ":refs/pull/42/head"
         )
-        status, _, stderr = self.invoke_pull(path)
+        status, stdout, stderr = self.invoke_pull(path, flags=["--json"])
         self.assertEqual((status, stderr), (0, ""))
         self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+        result = json.loads(stdout)
+        self.assertEqual(result["result"], "rewritten")
+        self.assertEqual((result["previous_oid"], result["oid"]), (advanced, original))
+        recovery = self.root / "backtracking" / (result["recovery_record"] + ".json")
+        record = json.loads(recovery.read_text())
+        self.assertEqual(record["snapshots"][0]["oid"], advanced)
         self.assertIn(
             advanced,
             git(
@@ -1256,7 +1264,7 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(
             self.repo.branches["rwgk/review-pr42"]["last_checked_out_head"], old
         )
-        status, _, stderr = self.invoke_pull(path)
+        status, stdout, stderr = self.invoke_pull(path)
         self.assertEqual((status, stderr), (0, ""))
         self.assertEqual(git(path, "rev-parse", "HEAD"), new)
         self.assertEqual(git(path, "status", "--porcelain"), "")
@@ -1266,6 +1274,21 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(old, refs.splitlines())
         records = list((self.root / "backtracking").glob("*.json"))
         self.assertEqual(len(records), 1)
+        self.assertEqual(
+            stdout.splitlines(),
+            [
+                "Adopted rewritten history from PR #42: rwgk/review-pr42",
+                f"Previous HEAD {old}",
+                f"Recovery: {records[0].resolve()}",
+                f"HEAD {new}",
+                "https://github.com/Acme/project/pull/42",
+            ],
+        )
+        status, stdout, stderr = self.invoke_pull(path)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Already up to date with PR #42", stdout)
+        self.assertNotIn("rewritten", stdout)
+        self.assertNotIn("Recovery:", stdout)
 
     def test_review_refresh_preserves_additional_local_commits(self):
         source = self.branch("rwgk/source")

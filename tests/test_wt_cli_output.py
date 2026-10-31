@@ -43,6 +43,80 @@ class RequestCommandTests(unittest.TestCase):
                 repo.locked.assert_not_called()
 
 
+class PullOutputTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = SimpleNamespace(
+            config={"backtracking": "/records"},
+            locked=contextlib.nullcontext,
+        )
+        self.value = {
+            "result": "rewritten",
+            "branch": "rwgk/review-pr42",
+            "path": "/trees/rwgk-review-pr42",
+            "previous_oid": "1" * 40,
+            "oid": "2" * 40,
+            "recovery_record": "project-rewrite",
+            "pr": {
+                "number": 42,
+                "head_oid": "2" * 40,
+                "url": "https://github.com/Acme/project/pull/42",
+            },
+        }
+
+    def invoke(self, flags=()):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, {"MY_GIT_BACKTRACKING_INFO_LOCAL": "/records"}),
+            patch.object(cli, "Repo", return_value=self.repo),
+            patch.object(
+                cli, "_dispatch", return_value=(self.value, Path(self.value["path"]))
+            ),
+            patch("rwgk_wt.push_guard.install"),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = cli.main(["pull", *flags])
+        self.assertEqual((status, stderr.getvalue()), (0, ""))
+        return stdout.getvalue()
+
+    def test_rewrite_reports_previous_head_recovery_and_current_head_for_each_forge(
+        self,
+    ):
+        for provider, noun, marker, branch, url in (
+            (
+                "github",
+                "PR",
+                "#",
+                "rwgk/review-pr42",
+                "https://github.com/Acme/project/pull/42",
+            ),
+            (
+                "gitlab",
+                "MR",
+                "!",
+                "rwgk/review-mr42",
+                "https://gitlab.example/group/project/-/merge_requests/42",
+            ),
+        ):
+            with self.subTest(provider=provider):
+                self.value["branch"] = branch
+                self.value["pr"].update(provider=provider, url=url)
+                self.assertEqual(
+                    self.invoke().splitlines(),
+                    [
+                        f"Adopted rewritten history from {noun} {marker}42: {branch}",
+                        "Previous HEAD " + "1" * 40,
+                        "Recovery: /records/project-rewrite.json",
+                        "HEAD " + "2" * 40,
+                        url,
+                    ],
+                )
+
+    def test_rewrite_machine_output_preserves_recovery_without_human_feedback(self):
+        self.assertEqual(json.loads(self.invoke(["--json"])), self.value)
+        self.assertEqual(self.invoke(["--print-path"]), self.value["path"] + "\n")
+
+
 class CleanupOutputTests(unittest.TestCase):
     def setUp(self):
         self.repo = SimpleNamespace(
