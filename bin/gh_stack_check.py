@@ -321,6 +321,13 @@ class Checker:
         merges = self.git(
             "config", "--get-all", f"branch.{name}.merge", ok=(0, 1)
         ).stdout.splitlines()
+        if not remotes and not merges:
+            self.issue(
+                "info",
+                name,
+                "branch tracking is unset; publication remote checked independently",
+            )
+            return None
         if len(remotes) != 1 or len(merges) != 1:
             self.issue(
                 "violation",

@@ -453,10 +453,23 @@ class StackCheckTests(unittest.TestCase):
         report = self.check(expected=1)
         self.assert_issue(report, "violation", "layer/three")
 
-    def test_missing_tracking_is_a_violation(self) -> None:
-        self.git("branch", "--unset-upstream", "layer/one")
-        report = self.check(expected=1)
-        self.assert_issue(report, "violation", "tracking")
+    def test_untracked_synced_stack_is_valid_and_preserved(self) -> None:
+        for branch in ("layer/one", "layer/two"):
+            self.git("branch", "--unset-upstream", branch)
+        before = self.snapshot()
+        report = self.check("--expect-synced", expected=0)
+        self.assert_issue(report, "info", "tracking is unset")
+        self.assertTrue(all(layer["tracking"] is None for layer in report["layers"]))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_partial_tracking_remains_a_violation(self) -> None:
+        for key in ("remote", "merge"):
+            with self.subTest(missing=key):
+                value = self.git("config", "--get", f"branch.layer/one.{key}")
+                self.git("config", "--unset", f"branch.layer/one.{key}")
+                report = self.check(expected=1)
+                self.assert_issue(report, "violation", "tracking")
+                self.git("config", f"branch.layer/one.{key}", value)
 
     def test_tracking_a_different_branch_is_a_violation(self) -> None:
         self.git("branch", "--set-upstream-to=upstream/main", "layer/one")

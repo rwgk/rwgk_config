@@ -439,7 +439,7 @@ def refresh(repo):
         if not stack:
             raise WTError("Publication lost its local stack association.")
         selected = next(
-            item for item in data["stacks"] if item.get("id") == stack.get("id")
+            item for item in data["stacks"] if item["branches"] == stack["branches"]
         )
         parent = repo.oid(selected["trunk"]["branch"])
         selected["trunk"]["head"] = parent
@@ -558,7 +558,7 @@ def save_native_identity(repo, number, native_id):
             raise WTError("No local stack for the verified GitHub identity.")
         data = catalog(repo)
         selected = next(
-            item for item in data["stacks"] if item.get("id") == current.get("id")
+            item for item in data["stacks"] if item["branches"] == current["branches"]
         )
         if selected.get("number") and selected["number"] != number:
             raise WTError("Local and remote stack numbers disagree.")

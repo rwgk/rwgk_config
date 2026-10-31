@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
+import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -289,6 +292,62 @@ class RetargetTests(unittest.TestCase):
                             ["stack", "rebase", "--accept-base-change", flag]
                         ),
                     )
+
+
+class StackCatalogSelectionTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.common = Path(directory.name)
+        self.unrelated = {
+            "trunk": {"branch": "main", "head": "old-main"},
+            "branches": [
+                {"branch": "rwgk/other", "head": "old-other", "base": "old-base"}
+            ],
+        }
+        current = copy.deepcopy(self.unrelated)
+        current["branches"][0]["branch"] = "rwgk/current"
+        (self.common / "gh-stack").write_text(
+            json.dumps({"schemaVersion": 1, "stacks": [self.unrelated, current]})
+        )
+        heads = {"main": "a" * 40, "rwgk/current": "b" * 40, "rwgk/other": "c" * 40}
+        self.repo = SimpleNamespace(
+            common=self.common,
+            current_branch=lambda: "rwgk/current",
+            oid=heads.__getitem__,
+            branches={
+                "rwgk/current": {
+                    "pr": {
+                        "number": 2,
+                        "url": "https://example.invalid/pull/2",
+                        "state": "OPEN",
+                    }
+                }
+            },
+            run=Mock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+        )
+
+    def test_save_native_identity_selects_current_stack_without_ids(self):
+        result = stacks.save_native_identity(self.repo, 10, 9876)
+        saved = stacks.catalog(self.repo)["stacks"]
+        self.assertEqual(saved[0], self.unrelated)
+        self.assertEqual(result["number"], 10)
+        self.assertEqual(result["id"], "9876")
+        self.assertEqual(saved[1], result)
+
+    def test_refresh_selects_current_stack_without_ids(self):
+        with patch.object(stacks, "_command") as command:
+            result = stacks.refresh(self.repo)
+        saved = stacks.catalog(self.repo)["stacks"]
+        self.assertEqual(saved[0], self.unrelated)
+        self.assertEqual(result["trunk"]["head"], "a" * 40)
+        self.assertEqual(result["branches"][0]["head"], "b" * 40)
+        self.assertEqual(result["branches"][0]["base"], "a" * 40)
+        self.assertEqual(result["branches"][0]["pullRequest"]["number"], 2)
+        command.assert_called_once_with(self.repo, "view", "--json")
+        self.repo.run.assert_called_once_with(
+            ["git", "merge-base", "--is-ancestor", "a" * 40, "b" * 40], check=False
+        )
 
 
 if __name__ == "__main__":
