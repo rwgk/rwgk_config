@@ -101,7 +101,7 @@ wt pull >"$test_root/output"
 [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail 'pull output was hidden'
 
 # Synchronization commands preserve the current directory and all mode flags.
-for mode in --rebase --continue --abort; do
+for mode in --rebase --reset-to-remote-head --continue --abort; do
     wt pull "$mode" >"$test_root/output"
     [[ "$PWD" == "$test_root/from" ]] || fail 'pull mode changed directories'
     [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == "$mode" ]] || fail 'pull mode was altered'

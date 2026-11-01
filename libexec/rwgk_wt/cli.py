@@ -49,6 +49,11 @@ def parser():
     )
     pull_mode = pull.add_mutually_exclusive_group()
     pull_mode.add_argument(
+        "--reset-to-remote-head",
+        action="store_true",
+        help="match the latest PR/MR head exactly, preserving the old tip; requires a clean worktree",
+    )
+    pull_mode.add_argument(
         "--rebase",
         action="store_true",
         help="replay local commits onto the current PR/MR head",
@@ -220,7 +225,9 @@ def _dispatch(repo, args):
         elif args.rebase:
             result = pr_rebase.start(repo)
         else:
-            result = github.refresh_current(repo)
+            result = github.refresh_current(
+                repo, reset_to_remote_head=args.reset_to_remote_head
+            )
         return result, Path(result["path"])
     if command == "push":
         from . import pr_push
@@ -591,6 +598,8 @@ def _display(args, value, repo=None):
             action = "Aborted pull rebase for"
         elif value["result"] == "rebased":
             action = "Rebased local commits onto"
+        elif value["result"] == "reset":
+            action = "Reset local branch to"
         elif value["result"] == "rewritten":
             action = "Adopted rewritten history from"
         elif value["oid"] != value["pr"]["head_oid"]:
@@ -604,7 +613,7 @@ def _display(args, value, repo=None):
         print(
             f"{action} {prefix.upper()} {marker}{value['pr']['number']}: {value['branch']}"
         )
-        if value["result"] == "rewritten":
+        if value["result"] in ("rewritten", "reset"):
             print(f"Previous HEAD {value['previous_oid']}")
         if value.get("recovery_record"):
             recovery = lifecycle._backtracking_dir(repo) / (

@@ -632,6 +632,45 @@ class GitLabTests(GitLabFixture):
         self.assertFalse(self.pushes())
         self.assert_checkouts(repo)
 
+    def test_pull_reset_matches_contributor_mr_and_preserves_role_and_tracking(self):
+        self.contributor_mr()
+        repo = self.open_review()
+        branch = repo.current_branch()
+        source = copy.deepcopy(repo.branches[branch]["associated_source"])
+        (repo.root / "local").write_text("local contribution\n")
+        local = self.commit(repo.root, "Local contribution")
+        (self.source / "remote").write_text("new author contribution\n")
+        self.commit(self.source, "Author update")
+        target = self.update_source()
+        repo.git("config", f"branch.{branch}.remote", "origin")
+        repo.git("config", f"branch.{branch}.merge", "refs/heads/main")
+        tracking = self.tracking(repo)
+        self.api_calls.clear()
+        status, stdout, stderr = self.invoke(repo, ["pull", "--reset-to-remote-head"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Reset local branch to MR !42", stdout)
+        self.assertIn(f"Previous HEAD {local}", stdout)
+        self.assertEqual(stdout.splitlines()[-1], self.mrs[42]["web_url"])
+        self.assertEqual(repo.oid("HEAD"), target)
+        self.assertFalse((repo.root / "local").exists())
+        self.assertEqual(
+            (repo.root / "remote").read_text(), "new author contribution\n"
+        )
+        self.assertEqual(repo.branches[branch]["role"], "review")
+        self.assertEqual(repo.branches[branch]["associated_source"], source)
+        self.assertEqual(repo.branches[branch]["sync_base"]["oid"], target)
+        self.assertNotIn("publication", repo.branches[branch])
+        self.assertEqual(self.tracking(repo), tracking)
+        self.assertIn(
+            local,
+            repo.git(
+                "for-each-ref", "--format=%(objectname)", "refs/rwgk/backtracking"
+            ),
+        )
+        self.assertTrue(all(method == "GET" for method, _, _ in self.api_calls))
+        self.assertFalse(self.pushes())
+        self.assert_checkouts(repo)
+
     def test_pull_rebase_then_push_contribution_uses_actual_fork_without_remote_or_tracking(
         self,
     ):

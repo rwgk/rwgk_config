@@ -572,7 +572,7 @@ def open_pr(repo, selector, refresh=False):
     return path
 
 
-def _open_pr(repo, selector, refresh=False):
+def _open_pr(repo, selector, refresh=False, *, reset_to_remote_head=False):
     from . import submodules
 
     manual_review = False
@@ -694,13 +694,13 @@ def _open_pr(repo, selector, refresh=False):
         repo.ensure_idle(path)
         repo.ensure_clean(path)
         local = repo.oid(f"refs/heads/{branch}")
-        previous = replay_base(repo, branch, pr)
+        previous = None if reset_to_remote_head else replay_base(repo, branch, pr)
         rewritten = (
             previous is not None
             and _ancestor(repo, previous, local)
             and not _ancestor(repo, previous, pr["head_oid"])
         )
-        if _ancestor(repo, local, pr["head_oid"]):
+        if not reset_to_remote_head and _ancestor(repo, local, pr["head_oid"]):
             submodules.validate_update(repo, path, fetched)
             repo.git(
                 "-c",
@@ -710,18 +710,23 @@ def _open_pr(repo, selector, refresh=False):
                 fetched,
                 cwd=path,
             )
-        elif rewritten or not _ancestor(repo, pr["head_oid"], local):
-            if local != previous:
+        elif local != pr["head_oid"] and (
+            reset_to_remote_head
+            or rewritten
+            or not _ancestor(repo, pr["head_oid"], local)
+        ):
+            if not reset_to_remote_head and local != previous:
                 raise WTError(
                     "PR head and local work diverged; run 'wt pull --rebase' "
                     "to replay your local commits onto the current PR head."
                 )
             from .lifecycle import protect_local
 
+            submodules._check_collisions(repo, path, local, pr["head_oid"])
             recovery = protect_local(
                 repo,
                 [{"oid": local, "label": branch, "branch": branch, "pr": pr}],
-                kind="pr-refresh",
+                kind="pr-reset" if reset_to_remote_head else "pr-refresh",
             )
             recovery_record = recovery["id"]
             repo.ensure_clean(path)
@@ -805,12 +810,14 @@ def current_pr(repo, *, action="pull"):
     return branch, metadata
 
 
-def refresh_current(repo):
+def refresh_current(repo, *, reset_to_remote_head=False):
     """Refresh the current independent PR through the same guarded PR-ref path."""
     branch, metadata = current_pr(repo)
     pr = metadata["pr"]
     previous = repo.oid(f"refs/heads/{branch}")
-    path, recovery_record = _open_pr(repo, pr["number"], refresh=True)
+    path, recovery_record = _open_pr(
+        repo, pr["number"], refresh=True, reset_to_remote_head=reset_to_remote_head
+    )
     oid = repo.oid(f"refs/heads/{branch}")
     result = {
         "result": "unchanged" if oid == previous else "refreshed",
@@ -821,7 +828,10 @@ def refresh_current(repo):
         "oid": oid,
     }
     if recovery_record is not None:
-        result.update(result="rewritten", recovery_record=recovery_record)
+        result.update(
+            result="reset" if reset_to_remote_head else "rewritten",
+            recovery_record=recovery_record,
+        )
     return result
 
 

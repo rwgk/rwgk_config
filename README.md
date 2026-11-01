@@ -264,6 +264,21 @@ the fetched PR head, preserving the old tip first. It uses the recorded replay
 boundary to distinguish local contributions from the author's old history after
 a rewrite. Merely resuming `wt pr` does not advance that boundary.
 
+To deliberately replace local commits with the associated PR/MR's latest head:
+
+```bash
+wt pull --reset-to-remote-head
+```
+
+This fetches and verifies the current PR/MR head, preserves the old local tip in
+recovery refs and a backtracking JSON record, then makes the local branch and
+checkout match the fetched head exactly, including when they are ahead or
+have diverged. It requires a clean worktree and retains the normal submodule
+safeguards. The output shows the previous full commit hash, recovery path,
+resulting full hash, and PR/MR URL. Repeating it at the same head reports that it
+is already up to date without creating another recovery record. This mode is
+for independent PRs/MRs; it leaves remote branches and Git tracking unchanged.
+
 Redundant local merges already represented on the incoming PR head can be
 omitted during rebase; this includes independently merging the same main commit
 with identical parents and contents. Other local merges stop for deliberate

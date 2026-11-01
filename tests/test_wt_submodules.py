@@ -226,12 +226,12 @@ class SubmoduleTests(unittest.TestCase):
         self.repo.save()
         return topic, new, pr
 
-    def pull_pr(self, topic, pr, repo=None):
+    def pull_pr(self, topic, pr, repo=None, **options):
         with (
             mock.patch("rwgk_wt.github._checked_remote"),
             mock.patch("rwgk_wt.github.get_pr", return_value=pr),
         ):
-            return github.refresh_current(repo or LocalRepo(topic))
+            return github.refresh_current(repo or LocalRepo(topic), **options)
 
     def interrupt_module_update(self, repo):
         original = repo.run
@@ -282,6 +282,36 @@ class SubmoduleTests(unittest.TestCase):
         self.assert_borrows(self.module(topic), self.primary_module)
         LocalRepo(topic).ensure_clean(topic)
 
+    def test_pr_pull_reset_preserves_local_tip_and_aligns_clean_submodules(self):
+        topic, new, pr = self.prepare_pr_update()
+        (topic / "local").write_text("local contribution\n")
+        self.git(topic, "add", "local")
+        self.git(topic, "commit", "-m", "Local contribution")
+        local = self.git(topic, "rev-parse", "HEAD")
+        module = self.module(topic)
+        (module / "file.txt").write_text("valuable module changes\n")
+        with self.assertRaisesRegex(WTError, "uncommitted"):
+            self.pull_pr(topic, pr, reset_to_remote_head=True)
+        self.assertEqual(self.git(topic, "rev-parse", "HEAD"), local)
+        self.assertEqual((module / "file.txt").read_text(), "valuable module changes\n")
+        self.git(module, "restore", "file.txt")
+        result = self.pull_pr(topic, pr, reset_to_remote_head=True)
+        self.assertEqual(result["result"], "reset")
+        self.assertEqual((result["previous_oid"], result["oid"]), (local, new))
+        self.assertEqual(self.git(module, "rev-parse", "HEAD"), self.b)
+        self.assertFalse((topic / "local").exists())
+        self.assertIn(
+            local,
+            self.git(
+                topic,
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/rwgk/backtracking",
+            ),
+        )
+        self.assert_borrows(module, self.primary_module)
+        LocalRepo(topic).ensure_clean(topic)
+
     def test_pr_pull_keeps_local_ahead_commit_that_adds_initialized_module(self):
         topic, _, pr = self.prepare_pr_update()
         old = self.git(topic, "rev-parse", "HEAD")
@@ -306,6 +336,14 @@ class SubmoduleTests(unittest.TestCase):
         self.assertEqual(self.gitdir(module), module_gitdir)
         self.assertEqual((module / "file.txt").read_text(), "second\n")
         LocalRepo(topic).ensure_clean(topic)
+        with self.assertRaisesRegex(
+            WTError, "removes or replaces initialized submodule"
+        ):
+            self.pull_pr(topic, pr, reset_to_remote_head=True)
+        self.assertEqual(self.git(topic, "rev-parse", "HEAD"), local)
+        self.assertEqual(self.git(module, "rev-parse", "HEAD"), module_head)
+        self.assertEqual(self.gitdir(module), module_gitdir)
+        self.assertEqual((module / "file.txt").read_text(), "second\n")
 
     def test_trunk_update_moves_primary_pin_without_changing_borrower(self):
         remote = self.area / "trunk.git"

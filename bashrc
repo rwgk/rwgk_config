@@ -941,7 +941,7 @@ _wt_complete() {
     elif [[ "$cur" == -* ]]; then
         case "$first" in
         init) words='--key --trunk --upstream --publish --archive --trees --backtracking' ;;
-        pull) words='--rebase --continue --abort' ;;
+        pull) words='--rebase --reset-to-remote-head --continue --abort' ;;
         publish) words='--stack --title --body-file --ready' ;;
         clean) words='--apply --archive-local --discard-builds --resume' ;;
         housekeeping) words='--apply --discard-builds' ;;

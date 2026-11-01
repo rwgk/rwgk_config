@@ -340,6 +340,177 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(f"HEAD {local}", stdout)
         self.assertEqual((path / "valuable").read_text(), "local contribution\n")
 
+    def test_pull_reset_preserves_local_tip_before_moving_without_replay_boundary(self):
+        path = self.review_pair()
+        branch = "rwgk/review-pr42"
+        target = git(path, "rev-parse", "HEAD")
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local review work")
+        local = git(path, "rev-parse", "HEAD")
+        for field in ("sync_base", "last_checked_out_head"):
+            self.repo.branches[branch].pop(field)
+        self.repo.save()
+        git(path, "config", f"branch.{branch}.remote", "origin")
+        git(path, "config", f"branch.{branch}.merge", "refs/heads/main")
+        before_tracking = git(path, "config", "--get-regexp", r"^branch\.")
+        original_run = FixtureRepo.run
+        observed_reset = []
+
+        def verify_preservation(repo, argv, **kwargs):
+            if list(argv)[:3] == ["git", "update-ref", f"refs/heads/{branch}"]:
+                records = list((self.root / "backtracking").glob("*.json"))
+                self.assertEqual(len(records), 1)
+                snapshot = json.loads(records[0].read_text())["snapshots"][0]
+                self.assertEqual(snapshot["oid"], local)
+                self.assertEqual(repo.oid(snapshot["recovery_ref"]), local)
+                self.assertEqual(git(path, "rev-parse", "HEAD"), local)
+                observed_reset.append(True)
+            return original_run(repo, argv, **kwargs)
+
+        with mock.patch.object(FixtureRepo, "run", verify_preservation):
+            status, stdout, stderr = self.invoke_pull(
+                path, ["--reset-to-remote-head", "--json"]
+            )
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertTrue(observed_reset)
+        value = json.loads(stdout)
+        self.assertEqual(value["result"], "reset")
+        self.assertEqual((value["previous_oid"], value["oid"]), (local, target))
+        record_path = self.root / "backtracking" / (value["recovery_record"] + ".json")
+        self.assertEqual(json.loads(record_path.read_text())["kind"], "pr-reset")
+        self.assertEqual(git(path, "rev-parse", "HEAD"), target)
+        self.assertFalse((path / "valuable").exists())
+        metadata = FixtureRepo(self, path).branches[branch]
+        self.assertEqual(metadata["sync_base"]["oid"], target)
+        self.assertEqual(metadata["role"], "review")
+        self.assertEqual(
+            git(path, "config", "--get-regexp", r"^branch\."), before_tracking
+        )
+        status, stdout, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Already up to date with PR #42", stdout)
+        self.assertNotIn("Recovery:", stdout)
+        self.assertEqual(len(list((self.root / "backtracking").glob("*.json"))), 1)
+        self.assertFalse(self.pushes())
+
+    def test_pull_reset_adopts_latest_pr_head_over_diverged_local_work(self):
+        path = self.review_pair()
+        original = git(path, "rev-parse", "HEAD")
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local contribution")
+        local = git(path, "rev-parse", "HEAD")
+        target = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            original,
+            "-m",
+            "Author update",
+        )
+        self.prs[42]["head"]["sha"] = target
+        git(self.primary, "push", "upstream", target + ":refs/pull/42/head")
+        status, stdout, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(git(path, "rev-parse", "HEAD"), target)
+        self.assertEqual(git(path, "status", "--porcelain"), "")
+        record = next((self.root / "backtracking").glob("*.json"))
+        self.assertEqual(
+            stdout.splitlines(),
+            [
+                "Reset local branch to PR #42: rwgk/review-pr42",
+                f"Previous HEAD {local}",
+                f"Recovery: {record.resolve()}",
+                f"HEAD {target}",
+                "https://github.com/Acme/project/pull/42",
+            ],
+        )
+        self.assertFalse(self.pushes())
+
+    def test_pull_reset_adopts_author_rewind_with_additional_local_commits(self):
+        path = self.review_pair()
+        original, _ = self.advance_review_head(path)
+        (path / "valuable").write_text("local contribution\n")
+        git(path, "add", "valuable")
+        git(path, "commit", "-m", "Local contribution")
+        local = git(path, "rev-parse", "HEAD")
+        self.prs[42]["head"]["sha"] = original
+        git(self.remotes["upstream"], "update-ref", "refs/pull/42/head", original)
+        status, _, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+        self.assertIn(
+            local,
+            git(
+                path, "for-each-ref", "--format=%(objectname)", "refs/rwgk/backtracking"
+            ),
+        )
+
+    def test_pull_reset_refuses_uncommitted_and_untracked_files(self):
+        path = self.review_pair()
+        original = git(path, "rev-parse", "HEAD")
+        for name in ("base", "untracked"):
+            with self.subTest(path=name):
+                artifact = path / name
+                artifact.write_text("valuable uncommitted work\n")
+                status, _, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+                self.assertEqual(status, 1)
+                self.assertIn("uncommitted or untracked", stderr)
+                self.assertEqual(artifact.read_text(), "valuable uncommitted work\n")
+                self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+                if name == "base":
+                    git(path, "restore", "base")
+                else:
+                    artifact.unlink()
+        self.assertEqual(list((self.root / "backtracking").glob("*.json")), [])
+
+    def test_pull_reset_refuses_mismatched_api_and_fetched_heads(self):
+        path = self.review_pair()
+        original = git(path, "rev-parse", "HEAD")
+        self.prs[42]["head"]["sha"] = git(
+            self.primary,
+            "commit-tree",
+            "main^{tree}",
+            "-p",
+            original,
+            "-m",
+            "New API head",
+        )
+        status, _, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+        self.assertEqual(status, 1)
+        self.assertIn("head changed", stderr)
+        self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+        self.assertEqual(list((self.root / "backtracking").glob("*.json")), [])
+
+    def test_pull_reset_preserves_ignored_material_that_incoming_pr_would_track(self):
+        path = self.review_pair()
+        original = git(path, "rev-parse", "HEAD")
+        exclude = Path(
+            git(
+                path,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "info/exclude",
+            )
+        )
+        exclude.write_text(exclude.read_text() + "\nsecret\n")
+        (path / "secret").write_text("valuable local material\n")
+        (self.primary / "secret").write_text("incoming tracked data\n")
+        git(self.primary, "add", "--force", "secret")
+        git(self.primary, "commit", "-m", "Track former ignored path")
+        target = git(self.primary, "rev-parse", "HEAD")
+        self.prs[42]["head"]["sha"] = target
+        git(self.primary, "push", "upstream", target + ":refs/pull/42/head")
+        status, _, stderr = self.invoke_pull(path, ["--reset-to-remote-head"])
+        self.assertEqual(status, 1)
+        self.assertIn("overwrite ignored files", stderr)
+        self.assertEqual((path / "secret").read_text(), "valuable local material\n")
+        self.assertEqual(git(path, "rev-parse", "HEAD"), original)
+        self.assertEqual(list((self.root / "backtracking").glob("*.json")), [])
+
     def test_pull_rebase_cli_replays_local_commit_and_prints_pr_url(self):
         path = self.review_pair()
         original = git(path, "rev-parse", "HEAD")
@@ -462,7 +633,7 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(git(path, "rev-parse", "HEAD"), original)
 
     def test_changed_pr_source_is_refused_on_resume_and_plain_pull(self):
-        self.review_pair()
+        path = self.review_pair()
         original = copy.deepcopy(self.repo.branches["rwgk/review-pr42"])
         for field, value in (
             ("ref", "different-branch"),
@@ -477,6 +648,15 @@ class GitHubTests(unittest.TestCase):
                     ):
                         github.open_pr(self.repo, "42", refresh=refresh)
                     self.assertEqual(self.repo.branches["rwgk/review-pr42"], original)
+                    before = len(self.commands)
+                    status, _, stderr = self.invoke_pull(
+                        path, ["--reset-to-remote-head"]
+                    )
+                    self.assertEqual(status, 1)
+                    self.assertIn("source repository or branch changed", stderr)
+                    self.assertFalse(
+                        any("fetch" in command for command in self.commands[before:])
+                    )
                     self.prs[42] = saved
 
     def test_failed_checkpoint_save_keeps_previous_replay_boundary_reachable(self):
@@ -531,11 +711,13 @@ class GitHubTests(unittest.TestCase):
                 }
             )
         )
-        before = len(self.gh_calls)
-        status, _, stderr = self.invoke_pull(path)
-        self.assertEqual(status, 1)
-        self.assertIn("wt stack pull", stderr)
-        self.assertEqual(len(self.gh_calls), before)
+        for flags in ((), ("--reset-to-remote-head",)):
+            with self.subTest(flags=flags):
+                before = len(self.gh_calls)
+                status, _, stderr = self.invoke_pull(path, flags)
+                self.assertEqual(status, 1)
+                self.assertIn("wt stack pull", stderr)
+                self.assertEqual(len(self.gh_calls), before)
 
     def test_pending_rebase_blocks_writes_and_plain_pull_but_allows_trunk_navigation(
         self,
@@ -548,6 +730,7 @@ class GitHubTests(unittest.TestCase):
         self.repo.save()
         for args in (
             ("pull",),
+            ("pull", "--reset-to-remote-head"),
             ("push",),
             ("publish",),
             ("trunk", "update"),

@@ -116,6 +116,36 @@ class PullOutputTests(unittest.TestCase):
         self.assertEqual(json.loads(self.invoke(["--json"])), self.value)
         self.assertEqual(self.invoke(["--print-path"]), self.value["path"] + "\n")
 
+    def test_reset_reports_previous_head_recovery_and_remote_head(self):
+        self.value["result"] = "reset"
+        self.assertEqual(
+            self.invoke(["--reset-to-remote-head"]).splitlines(),
+            [
+                "Reset local branch to PR #42: rwgk/review-pr42",
+                "Previous HEAD " + "1" * 40,
+                "Recovery: /records/project-rewrite.json",
+                "HEAD " + "2" * 40,
+                "https://github.com/Acme/project/pull/42",
+            ],
+        )
+        self.assertEqual(
+            json.loads(self.invoke(["--reset-to-remote-head", "--json"])), self.value
+        )
+        self.assertEqual(
+            self.invoke(["--reset-to-remote-head", "--print-path"]),
+            self.value["path"] + "\n",
+        )
+
+    def test_reset_cannot_be_combined_with_other_pull_modes(self):
+        for mode in ("--rebase", "--continue", "--abort"):
+            with (
+                self.subTest(mode=mode),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                cli.parser().parse_args(["pull", "--reset-to-remote-head", mode])
+            self.assertEqual(stopped.exception.code, 2)
+
 
 class CleanupOutputTests(unittest.TestCase):
     def setUp(self):

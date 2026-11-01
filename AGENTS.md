@@ -44,6 +44,9 @@ the registered repository's publication destination. Update an associated
 independent PR with `wt push`, including an authorized contribution to another
 author's actual source branch. Use `wt pull --rebase` to replay diverged local
 contributions, then `wt pull --continue` or `wt pull --abort` when needed.
+For a requested reset to the associated PR/MR's latest head, use
+`wt pull --reset-to-remote-head`; it requires a clean worktree and preserves
+replaced local commits in recovery refs and backtracking records.
 `wt publish` retains owned PR creation, metadata changes, history rewrites, and
 stack publication. Neither push nor publication configures Git upstream tracking;
 preserve existing tracking and use `wt`'s association records instead.
