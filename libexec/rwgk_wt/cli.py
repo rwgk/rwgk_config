@@ -91,10 +91,20 @@ def parser():
     name.add_argument("branch")
     codex = commands.add_parser(
         "codex",
-        help="find and resume Codex sessions for the current PR/MR or workspace",
+        help="resume a session nickname, or find sessions for the current PR/MR or workspace",
     )
+    codex.add_argument("nickname", nargs="?", help="exact global session nickname")
+    codex.add_argument("--cwd", help="explicit directory to resume in")
     codex.add_argument(
         "--list", action="store_true", help="list matches without resuming"
+    )
+    nickname = commands.add_parser(
+        "nickname", help="assign, list, or delete global session nicknames"
+    )
+    nickname.add_argument("name", nargs="?")
+    nickname.add_argument("session_id", nargs="?", help="defaults to CODEX_THREAD_ID")
+    nickname.add_argument(
+        "--delete", action="store_true", help="remove only the nickname"
     )
     commands.add_parser("list", help="list managed branch/worktree pairs")
     commands.add_parser("doctor", help="check managed pairs and report legacy work")
@@ -667,15 +677,28 @@ def main(argv=None):
             name = directory_name(args.branch)
             print(json.dumps({"directory": name}) if as_json else name)
             return 0
-        if args.command == "codex":
+        if args.command in ("codex", "nickname"):
             if print_path:
-                raise WTError("wt codex does not produce a navigation path.")
+                raise WTError(f"wt {args.command} does not produce a navigation path.")
             from agent_logbook.cli import main as logbook_main
 
-            options = ["here"]
+            if args.command == "nickname":
+                options = ["nickname"]
+                if args.name is not None:
+                    options.append(args.name)
+                if args.session_id is not None:
+                    options.append(args.session_id)
+                if args.delete:
+                    options.append("--delete")
+            else:
+                options = (
+                    ["resume", args.nickname] if args.nickname is not None else ["here"]
+                )
+                if args.cwd is not None:
+                    options.extend(["--cwd", args.cwd])
             if as_json:
                 options.append("--json")
-            if args.list:
+            if args.command == "codex" and args.list:
                 options.append("--list")
             return logbook_main(options)
         repo = Repo(initialized=args.command != "init")

@@ -25,6 +25,20 @@ When assessing potential side effects of changes in this repo, also inspect `$HO
 
 Fully trust that both `$HOME/rwgk_config/bin` and `$HOME/rwgk_config_nvidia/bin` are on `PATH`.
 
+## Session nicknames
+
+On Ralf's explicit request to name the current Codex session, run
+`git-wt nickname NAME`; it uses the actual `CODEX_THREAD_ID`. To name another
+session, use `git-wt nickname NAME UUID` with its verified UUID. Do not infer a
+session ID from copied conversation history or automatically assign or move
+nicknames when resuming or forking. Reassignment moves only the nickname pointer.
+
+`wt codex NAME` resumes that exact global nickname in its saved directory from
+anywhere; `--cwd PATH` deliberately overrides the directory. `wt codex` without a
+name keeps the current PR/worktree lookup. `wt nickname` lists names, and
+`wt nickname --delete NAME` removes only the pointer. These commands need no Git
+repository or `wt init`; they use the configured shared agent logbook.
+
 ## Managed branches and worktrees
 
 When the repository's only remote is `origin`, edit and commit in the supplied

@@ -36,6 +36,45 @@ launching. No match reports an error instead of silently starting a new session.
 recorded directory when it still exists. A missing directory suppresses automatic
 resume; recreate the worktree or explicitly select `--cwd PATH`.
 
+### Session nicknames
+
+Give a session a short, global name and resume it from any directory:
+
+```bash
+wt nickname wtdesign SESSION_UUID
+wt codex wtdesign
+wt codex wtdesign --list           # inspect without resuming
+wt codex wtdesign --cwd /path/to/worktree
+wt nickname                       # list names and session IDs
+wt nickname --delete wtdesign      # remove the name only
+```
+
+Inside a Codex session, ask its agent to run `git-wt nickname wtdesign`; the
+command gets the current UUID from `CODEX_THREAD_ID`. Outside a session, supply
+the UUID explicitly. Assignment validates the target against the logbook or
+local saved history. Naming an older local session can register its verified
+saved metadata; it does not associate the session with the directory where you
+run the naming command.
+
+Assigning an existing name changes its target and prints the old and new UUIDs.
+Repeating the same assignment is harmless. Forking leaves the name pointing to
+the original session; explicitly reassign it to move it to the fork. Names are
+case-sensitive and use letters, digits, `.`, `_`, and `-`, starting with a letter
+or digit. Completion offers saved nicknames for `wt codex` and `wt nickname`.
+
+`wt codex NAME` resolves the exact nickname and resumes in the session's saved
+directory; `--cwd PATH` explicitly selects another directory. Unknown names fail
+without a topic search or fallback. `wt codex` without a name keeps its current
+PR/worktree lookup. Lookup results also show assigned nicknames. Both forms
+support `--list` and `--json` without launching Codex.
+
+Nicknames live under `nicknames/` in the configured shared logbook directory,
+one private, atomically replaced JSON pointer per name. They work without a Git
+repository or `wt init`. Names are shared wherever that logbook is mounted;
+actual Codex history must still be available on the machine doing the resume.
+Nicknames leave Codex's displayed titles, transcripts, and PR/worktree
+associations unchanged. Deleting a nickname removes only its pointer.
+
 ### Storage and setup
 
 The logbook lives in `$H/agent-logbook` when `H` is set, otherwise

@@ -44,6 +44,52 @@ class WtCodexTests(unittest.TestCase):
         lookup.assert_not_called()
         self.assertIn("navigation path", stderr.getvalue())
 
+    def test_named_resume_and_cwd_delegate_without_repository(self):
+        with (
+            patch.object(cli, "Repo") as repo,
+            patch.object(logbook, "main", return_value=0) as lookup,
+        ):
+            self.assertEqual(
+                cli.main(["codex", "wtdesign", "--cwd", "/chosen", "--list"]), 0
+            )
+        repo.assert_not_called()
+        lookup.assert_called_once_with(
+            ["resume", "wtdesign", "--cwd", "/chosen", "--list"]
+        )
+
+    def test_nickname_operations_delegate_without_repository(self):
+        for arguments, options in (
+            (["nickname"], ["nickname"]),
+            (["nickname", "wtdesign"], ["nickname", "wtdesign"]),
+            (
+                ["nickname", "wtdesign", "session-id", "--json"],
+                ["nickname", "wtdesign", "session-id", "--json"],
+            ),
+            (
+                ["nickname", "--delete", "wtdesign"],
+                ["nickname", "wtdesign", "--delete"],
+            ),
+        ):
+            with (
+                self.subTest(arguments=arguments),
+                patch.object(cli, "Repo") as repo,
+                patch.object(logbook, "main", return_value=0) as lookup,
+            ):
+                self.assertEqual(cli.main(arguments), 0)
+                repo.assert_not_called()
+                lookup.assert_called_once_with(options)
+
+    def test_nickname_print_path_rejected_before_writing(self):
+        with (
+            patch.object(cli, "Repo") as repo,
+            patch.object(logbook, "main") as lookup,
+            contextlib.redirect_stderr(io.StringIO()) as stderr,
+        ):
+            self.assertEqual(cli.main(["nickname", "wtdesign", "--print-path"]), 1)
+        repo.assert_not_called()
+        lookup.assert_not_called()
+        self.assertIn("navigation path", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

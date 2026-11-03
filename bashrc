@@ -936,6 +936,7 @@ _wt_complete() {
     init) values='--key --trunk --upstream --publish --archive --trees --backtracking --repo' ;;
     clean | drop) values='--resume' ;;
     publish) values='--title --body-file' ;;
+    codex) values='--cwd' ;;
     stack) values='--stack' ;;
     esac
     for ((i = 2; i < COMP_CWORD; i++)); do
@@ -965,7 +966,8 @@ _wt_complete() {
     clean) flags='--apply --archive-local --discard-builds --resume' ;;
     housekeeping) flags='--apply --discard-builds' ;;
     drop) flags='--local-only --apply --archive-local --discard-builds --resume' ;;
-    codex) flags='--list' ;;
+    codex) flags='--list --cwd' ;;
+    nickname) flags='--delete' ;;
     stack)
         case "$subcommand" in
         pull) flags='--stack --apply' ;;
@@ -973,11 +975,25 @@ _wt_complete() {
         esac
         ;;
     esac
-    flags="$flags --help --json --print-path"
+    flags="$flags --help --json"
+    case "$first" in
+    codex | nickname) ;;
+    *) flags="$flags --print-path" ;;
+    esac
     if [[ "$COMP_CWORD" -eq 1 ]]; then
-        words='init new pr mr pull push go list trunk stack publish clean drop housekeeping restore doctor path name codex --help'
+        words='init new pr mr pull push go list trunk stack publish clean drop housekeeping restore doctor path name codex nickname --help'
     elif [[ "$cur" == -* ]]; then
         words="$flags"
+    elif [[ "$first" == codex || "$first" == nickname ]]; then
+        if ((positional)); then
+            words="$flags"
+        else
+            words=$(command git-wt nickname --json 2>/dev/null | python -c '
+import json, sys
+for nickname in json.load(sys.stdin)["nicknames"]:
+    print(nickname["name"])
+' 2>/dev/null) || words=
+        fi
     elif [[ "$first" == stack ]]; then
         if ((positional == 0)); then
             words='init add pull rebase go'

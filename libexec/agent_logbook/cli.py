@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import context, resources, store
+from . import context, nicknames, resources, store
 
 RELATIONS = ("created", "modified", "reviewed", "discussed", "commented", "workspace")
 
@@ -31,15 +31,28 @@ def parser():
     record.add_argument("--transcript-path", default=None)
     record.add_argument("--cwd", default=None)
     record.add_argument("--json", action="store_true")
-    for name in ("find", "here"):
+    nickname = commands.add_parser(
+        "nickname", help="assign, list, or delete session nicknames"
+    )
+    nickname.add_argument("name", nargs="?")
+    nickname.add_argument("session_id", nargs="?", help="defaults to CODEX_THREAD_ID")
+    nickname.add_argument(
+        "--delete", action="store_true", help="remove only the nickname"
+    )
+    nickname.add_argument("--json", action="store_true")
+    for name in ("find", "here", "resume"):
         command = commands.add_parser(
             name,
-            help="find sessions by resource"
-            if name == "find"
-            else "find sessions for this workspace",
+            help={
+                "find": "find sessions by resource",
+                "here": "find sessions for this workspace",
+                "resume": "resume an exact global nickname",
+            }[name],
         )
         if name == "find":
             command.add_argument("query")
+        elif name == "resume":
+            command.add_argument("nickname")
         command.add_argument("--cwd", default=None)
         command.add_argument(
             "--list", action="store_true", help="list results without resuming"
@@ -213,19 +226,132 @@ def _resume_command(session, location, cwd=None):
     return ["codex", "resume", session["session_id"], "-C", str(chosen.resolve())]
 
 
+def _saved_session(sessions, session_id):
+    for session in sessions:
+        if (
+            session.get("agent", "codex") == "codex"
+            and session["session_id"] == session_id
+        ):
+            return session
+    transcript = _find_transcript(session_id)
+    if transcript is None:
+        raise ValueError(
+            f"No recorded session or local Codex history for {session_id}."
+        )
+    with transcript.open() as stream:
+        payload = json.loads(stream.readline())["payload"]
+    cwd = payload.get("cwd", "")
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        cwd = ""
+    return {
+        "agent": "codex",
+        "session_id": session_id,
+        "host": store.host_name(),
+        "cwd": cwd,
+        "transcript_path": str(transcript),
+    }
+
+
+def _nickname(args, directory=None):
+    if args.name is None:
+        if args.delete:
+            raise ValueError("Provide a nickname to delete.")
+        rows = [
+            {"name": name, "session_id": target}
+            for name, target in nicknames.load(directory).items()
+        ]
+        if args.json:
+            print(json.dumps({"nicknames": rows}, indent=2))
+        else:
+            for row in rows:
+                print(f"{row['name']}  {row['session_id']}")
+            if not rows:
+                print("No session nicknames assigned.")
+        return 0
+    nicknames.validate_name(args.name)
+    if args.delete:
+        if args.session_id:
+            raise ValueError("Do not supply a session ID when deleting a nickname.")
+        target = nicknames.delete(args.name, directory)
+        value = {"result": "deleted", "name": args.name, "session_id": target}
+        message = (
+            f"Deleted nickname {args.name} ({target}); session history is unchanged."
+        )
+    else:
+        target = args.session_id or os.environ.get("CODEX_THREAD_ID")
+        if not target:
+            raise ValueError("Supply a session UUID outside a Codex session.")
+        target = nicknames.session_id(target)
+        sessions = store.load_sessions(directory)
+        session = _saved_session(sessions, target)
+        if not any(
+            row.get("agent", "codex") == "codex" and row["session_id"] == target
+            for row in sessions
+        ):
+            # Use the target's verified metadata, never the naming command's workspace.
+            store.append_event(session, directory)
+        previous = nicknames.assign(args.name, target, directory)
+        result = (
+            "unchanged"
+            if previous == target
+            else "reassigned"
+            if previous
+            else "assigned"
+        )
+        value = {
+            "result": result,
+            "name": args.name,
+            "session_id": target,
+            "previous_session_id": previous,
+        }
+        message = (
+            f"{args.name}: {previous} -> {target}"
+            if previous and previous != target
+            else f"{args.name}: {target}"
+        )
+        if result == "unchanged":
+            message += " (unchanged)"
+    print(json.dumps(value, indent=2) if args.json else message)
+    return 0
+
+
 def _find(args, directory=None):
     cwd = str(Path(args.cwd or os.getcwd()).expanduser().resolve())
     if not Path(cwd).is_dir():
         raise ValueError(f"Working directory does not exist: {cwd}")
     sessions = store.load_sessions(directory=directory)
-    query = args.query.strip() if args.command == "find" else cwd
+    query = (
+        args.query.strip()
+        if args.command == "find"
+        else args.nickname
+        if args.command == "resume"
+        else cwd
+    )
     if not query:
         raise ValueError("Provide a resource URL, filename, session ID, or topic.")
-    matches = (
-        _matching(sessions, query, cwd)
-        if args.command == "find"
-        else _here(sessions, cwd)
-    )
+    if args.command == "resume":
+        target = nicknames.get(query, directory)
+        if target is None:
+            raise ValueError(
+                f"Unknown session nickname: {query}. Use 'wt nickname' to list names."
+            )
+        matches = [
+            {**_saved_session(sessions, target), "match": "exact", "matched_links": []}
+        ]
+    else:
+        matches = (
+            _matching(sessions, query, cwd)
+            if args.command == "find"
+            else _here(sessions, cwd)
+        )
+    saved_names = nicknames.load(directory)
+    for session in matches:
+        session["nicknames"] = [
+            name
+            for name, target in saved_names.items()
+            if session.get("agent", "codex") == "codex"
+            and target == session["session_id"]
+        ]
     matches.sort(key=lambda session: session.get("updated_at", ""), reverse=True)
     for session in matches:
         location = _local_location(session)
@@ -257,7 +383,12 @@ def _find(args, directory=None):
         and matches[0]["resume_command"] is not None
     ):
         command = matches[0]["resume_command"]
-        print(f"Resuming {matches[0]['session_id']}", flush=True)
+        label = (
+            f" ({', '.join(matches[0]['nicknames'])})"
+            if matches[0]["nicknames"]
+            else ""
+        )
+        print(f"Resuming {matches[0]['session_id']}{label}", flush=True)
         return subprocess.run(command, check=False).returncode
     for session in matches:
         relations = sorted(
@@ -266,6 +397,8 @@ def _find(args, directory=None):
         print(
             f"{session['session_id']}  {_line(session.get('updated_at', ''), 32)}  {session['match']}  {','.join(relations)}"
         )
+        if session["nicknames"]:
+            print(f"  nicknames: {', '.join(session['nicknames'])}")
         hint = session.get("note") or session.get("title") or session.get("cwd")
         if hint:
             print(f"  {_line(hint)}")
@@ -278,9 +411,12 @@ def _find(args, directory=None):
                 "  Saved history is available, but its working directory is missing or unrecorded."
             )
             print("  Recreate the worktree or select a directory explicitly:")
-            print(
-                f"  {shlex.join(['codex-find', query, '--cwd', '/path/to/worktree'])}"
+            lookup = (
+                ["wt", "codex", query]
+                if args.command == "resume"
+                else ["codex-find", query]
             )
+            print(f"  {shlex.join([*lookup, '--cwd', '/path/to/worktree'])}")
         else:
             print(
                 f"  Saved history is unavailable here; resume on a recorded host with: codex resume {shlex.quote(session['session_id'])}"
@@ -360,6 +496,8 @@ def main(argv=None, *, directory=None):
             return 0
         if args.command == "record":
             return _record(args, directory=directory)
+        if args.command == "nickname":
+            return _nickname(args, directory=directory)
         return _find(args, directory=directory)
     except (OSError, ValueError, KeyError) as error:
         print(f"agent-logbook: {_line(error)}", file=sys.stderr)
