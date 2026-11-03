@@ -537,7 +537,8 @@ def _housekeeping_lines(repo, value):
         if entry.get("path"):
             lines.append(f"    {entry['path']}")
         for reason in entry.get("reasons", []):
-            lines.append(f"    {reason['message']}")
+            message = reason.get("display_message", reason["message"])
+            lines.extend(f"    {line}" for line in message.splitlines())
         facts = entry.get("facts", {})
         if pr.get("state") == "OPEN" and {"ahead", "behind"} <= facts.keys():
             lines.append(
@@ -708,5 +709,8 @@ def main(argv=None):
         if as_json:
             print(json.dumps({"result": "stopped", "message": str(error)}))
         else:
-            print(f"wt: {error}", file=sys.stderr)
+            message = (
+                error.display_message if isinstance(error, WTError) else str(error)
+            )
+            print(f"wt: {message}", file=sys.stderr)
         return 1

@@ -13,7 +13,8 @@ def _protect_ignored(repo, path):
         _check_ignored(repo, path, True)
     except WTError as error:
         raise WTError(
-            f"Preserve ignored local material in submodule {path} before stack rebase: {error}"
+            f"Preserve ignored local material in submodule {path} before stack rebase: {error.heading}",
+            details=error.details,
         ) from error
 
 
@@ -23,9 +24,9 @@ def _require_paths(repo, path, names, revision=None):
     missing = [name for name in names if name not in links]
     if missing:
         raise WTError(
-            "Stack rebase removes or replaces an initialized submodule at "
-            + ", ".join(str(path / name) for name in missing)
-            + "; handle/deinitialize it explicitly before rebasing."
+            "Stack rebase removes or replaces initialized submodules; "
+            "handle/deinitialize them explicitly before rebasing:",
+            details=[str(path / name) for name in missing],
         )
 
 

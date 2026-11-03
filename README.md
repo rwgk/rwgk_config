@@ -555,6 +555,11 @@ cleanup. Known disposable build outputs and tool caches (including `.mypy_cache`
 and `.lycheecache`) need the explicit `--discard-builds` option. Inspect the
 preview before applying.
 
+Long filename lists in terminal diagnostics show their first three and last
+three lines, with an omitted-line count in between. Lists of ten lines or fewer
+remain complete. JSON output and recovery records retain the full details;
+housekeeping continues to show every workspace, reason, and next-step hint.
+
 Git's ignore rules select the ignored paths. Cleanup recognizes conventional
 Python extension binaries, package metadata, Cython debug output, benchmark
 directories, and generated Cython/version files as disposable build outputs.

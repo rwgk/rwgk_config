@@ -20,7 +20,10 @@ def _assess(repo, branch, discard_builds):
 def _retain(entry, code, message, hint="wt doctor", *, error=False):
     entry = copy.deepcopy(entry)
     entry["eligible"] = False
-    entry.setdefault("reasons", []).append({"code": code, "message": str(message)})
+    reason = {"code": code, "message": str(message)}
+    if isinstance(message, WTError) and message.display_message != str(message):
+        reason["display_message"] = message.display_message
+    entry.setdefault("reasons", []).append(reason)
     if hint and hint not in entry.setdefault("hints", []):
         entry["hints"].append(hint)
     entry["error"] = bool(entry.get("error") or error)

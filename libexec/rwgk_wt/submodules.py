@@ -122,7 +122,10 @@ def _clean(repo, path):
         "--ignore-submodules=all",
     )
     if status:
-        raise WTError(f"Submodule has uncommitted or untracked files: {path}\n{status}")
+        raise WTError(
+            f"Submodule has uncommitted or untracked files: {path}",
+            details=status.splitlines(),
+        )
     flags = _git(repo, path, "ls-files", "-v", "-z")
     if any(row and (row[0].islower() or row[0] == "S") for row in flags.split("\0")):
         raise WTError(

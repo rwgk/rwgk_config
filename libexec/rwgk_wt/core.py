@@ -13,9 +13,24 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .formatting import format_file_list
+
 
 class WTError(Exception):
     """An operation stopped without silently discarding work."""
+
+    def __init__(self, message, *, details=None):
+        self.heading = message
+        self.details = list(details) if details is not None else None
+        super().__init__(
+            "\n".join((message, *self.details)) if self.details is not None else message
+        )
+
+    @property
+    def display_message(self):
+        if self.details is None:
+            return str(self)
+        return format_file_list(self.heading, self.details)
 
 
 def atomic_json(path, value):
@@ -313,7 +328,8 @@ class Repo:
         )
         if status:
             raise WTError(
-                f"Worktree has uncommitted or untracked files: {path}\n{status}"
+                f"Worktree has uncommitted or untracked files: {path}",
+                details=status.splitlines(),
             )
         flags = self.git("ls-files", "-v", cwd=path)
         if any(

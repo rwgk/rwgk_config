@@ -14,7 +14,63 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
-from rwgk_wt import cli
+from rwgk_wt import cli, housekeeping_inspect, lifecycle, submodule_rebase
+from rwgk_wt.core import WTError
+
+
+class FilenameErrorOutputTests(unittest.TestCase):
+    def test_unknown_ignored_files_are_bounded_in_human_output_and_complete_in_json(
+        self,
+    ):
+        paths = [
+            f"venv/lib/python3.14/site-packages/package/file{i:03d}.py"
+            for i in range(100)
+        ]
+        repo = SimpleNamespace(
+            config={"disposable_build_dirs": ["build"]},
+            primary=Path("/worktree"),
+            locked=contextlib.nullcontext,
+        )
+        with (
+            patch.object(lifecycle, "_git", return_value="\0".join(paths) + "\0"),
+            self.assertRaises(WTError) as stopped,
+        ):
+            lifecycle._check_ignored(repo, repo.primary, True)
+        direct_error = stopped.exception
+        with (
+            patch.object(lifecycle, "_check_ignored", side_effect=direct_error),
+            self.assertRaises(WTError) as stopped,
+        ):
+            submodule_rebase._protect_ignored(repo, repo.primary)
+        wrapped_error = stopped.exception
+
+        def invoke(flags=()):
+            output, errors = io.StringIO(), io.StringIO()
+            with (
+                patch.object(cli, "Repo", return_value=repo),
+                patch.object(cli, "_dispatch", side_effect=error),
+                patch("rwgk_wt.push_guard.install"),
+                contextlib.redirect_stdout(output),
+                contextlib.redirect_stderr(errors),
+            ):
+                result = cli.main(["clean", "--discard-builds", *flags])
+            return result, output.getvalue(), errors.getvalue()
+
+        for error in (direct_error, wrapped_error):
+            with self.subTest(context=error.heading):
+                status, output, errors = invoke()
+                self.assertEqual((status, output), (1, ""))
+                self.assertEqual(errors.splitlines()[0], "wt: " + error.heading)
+                self.assertEqual(
+                    errors.splitlines()[1:],
+                    [*paths[:3], "... 94 lines omitted ...", *paths[-3:]],
+                )
+                status, output, errors = invoke(["--json"])
+                self.assertEqual((status, errors), (1, ""))
+                self.assertEqual(json.loads(output)["message"], str(error))
+                self.assertTrue(
+                    all(path in json.loads(output)["message"] for path in paths)
+                )
 
 
 class RequestCommandTests(unittest.TestCase):
@@ -615,6 +671,68 @@ class HousekeepingOutputTests(unittest.TestCase):
         status, stdout, stderr, value = self.invoke(["--json"])
         self.assertEqual((status, stderr), (0, ""))
         self.assertEqual(json.loads(stdout), value)
+
+    def test_filename_summary_keeps_all_workspaces_hints_and_full_json_facts(self):
+        paths = [
+            f"venv/lib/python3.14/site-packages/package/file{i:03d}.py"
+            for i in range(100)
+        ]
+        error = WTError("Ignored files:", details=paths)
+        entry = self.value["remaining"][0]
+        entry.update(reasons=[], facts={}, error=False)
+        with (
+            patch.object(
+                housekeeping_inspect, "_git", return_value="\0".join(paths) + "\0"
+            ),
+            patch.object(lifecycle, "_check_ignored"),
+        ):
+            housekeeping_inspect._ignored(self.repo, entry, Path(entry["path"]), False)
+        self.assertEqual(entry["reasons"][0]["code"], "build-outputs")
+        failed = {"reasons": [], "facts": {}, "hints": [], "error": False}
+        with (
+            patch.object(
+                housekeeping_inspect, "_git", return_value="\0".join(paths) + "\0"
+            ),
+            patch.object(lifecycle, "_check_ignored", side_effect=error),
+        ):
+            housekeeping_inspect._ignored(self.repo, failed, Path(entry["path"]), False)
+        self.assertEqual(failed["reasons"][0]["message"], str(error))
+        self.assertEqual(failed["reasons"][0]["display_message"], error.display_message)
+        for index in range(7):
+            self.value["remaining"].append(
+                {
+                    "branch": f"rwgk/other-workspace-{index}",
+                    "path": f"/trees/other-workspace-{index}",
+                    "reasons": [{"code": "no-pr", "message": "No associated PR"}],
+                }
+            )
+        status, stdout, stderr, _ = self.invoke()
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("... 94 lines omitted ...", stdout)
+        self.assertNotIn(paths[50], stdout)
+        for path in [*paths[:3], *paths[-3:]]:
+            self.assertIn(path, stdout)
+        for row in self.value["remaining"]:
+            self.assertIn(row["branch"], stdout)
+        self.assertIn("Next: wt go pr43", stdout)
+        self.assertIn("https://github.com/Acme/project/pull/43", stdout)
+        self.assertIn("retained: 8", stdout)
+
+        status, stdout, stderr, value = self.invoke(["--json"])
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout), value)
+        self.assertEqual(value["remaining"][0]["facts"]["ignored"], paths)
+        self.assertTrue(
+            all(
+                path in value["remaining"][0]["reasons"][0]["message"] for path in paths
+            )
+        )
+
+        status, stdout, stderr, _ = self.invoke(["--apply", "--print-path"])
+        self.assertEqual((status, stdout), (0, "/primary\n"))
+        self.assertIn("... 94 lines omitted ...", stderr)
+        self.assertNotIn(paths[50], stderr)
+        self.assertIn("Next: wt go pr43", stderr)
 
     def test_apply_path_mode_keeps_stdout_reserved_for_shell_navigation(self):
         status, stdout, stderr, _ = self.invoke(["--apply", "--print-path"])

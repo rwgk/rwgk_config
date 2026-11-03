@@ -482,8 +482,8 @@ def _check_ignored(repo, path, discard_builds):
         unknown = remaining
     if unknown:
         raise WTError(
-            "Ignored paths are not recognized disposable build outputs or caches: "
-            + ", ".join(unknown)
+            "Ignored paths are not recognized disposable build outputs or caches:",
+            details=unknown,
         )
     return bool(ignored)
 

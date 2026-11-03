@@ -9,10 +9,20 @@ from pathlib import Path
 
 from . import github, lifecycle, stacks, submodules
 from .core import WTError, request_prefix
+from .formatting import format_file_list
 
 
-def _reason(entry, code, message, hint=None, *, error=False):
-    entry["reasons"].append({"code": code, "message": str(message)})
+def _reason(entry, code, message, hint=None, *, error=False, details=None):
+    text = str(message)
+    display = message.display_message if isinstance(message, WTError) else text
+    if details is not None:
+        details = list(details)
+        display = format_file_list(text, details)
+        text = "\n".join((text, *details))
+    reason = {"code": code, "message": text}
+    if display != text:
+        reason["display_message"] = display
+    entry["reasons"].append(reason)
     if hint and hint not in entry["hints"]:
         entry["hints"].append(hint)
     entry["error"] |= error
@@ -82,8 +92,9 @@ def _ignored(repo, entry, path, discard_builds, *, module=None):
             _reason(
                 entry,
                 "build-outputs",
-                f"Recognized disposable build outputs or caches: {', '.join(prefix + value for value in ignored)}",
+                "Recognized disposable build outputs or caches:",
                 "Use 'wt housekeeping --apply --discard-builds' after inspecting these generated files.",
+                details=(prefix + value for value in ignored),
             )
 
 

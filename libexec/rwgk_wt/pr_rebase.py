@@ -152,8 +152,8 @@ def _check_parent_resume(repo, operation, *, abort):
     if untracked:
         action = "aborting" if abort else "continuing"
         raise WTError(
-            f"Preserve untracked parent files before {action} PR rebase: "
-            + ", ".join(repr(name) for name in untracked)
+            f"Preserve untracked parent files before {action} PR rebase:",
+            details=[repr(name) for name in untracked],
         )
     current = repo.oid("HEAD")
     revisions = (
@@ -222,8 +222,8 @@ def _finish(repo, operation, *, aborted=False):
     )
     if status:
         raise WTError(
-            "Resolve parent worktree changes before finishing PR rebase alignment:\n"
-            + status
+            "Resolve parent worktree changes before finishing PR rebase alignment:",
+            details=status.splitlines(),
         )
     submodule_rebase.after(repo, operation["captured"])
     submodules.initialize(repo, repo.root)
