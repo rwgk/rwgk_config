@@ -139,10 +139,10 @@ WT_TEST_STATUS=0
 # the same name. Extract only the shared completer and its registration.
 awk '/^_complete_local_git_branches\(\) \{/ { copy=1 } copy { print } copy && /^}$/ { exit }' \
     "$repo_root/bashrc" >"$test_root/completion.sh"
-awk '$1 == "complete" && $NF == "git_branch_D_track_hash" { print }' \
+awk '$1 == "complete" && $NF == "git_branch_D_track_hash.py" { print }' \
     "$repo_root/bashrc" >>"$test_root/completion.sh"
 source "$test_root/completion.sh"
-[[ "$(complete -p git_branch_D_track_hash)" == *'-F _complete_local_git_branches '* ]] || fail 'standalone branch completion not registered'
+[[ "$(complete -p git_branch_D_track_hash.py)" == *'-F _complete_local_git_branches '* ]] || fail 'standalone branch completion not registered'
 mkdir -- "$test_root/completion"
 cd "$test_root/completion"
 git init --quiet --initial-branch=main
@@ -152,11 +152,11 @@ git -c user.name='Shell fixture' -c user.email='fixture@example.invalid' \
 git branch rwgk/topic-name
 git tag rwgk/topic-name
 git branch 'upstream→topic'
-COMP_WORDS=(git_branch_D_track_hash rwgk/)
+COMP_WORDS=(git_branch_D_track_hash.py rwgk/)
 COMP_CWORD=1
 _complete_local_git_branches
 [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == rwgk/topic-name ]] || fail 'slash branch completion was ambiguous'
-COMP_WORDS=(git_branch_D_track_hash 'upstream→')
+COMP_WORDS=(git_branch_D_track_hash.py 'upstream→')
 _complete_local_git_branches
 [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 'upstream→topic' ]] || fail 'unicode branch completion failed'
 printf 'PASS: standalone branch deletion completion\n'

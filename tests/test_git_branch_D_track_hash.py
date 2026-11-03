@@ -76,7 +76,7 @@ class LocalBranchDeletionTests(unittest.TestCase):
 
     def invoke(self, *args):
         return subprocess.run(
-            [str(ROOT / "bin/git_branch_D_track_hash"), *args],
+            [str(ROOT / "bin/git_branch_D_track_hash.py"), *args],
             cwd=self.primary,
             text=True,
             capture_output=True,

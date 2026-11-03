@@ -52,7 +52,7 @@ def delete(repo, branch):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="git_branch_D_track_hash",
+        prog="git_branch_D_track_hash.py",
         description=(
             "Delete one unpaired local branch after saving its tip and configuration. "
             "Works without wt init; worktree-owned and wt-managed branches are refused."
@@ -63,7 +63,7 @@ def main(argv=None):
     try:
         record = delete(Repo(initialized=False), args.branch)
     except (WTError, OSError, ValueError, KeyError) as error:
-        print(f"git_branch_D_track_hash: {error}", file=sys.stderr)
+        print(f"git_branch_D_track_hash.py: {error}", file=sys.stderr)
         return 1
     print(f"Deleted local branch {record['branch']} ({record['local_oid']}).")
     print(f"Backtracking: {record['backtracking_path']}")

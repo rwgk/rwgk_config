@@ -576,7 +576,7 @@ For an ad-hoc local branch outside the managed pair lifecycle, including in a
 repository that has never run `wt init`, use:
 
 ```bash
-git_branch_D_track_hash old-branch-name
+git_branch_D_track_hash.py old-branch-name
 ```
 
 This standalone Python command immediately deletes the one explicitly named
