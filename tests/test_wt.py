@@ -133,10 +133,48 @@ class WorktreeTests(unittest.TestCase):
             "rwgk/one", {"number": 42, "base_repo": "unit/fixture", "state": "OPEN"}
         )
         self.assertEqual(alias.resolve(), path.resolve())
-        result = self.cli("go", "pr42", "--print-path")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), str(path))
+        for command, selector in (("go", "pr42"), ("go", "42"), ("path", "42")):
+            with self.subTest(command=command, selector=selector):
+                result = self.cli(command, selector, "--print-path")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), str(path))
         self.assertEqual(len(self.repo.worktrees()), 2)
+
+    def test_numeric_selector_prefers_pr_association_over_numeric_branch_names(self):
+        self.repo.create("rwgk/review", "main")
+        self.repo.alias("rwgk/review", {"number": 42, "base_repo": "unit/fixture"})
+        self.repo.create("42", "main")
+        self.repo.create("rwgk/42", "main")
+        for selector in ("42", "0042", "pr42"):
+            with self.subTest(selector=selector):
+                self.assertEqual(self.repo.resolve(selector), "rwgk/review")
+        self.assertEqual(self.repo.resolve("review"), "rwgk/review")
+        self.assertEqual(self.repo.resolve("rwgk/review"), "rwgk/review")
+        self.assertEqual(self.repo.resolve("rwgk/42"), "rwgk/42")
+
+    def test_numeric_selector_rejects_unknown_and_ambiguous_pr_associations(self):
+        self.repo.create("rwgk/review", "main")
+        self.repo.alias("rwgk/review", {"number": 42, "base_repo": "unit/fixture"})
+        self.repo.create("rwgk/other", "main")
+        self.repo.branches["rwgk/other"]["pr"] = {
+            "number": 42,
+            "base_repo": "other/repository",
+        }
+        self.assertEqual(self.repo.resolve("42"), "rwgk/review")
+        with self.assertRaises(WTError):
+            self.repo.resolve("43")
+        self.repo.branches["rwgk/other"]["pr"]["base_repo"] = "unit/fixture"
+        with self.assertRaises(WTError):
+            self.repo.resolve("42")
+
+    def test_numeric_branch_creation_and_directory_mapping_keep_literal_names(self):
+        result = self.cli("new", "42", "--print-path")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = Path(result.stdout.strip())
+        self.assertEqual(self.git("branch", "--show-current", cwd=path), "rwgk/42")
+        result = self.cli("name", "42")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), directory_name("42"))
 
     def test_alias_collision_preserves_existing_target(self):
         one = self.repo.create("rwgk/one", "main")
@@ -383,6 +421,25 @@ class WorktreeTests(unittest.TestCase):
                 result = self.cli("drop", selector, "--local-only", "--apply")
                 self.assertNotEqual(result.returncode, 0)
         self.assertTrue(self.repo.exists("refs/heads/rwgk/existing-unmanaged"))
+
+    def test_numeric_drop_does_not_fall_back_to_unpaired_branch_without_a_pr(self):
+        self.git("branch", "42")
+        self.git("branch", "pr42")
+        path = self.repo.create("rwgk/42", "main")
+        before = self.git("rev-parse", "refs/heads/42")
+        with self.assertRaises(WTError):
+            self.repo.resolve("42")
+        for command, flags in (
+            ("clean", ("--apply",)),
+            ("drop", ("--local-only", "--apply")),
+        ):
+            with self.subTest(command=command):
+                result = self.cli(command, "42", *flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.git("rev-parse", "refs/heads/42"), before)
+                self.assertEqual(self.git("rev-parse", "refs/heads/pr42"), before)
+                self.assertTrue(path.is_dir())
+        self.assertFalse(list((self.area / "backtracking").glob("*.json")))
 
     def test_unpaired_branch_reserved_by_detached_rebase_is_preserved(self):
         path = self.repo.create("rwgk/rebasing", "main")

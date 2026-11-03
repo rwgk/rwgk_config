@@ -38,6 +38,8 @@ see `README.md` for the command reference. Keep primary worktrees on configured
 trunk. Each development or review branch owns one stable worktree under
 `$W/trees/<repo-key>/`; new branch names use `rwgk/<slug>`. Navigate with `wt go`
 or `wt stack go`, without switching branches in an existing worktree.
+`wt go`, `wt path`, `wt clean`, and `wt drop` accept bare PR/MR numbers;
+all-digit selectors always identify a request number for the repository's forge.
 
 All stacks publish to verified upstream, unconditionally. New independent PRs use
 the registered repository's publication destination. Update an associated

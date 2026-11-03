@@ -160,4 +160,83 @@ COMP_WORDS=(git_branch_D_track_hash.py 'upstream→')
 _complete_local_git_branches
 [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 'upstream→topic' ]] || fail 'unicode branch completion failed'
 printf 'PASS: standalone branch deletion completion\n'
+
+# Complete managed selectors locally, with option values and positional arguments
+# excluded. The stub above supplies catalog JSON without contacting a forge.
+awk '/^_wt_complete\(\) \{/ { copy=1 } copy { print } copy && /^}$/ { exit }' \
+    "$repo_root/bashrc" >"$test_root/wt-completion.sh"
+source "$test_root/wt-completion.sh"
+git branch legacy/topic
+git branch 123
+WT_TEST_RESULT='{
+  "config": {"provider": "github", "upstream_repo": "Acme/project"},
+  "branches": [
+    {"branch": "rwgk/topic-name", "pr": {"number": 3182, "base_repo": "Acme/project"}},
+    {"branch": "rwgk/123"}
+  ]
+}'
+complete_wt() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    _wt_complete
+}
+for command in go path clean drop; do
+    complete_wt wt "$command" 31
+    [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 3182 ]] || fail "bare-number completion failed for $command"
+done
+complete_wt wt clean pr31
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == pr3182 ]] || fail 'PR alias completion failed'
+complete_wt wt path topic
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == topic-name ]] || fail 'shortened branch completion failed'
+complete_wt wt go rwgk/topic
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == rwgk/topic-name ]] || fail 'full branch completion failed'
+complete_wt wt drop --local-only legacy/
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == legacy/topic ]] || fail 'unpaired local branch completion failed'
+complete_wt wt go legacy/
+[[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'navigation offered an unmanaged branch'
+complete_wt wt drop 12
+[[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'numeric local branch was offered as a request number'
+complete_wt wt name rwgk/topic
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == rwgk/topic-name ]] || fail 'wt name completion was ambiguous with a tag'
+git branch 'rwgk/$(touch${IFS}completion-injected)'
+complete_wt wt name 'rwgk/$'
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 'rwgk/$(touch${IFS}completion-injected)' ]] || fail 'literal branch syntax was not preserved'
+[[ ! -e completion-injected ]] || fail 'completion evaluated shell syntax in a branch name'
+COMP_WORDS=(git_branch_D_track_hash.py 'rwgk/$')
+COMP_CWORD=1
+_complete_local_git_branches
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 'rwgk/$(touch${IFS}completion-injected)' ]] || fail 'standalone completion changed literal branch syntax'
+[[ ! -e completion-injected ]] || fail 'standalone completion evaluated shell syntax in a branch name'
+
+WT_TEST_RESULT='{
+  "config": {"provider": "gitlab", "upstream_repo": "gitlab.example/group/project"},
+  "branches": [
+    {"branch": "rwgk/review-mr607", "pr": {"number": 607, "base_repo": "gitlab.example/group/project"}}
+  ]
+}'
+complete_wt wt clean mr6
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == mr607 ]] || fail 'MR alias completion failed'
+complete_wt wt go 6
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 607 ]] || fail 'bare MR number completion failed'
+complete_wt wt go pr6
+[[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'GitLab completion offered a GitHub alias'
+
+for argument in 'clean --resume' 'publish --title' 'publish --body-file' 'stack pull --stack'; do
+    read -r -a arguments <<<"$argument"
+    rm -f -- "$WT_TEST_ARGUMENTS"
+    complete_wt wt "${arguments[@]}" ''
+    [[ "${#COMPREPLY[@]}" -eq 0 ]] || fail "option value received selector completion: $argument"
+    [[ ! -e "$WT_TEST_ARGUMENTS" ]] || fail "option value queried branch metadata: $argument"
+done
+complete_wt wt clean --resume saved-record ''
+[[ " ${COMPREPLY[*]} " == *' --apply '* ]] || fail 'resume did not offer cleanup options'
+complete_wt wt clean mr607 ''
+[[ " ${COMPREPLY[*]} " == *' --apply '* && " ${COMPREPLY[*]} " != *' mr607 '* ]] || fail 'consumed selector received another selector'
+complete_wt wt clean --apply mr6
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == mr607 ]] || fail 'option before selector prevented completion'
+complete_wt wt stack go do
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == down ]] || fail 'stack direction completion failed'
+complete_wt wt stack go down ''
+[[ " ${COMPREPLY[*]} " != *' down '* ]] || fail 'consumed stack direction received another direction'
+printf 'PASS: wt selector and option completion\n'
 printf 'PASS: wt shell navigation\n'

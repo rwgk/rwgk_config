@@ -928,59 +928,116 @@ wt() {
 
 _wt_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}" first="${COMP_WORDS[1]:-}"
-    local words= branch
+    local words= flags= values= branch owner argument subcommand= i
+    local positional=0 need_value=0 resuming=0
     COMPREPLY=()
-    if [[ "$COMP_CWORD" -eq 1 ]]; then
-        words='init new pr mr pull push go list trunk stack publish clean drop housekeeping restore doctor path name --help'
-    elif [[ "$first" == stack && "$COMP_CWORD" -eq 2 ]]; then
-        words='init add pull rebase go'
-    elif [[ "$first" == stack && "${COMP_WORDS[2]:-}" == go ]]; then
-        words='up down top bottom'
-    elif [[ "$first" == trunk ]]; then
-        words='update'
-    elif [[ "$cur" == -* ]]; then
-        case "$first" in
-        init) words='--key --trunk --upstream --publish --archive --trees --backtracking' ;;
-        pull) words='--rebase --reset-to-remote-head --continue --abort' ;;
-        publish) words='--stack --title --body-file --ready' ;;
-        clean) words='--apply --archive-local --discard-builds --resume' ;;
-        housekeeping) words='--apply --discard-builds' ;;
-        drop) words='--local-only --apply --resume' ;;
-        stack)
-            case "${COMP_WORDS[2]:-}" in
-            pull) words='--stack --apply' ;;
-            rebase) words='--upstack --downstack --no-trunk --accept-base-change --continue --abort' ;;
-            esac
-            ;;
+    case "$first" in
+    init) values='--key --trunk --upstream --publish --archive --trees --backtracking --repo' ;;
+    clean | drop) values='--resume' ;;
+    publish) values='--title --body-file' ;;
+    stack) values='--stack' ;;
+    esac
+    for ((i = 2; i < COMP_CWORD; i++)); do
+        argument="${COMP_WORDS[i]}"
+        if ((need_value)); then
+            need_value=0
+            continue
+        fi
+        case "$argument" in
+        --resume | --resume=*) resuming=1 ;;
         esac
-        words="$words --help --json --print-path"
+        if [[ " $values " == *" $argument "* ]]; then
+            need_value=1
+        elif [[ "$argument" != -* ]]; then
+            if [[ "$first" == stack && "$positional" -eq 0 ]]; then
+                subcommand="$argument"
+            fi
+            ((positional += 1))
+        fi
+    done
+    # Option values use the shell's normal filename fallback, never selectors.
+    ((need_value)) && return 0
+    case "$first" in
+    init) flags="$values" ;;
+    pull) flags='--rebase --reset-to-remote-head --continue --abort' ;;
+    publish) flags='--stack --title --body-file --ready' ;;
+    clean) flags='--apply --archive-local --discard-builds --resume' ;;
+    housekeeping) flags='--apply --discard-builds' ;;
+    drop) flags='--local-only --apply --archive-local --discard-builds --resume' ;;
+    codex) flags='--list' ;;
+    stack)
+        case "$subcommand" in
+        pull) flags='--stack --apply' ;;
+        rebase) flags='--upstack --downstack --no-trunk --accept-base-change --continue --abort' ;;
+        esac
+        ;;
+    esac
+    flags="$flags --help --json --print-path"
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        words='init new pr mr pull push go list trunk stack publish clean drop housekeeping restore doctor path name codex --help'
+    elif [[ "$cur" == -* ]]; then
+        words="$flags"
+    elif [[ "$first" == stack ]]; then
+        if ((positional == 0)); then
+            words='init add pull rebase go'
+        elif [[ "$subcommand" == go && "$positional" -eq 1 ]]; then
+            words='up down top bottom'
+        elif [[ "$subcommand" != add || "$positional" -gt 1 ]]; then
+            words="$flags"
+        fi
+    elif [[ "$first" == trunk ]]; then
+        if ((positional == 0)); then
+            words='update'
+        else
+            words="$flags"
+        fi
+    elif [[ "$first" == go || "$first" == path || "$first" == clean || "$first" == drop || "$first" == name ]]; then
+        if ((positional || resuming)); then
+            words="$flags"
+        elif [[ "$first" == name ]]; then
+            words=$(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null) || words=
+        else
+            words=$(command git-wt list --json 2>/dev/null | python -c '
+import json, sys
+catalog = json.load(sys.stdin)
+config = catalog["config"]
+for row in catalog["branches"]:
+    branch = row["branch"]
+    if not branch.isdecimal():
+        print(branch)
+    if branch.startswith("rwgk/") and not branch[5:].isdecimal():
+        print(branch[5:])
+    pr = row.get("pr") or {}
+    if pr.get("number") and pr.get("base_repo", "").lower() == config["upstream_repo"].lower():
+        prefix = "mr" if pr.get("provider") == "gitlab" or config.get("provider") == "gitlab" else "pr"
+        print(prefix + str(pr["number"]))
+        print(pr["number"])
+' 2>/dev/null) || words=
+            if [[ "$first" == drop ]]; then
+                while IFS=$'\t' read -r branch owner; do
+                    if [[ -z "$owner" && ! "$branch" =~ ^[0-9]+$ ]]; then
+                        words+=$'\n'"$branch"
+                    fi
+                done < <(git for-each-ref --format='%(refname:strip=2)%09%(worktreepath)' refs/heads 2>/dev/null)
+            fi
+        fi
     else
         case "$first" in
-        name)
-            words=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+        new | pr | mr | restore)
+            ((positional)) && words="$flags"
             ;;
-        go | path | clean | drop)
-            while IFS= read -r branch; do
-                words+="$branch"$'\n'
-            done < <(command git-wt list --json 2>/dev/null | python -c '
-import json, sys
-for row in json.load(sys.stdin)["branches"]:
-    branch = row["branch"]
-    print(branch)
-    if branch.startswith("rwgk/"):
-        print(branch[5:])
-    if row.get("pr"):
-        print("pr" + str(row["pr"]["number"]))
-' 2>/dev/null)
-            ;;
+        *) words="$flags" ;;
         esac
     fi
-    local IFS=$'\n'
-    # Static words use spaces; selectors use newlines and cannot contain spaces.
+    # Static words use spaces; branch selectors cannot contain spaces.
     if [[ "$words" != *$'\n'* ]]; then
-        IFS=' '
+        words="${words// /$'\n'}"
     fi
-    COMPREPLY=($(compgen -W "$words" -- "$cur"))
+    while IFS= read -r branch; do
+        if [[ -n "$branch" && "$branch" == "$cur"* ]]; then
+            COMPREPLY+=("$branch")
+        fi
+    done < <(printf '%s\n' "$words" | LC_ALL=C sort -u)
 }
 complete -o bashdefault -o default -F _wt_complete wt git-wt
 
@@ -1077,20 +1134,19 @@ if [[ -e "$HOME/rwgk_config/.git" && ! -f "$HOME/rwgk_config/.git/hooks/pre-push
 fi
 
 _complete_local_git_branches() {
-    # only complete if we're in a git repo
+    # Only complete if we're in a Git repository.
     git rev-parse --git-dir >/dev/null 2>&1 || {
         COMPREPLY=()
         return
     }
 
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-    # Use newline as separator so branch names with slashes (or spaces) work
-    local IFS=$'\n'
-    # List local branches (same as completing for `git branch -D`)
-    local branches
-    branches=$(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null)
-
-    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+    local cur="${COMP_WORDS[COMP_CWORD]}" branch
+    COMPREPLY=()
+    while IFS= read -r branch; do
+        if [[ -n "$branch" && "$branch" == "$cur"* ]]; then
+            COMPREPLY+=("$branch")
+        fi
+    done < <(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null)
 }
 
 complete -o bashdefault -o default -F _complete_local_git_branches git_show_upstream_for_branch

@@ -464,6 +464,12 @@ class GitLabTests(GitLabFixture):
         self.assertEqual(git(path, "rev-parse", "HEAD"), mr["sha"])
         self.assertEqual((path.parent / "mr42").resolve(), path)
         self.assertEqual(github.open_pr(self.repo, "mr42"), path)
+        self.assertEqual(self.repo.resolve("42"), "rwgk/review-mr42")
+        before = len(self.api_calls)
+        status, output, error = self.invoke(self.repo, ["path", "42"])
+        self.assertEqual((status, error), (0, ""))
+        self.assertEqual(Path(output.strip()), path)
+        self.assertEqual(len(self.api_calls), before)
         self.assertEqual(len(self.repo.worktrees()), 2)
         self.assertTrue(
             any(

@@ -216,11 +216,25 @@ update owned PR metadata, publish an owned history rewrite, or publish a stack.
 
 ```bash
 wt list                         # branches, worktrees, PR associations
-wt go fix-stream                # slug, full branch, or pr1234
+wt go fix-stream                # slug, full branch, pr1234, or a bare PR/MR number
 wt trunk                        # enter primary checkout without updating it
 wt path rwgk/fix-stream          # print owning worktree path
 wt name rwgk/fix-stream          # print centrally mapped directory name
 ```
+
+`wt go`, `wt path`, `wt clean`, and `wt drop` accept bare PR/MR numbers:
+`wt go 3182` selects the same pair as `wt go pr3182` in a GitHub repository;
+`wt path 607` is equivalent to `wt path mr607` in a GitLab repository. These
+shortcuts select existing managed pairs. All-digit selectors always identify
+PR/MR numbers, even when a local branch has that numeric name. Explicit branch
+names, shortened `rwgk/` slugs, and `prNUMBER`/`mrNUMBER` aliases remain usable.
+`wt new`, `wt stack add`, and `wt name` retain their literal branch-name inputs.
+
+Bash completion offers managed branch names, shortened slugs, PR/MR aliases, and
+bare numbers for these selectors. `wt drop` also completes unpaired local branch
+names, and `wt name` completes exact local branch names. Suggestions use local
+repository data, without GitHub/GitLab requests, and respect selector and option
+argument positions. Open a new shell to load updated completion definitions.
 
 ### PR reviews
 
@@ -516,6 +530,7 @@ exporting the override or using `--no-verify`, which skips other hook checks too
 ```bash
 wt clean                        # preview terminal PR candidates
 wt clean pr1234                 # preview one PR
+wt clean 3182                   # the pr/mr prefix is optional
 wt clean pr1234 --apply          # perform its lifecycle cleanup
 ```
 

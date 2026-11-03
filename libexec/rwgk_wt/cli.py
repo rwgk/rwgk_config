@@ -8,7 +8,14 @@ import sys
 from pathlib import Path
 
 from . import github, lifecycle, stacks
-from .core import Repo, WTError, branch_name, directory_name, request_prefix
+from .core import (
+    Repo,
+    WTError,
+    branch_name,
+    directory_name,
+    request_prefix,
+    request_selector,
+)
 
 
 def parser():
@@ -77,7 +84,7 @@ def parser():
     )
     for name in ("go", "path"):
         command = commands.add_parser(name, help="resolve an existing owning worktree")
-        command.add_argument("selector")
+        command.add_argument("selector", help="branch, slug, or PR/MR number or alias")
     name = commands.add_parser(
         "name", help="map a branch to its canonical directory name"
     )
@@ -153,7 +160,9 @@ def parser():
             name,
             help="preview retirement; drop also accepts an unpaired local branch",
         )
-        command.add_argument("selector", nargs="?")
+        command.add_argument(
+            "selector", nargs="?", help="branch, slug, or PR/MR number or alias"
+        )
         command.add_argument("--apply", action="store_true")
         command.add_argument("--archive-local", action="store_true")
         command.add_argument(
@@ -309,12 +318,17 @@ def _dispatch(repo, args):
         if command == "clean" and args.local_only:
             raise WTError("Use 'wt drop --local-only' for explicit local retirement.")
         if args.selector:
+            selector = request_selector(args.selector, repo.config)
             try:
-                names = [repo.resolve(args.selector)]
+                names = [repo.resolve(selector)]
             except WTError:
-                if command != "drop" or not repo.exists("refs/heads/" + args.selector):
+                if (
+                    command != "drop"
+                    or selector != args.selector
+                    or not repo.exists("refs/heads/" + selector)
+                ):
                     raise
-                names = [args.selector]
+                names = [selector]
         elif command == "drop":
             names = [repo.resolve()]
         else:

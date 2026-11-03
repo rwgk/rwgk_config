@@ -94,6 +94,13 @@ def request_prefix(pr=None, config=None):
     )
 
 
+def request_selector(selector, config):
+    """Treat all-digit selectors as PR/MR numbers for this repository's forge."""
+    if selector and re.fullmatch(r"[0-9]+", selector):
+        return request_prefix(config=config) + str(int(selector))
+    return selector
+
+
 def run_command(argv, *, cwd=None, check=True, input=None):
     env = os.environ.copy()
     for key in tuple(env):
@@ -335,7 +342,11 @@ class Repo:
             )
 
     def resolve(self, selector=None):
-        selector = selector or self.current_branch()
+        selector = (
+            request_selector(selector, self.config)
+            if selector
+            else self.current_branch()
+        )
         if selector in self.branches:
             return selector
         if selector and "rwgk/" + selector in self.branches:
