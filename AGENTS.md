@@ -40,6 +40,8 @@ trunk. Each development or review branch owns one stable worktree under
 or `wt stack go`, without switching branches in an existing worktree.
 `wt go`, `wt path`, `wt clean`, and `wt drop` accept bare PR/MR numbers;
 all-digit selectors always identify a request number for the repository's forge.
+Without a selector, `wt pr` / `wt mr` prints the current worktree's saved URL,
+including in stacks, without navigation or a forge request.
 
 All stacks publish to verified upstream, unconditionally. New independent PRs use
 the registered repository's publication destination. Update an associated

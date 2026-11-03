@@ -860,7 +860,8 @@ wt() {
         esac
     done
     case "${1:-}" in
-    new | pr | mr | go | restore) navigate=1 ;;
+    new | go | restore) navigate=1 ;;
+    pr | mr) [[ $# -gt 1 ]] && navigate=1 ;;
     trunk) [[ $# -eq 1 ]] && navigate=1 ;;
     stack)
         case "${2:-}" in

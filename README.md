@@ -242,6 +242,7 @@ argument positions. Open a new shell to load updated completion definitions.
 wt pr 1234                      # or the full PR URL
 # review and test in the resulting worktree
 wt pr 1234                      # resume the same pair
+wt pr                           # print this worktree's saved PR URL
 wt pull                         # update this worktree's PR; no number needed
 # edit, test, commit a contribution
 wt push                         # fast-forward the associated PR's source branch
@@ -255,6 +256,11 @@ Your own PR reuses its local branch when available. Another author's PR gets a
 local `rwgk/review-pr1234` branch. PR head identity is recorded separately from
 the local branch name, and the receiving repository's PR head ref permits
 checkout after a contributor fork or branch disappears.
+
+Without an argument, `wt pr` prints only the current worktree's saved PR URL.
+GitLab uses `wt mr` the same way. This local lookup leaves the current directory
+unchanged, works in stack worktrees too, and makes no forge request. A worktree
+without an associated PR/MR reports an error.
 
 `wt push` works for your own independent PRs and authorized contributions to
 another author's PR. It reads the current PR identity, verifies its actual source
@@ -332,6 +338,7 @@ aliases remain usable. Cleanup and restore recognize both spellings.
 glab auth login --hostname gitlab.example.com
 wt mr 42
 # or: wt mr https://gitlab.example.com/group/subgroup/project/-/merge_requests/42
+wt mr                           # print this worktree's saved MR URL
 wt pull
 wt pull --rebase                 # when local contributions diverged
 wt push                         # publish an authorized contribution to the MR source

@@ -41,7 +41,8 @@ def require_request_command(repo, command, selector):
             if expected == "mr"
             else ("GitHub", "pull requests")
         )
-        raise WTError(f"{service} uses {noun}; use 'wt {expected} {number}'.")
+        suffix = "" if selector is None else " " + number
+        raise WTError(f"{service} uses {noun}; use 'wt {expected}{suffix}'.")
 
 
 def pr_head_ref(repo, number):
@@ -759,6 +760,28 @@ def _open_pr(repo, selector, refresh=False, *, reset_to_remote_head=False):
         checked_out = repo.oid(f"refs/heads/{branch}")
     _associate(repo, branch, pr, role, refresh=refresh, checked_out=checked_out)
     return Path(path).resolve(), recovery_record
+
+
+def current_request_url(repo):
+    """Read the current pair's saved URL, including while its HEAD is detached."""
+    branch = repo.current_branch()
+    if branch is None:
+        matches = [
+            name
+            for name, metadata in repo.branches.items()
+            if Path(metadata["path"]).resolve() == repo.root
+        ]
+        if len(matches) == 1:
+            branch = matches[0]
+    metadata = repo.branches.get(branch, {})
+    url = (metadata.get("pr") or {}).get("url")
+    if not url or Path(metadata["path"]).resolve() != repo.root:
+        command = request_prefix(config=repo.config)
+        raise WTError(
+            f"This worktree has no associated {command.upper()} URL; "
+            f"use 'wt {command} NUMBER' to open one."
+        )
+    return {"branch": branch, "url": url}
 
 
 def current_pr(repo, *, action="pull"):

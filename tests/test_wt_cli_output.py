@@ -23,24 +23,144 @@ class RequestCommandTests(unittest.TestCase):
             ("pr", "gitlab", "gitlab.example/group/project", "mr"),
             ("mr", "github", "owner/project", "pr"),
         ):
-            with self.subTest(command=command):
-                repo = SimpleNamespace(
-                    config={"provider": provider, "upstream_repo": identity},
-                    locked=Mock(),
-                )
-                output, errors = io.StringIO(), io.StringIO()
-                with (
-                    patch.object(cli, "Repo", return_value=repo),
-                    patch.object(cli.github, "open_pr") as open_pr,
-                    contextlib.redirect_stdout(output),
-                    contextlib.redirect_stderr(errors),
-                ):
-                    result = cli.main([command, "42"])
-                self.assertEqual(result, 1)
-                self.assertEqual(output.getvalue(), "")
-                self.assertIn(f"wt {expected} 42", errors.getvalue())
-                open_pr.assert_not_called()
+            for selector in (("42",), ()):
+                with self.subTest(command=command, selector=selector):
+                    repo = SimpleNamespace(
+                        config={"provider": provider, "upstream_repo": identity},
+                        locked=Mock(),
+                    )
+                    output, errors = io.StringIO(), io.StringIO()
+                    with (
+                        patch.object(cli, "Repo", return_value=repo),
+                        patch.object(cli.github, "open_pr") as open_pr,
+                        contextlib.redirect_stdout(output),
+                        contextlib.redirect_stderr(errors),
+                    ):
+                        result = cli.main([command, *selector])
+                    self.assertEqual(result, 1)
+                    self.assertEqual(output.getvalue(), "")
+                    self.assertIn(f"wt {expected}", errors.getvalue())
+                    open_pr.assert_not_called()
+                    repo.locked.assert_not_called()
+
+
+class CurrentRequestURLTests(unittest.TestCase):
+    def repo(self, provider="github"):
+        command = "mr" if provider == "gitlab" else "pr"
+        identity = (
+            "gitlab.example/group/project" if provider == "gitlab" else "Acme/project"
+        )
+        branch = f"rwgk/review-{command}42"
+        root = Path("/trees") / branch.replace("/", "-")
+        url = (
+            f"https://{identity}/-/merge_requests/42"
+            if provider == "gitlab"
+            else f"https://github.com/{identity}/pull/42"
+        )
+        config = {"provider": provider, "upstream_repo": identity, "trunk": "main"}
+        branches = {
+            branch: {
+                "path": str(root),
+                "role": "review",
+                "pr": {
+                    "provider": provider,
+                    "number": 42,
+                    "base_repo": identity,
+                    "url": url,
+                },
+            }
+        }
+        forbidden = lambda action: Mock(side_effect=AssertionError(action))
+        return SimpleNamespace(
+            config=config,
+            branches=branches,
+            state={"config": config, "branches": branches},
+            root=root,
+            primary=Path("/primary"),
+            current_branch=Mock(return_value=branch),
+            owner=Mock(return_value=root),
+            locked=forbidden("URL lookup acquired a mutation lock"),
+            save=forbidden("URL lookup changed repository state"),
+            ensure_idle=forbidden("URL lookup required an idle worktree"),
+            ensure_clean=forbidden("URL lookup inspected dirty work"),
+            check_primary=forbidden("URL lookup inspected trunk"),
+        )
+
+    def invoke(self, repo, command, flags=()):
+        output, errors = io.StringIO(), io.StringIO()
+        before = copy.deepcopy(repo.state)
+        with (
+            patch.object(cli, "Repo", return_value=repo),
+            patch.object(
+                cli.github, "open_pr", side_effect=AssertionError("PR was opened")
+            ),
+            patch.object(
+                cli.github, "get_pr", side_effect=AssertionError("Forge was queried")
+            ),
+            patch.object(
+                cli.github,
+                "current_pr",
+                side_effect=AssertionError("Independent PR required"),
+            ),
+            patch(
+                "rwgk_wt.push_guard.install",
+                side_effect=AssertionError("Hook installed"),
+            ),
+            patch("rwgk_wt.stacks.get_stack", return_value={"number": 42}),
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(errors),
+        ):
+            result = cli.main([command, *flags])
+        self.assertEqual(repo.state, before)
+        return result, output.getvalue(), errors.getvalue()
+
+    def test_no_argument_request_prints_only_saved_url_for_each_forge(self):
+        for provider, command in (("github", "pr"), ("gitlab", "mr")):
+            with self.subTest(provider=provider):
+                repo = self.repo(provider)
+                url = next(iter(repo.branches.values()))["pr"]["url"]
+                self.assertEqual(self.invoke(repo, command), (0, url + "\n", ""))
                 repo.locked.assert_not_called()
+                repo.save.assert_not_called()
+
+    def test_paused_detached_worktree_still_uses_its_saved_association(self):
+        repo = self.repo()
+        branch = next(iter(repo.branches))
+        url = repo.branches[branch]["pr"]["url"]
+        repo.current_branch.return_value = None
+        repo.state["pr_rebase"] = {"branch": branch, "path": str(repo.root)}
+        self.assertEqual(self.invoke(repo, "pr"), (0, url + "\n", ""))
+
+    def test_json_keeps_url_identity_and_path_mode_refuses_url_as_directory(self):
+        repo = self.repo()
+        branch = next(iter(repo.branches))
+        status, output, error = self.invoke(repo, "pr", ["--json"])
+        self.assertEqual((status, error), (0, ""))
+        value = json.loads(output)
+        self.assertEqual(value["url"], repo.branches[branch]["pr"]["url"])
+        self.assertEqual(value["branch"], branch)
+        status, output, error = self.invoke(repo, "pr", ["--print-path"])
+        self.assertEqual((status, output), (1, ""))
+        self.assertIn("navigation path", error)
+
+    def test_trunk_unassociated_and_unknown_worktrees_have_clear_errors(self):
+        for context in ("trunk", "unassociated", "unknown"):
+            with self.subTest(context=context):
+                repo = self.repo()
+                branch = next(iter(repo.branches))
+                if context == "trunk":
+                    repo.root = repo.primary
+                    repo.current_branch.return_value = "main"
+                    repo.branches["main"] = {"path": str(repo.primary), "role": "trunk"}
+                elif context == "unassociated":
+                    repo.branches[branch].pop("pr")
+                else:
+                    repo.root = Path("/unknown")
+                    repo.current_branch.return_value = "unmanaged"
+                status, output, error = self.invoke(repo, "pr")
+                self.assertEqual((status, output), (1, ""))
+                self.assertIn("PR", error)
+                self.assertTrue(error.strip())
 
 
 class PullOutputTests(unittest.TestCase):

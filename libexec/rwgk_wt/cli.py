@@ -46,9 +46,9 @@ def parser():
     for command, service, noun in (("pr", "GitHub", "PR"), ("mr", "GitLab", "MR")):
         request = commands.add_parser(
             command,
-            help=f"open or resume a {service} {noun} worktree and attach its alias",
+            help=f"open/resume a {service} {noun} worktree, or print its URL without a selector",
         )
-        request.add_argument("selector")
+        request.add_argument("selector", nargs="?", help="request number or URL")
     pull = commands.add_parser(
         "pull",
         help="update the current independent PR/MR worktree safely",
@@ -188,6 +188,8 @@ def parser():
 def _readonly(args):
     return (
         args.command in ("go", "path", "list", "doctor")
+        or args.command in ("pr", "mr")
+        and args.selector is None
         or args.command == "trunk"
         and args.action is None
         or args.command == "stack"
@@ -224,6 +226,8 @@ def _dispatch(repo, args):
         return {"branch": branch_name(args.slug), "path": str(path)}, path
     if command in ("pr", "mr"):
         github.require_request_command(repo, command, args.selector)
+        if args.selector is None:
+            return github.current_request_url(repo), None
         path = github.open_pr(repo, args.selector)
         return {"path": str(path)}, path
     if command == "pull":
@@ -558,7 +562,9 @@ def _housekeeping_lines(repo, value):
 
 
 def _display(args, value, repo=None):
-    if args.command == "list":
+    if args.command in ("pr", "mr") and args.selector is None:
+        print(value["url"])
+    elif args.command == "list":
         print(
             f"{value['config']['key']}: {value['config']['trunk']} at {value['config']['primary']}"
         )

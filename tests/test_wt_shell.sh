@@ -32,15 +32,28 @@ fail() {
     exit 1
 }
 
+for request in pr mr; do
+    cd "$test_root/from"
+    WT_TEST_RESULT="https://forge.example/project/$request/42"
+    wt "$request" >"$test_root/output"
+    [[ "$PWD" == "$test_root/from" ]] || fail 'URL lookup changed directories'
+    [[ "$(cat "$WT_TEST_ARGUMENTS")" == "$request" ]] || fail 'URL lookup requested a navigation path'
+    [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail 'URL lookup did not print exactly the saved URL'
+done
+WT_TEST_RESULT="$test_root/destination with spaces"
+
 cd "$test_root/from"
 wt new example
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'new did not enter its worktree'
 [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == --print-path ]] || fail 'navigation did not request a path'
 
-cd "$test_root/from"
-wt mr 607
-[[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'mr did not enter its worktree'
-[[ "$(head -1 "$WT_TEST_ARGUMENTS")" == mr ]] || fail 'mr command was altered'
+for request in pr mr; do
+    cd "$test_root/from"
+    wt "$request" 607
+    [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'request selector did not enter its worktree'
+    [[ "$(head -1 "$WT_TEST_ARGUMENTS")" == "$request" ]] || fail 'request command was altered'
+    [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" == --print-path ]] || fail 'request navigation did not ask for a path'
+done
 
 cd "$test_root/from"
 wt go example --json >"$test_root/output"
