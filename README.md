@@ -565,12 +565,36 @@ wt drop old-branch-name --local-only          # preview; no temporary worktree
 wt drop old-branch-name --local-only --apply
 ```
 
-This is the replacement for `git_branch_D_track_hash --local-only`: it records
-the commit and branch configuration, creates a local recovery ref, and deletes
-only that local branch. Neither upstream nor origin is changed. Legacy names do
-not need an `rwgk/` prefix. Checked-out branches, trunk, missing managed worktrees,
+This registered-repository workflow records the commit and branch configuration,
+creates a local recovery ref, and deletes only that local branch. Neither
+upstream nor origin is changed. Legacy names do not need an `rwgk/` prefix.
+Checked-out branches, trunk, missing managed worktrees,
 and branches needed by surviving stack layers are protected. `wt restore` can
 recreate the retired branch in its own managed worktree.
+
+For an ad-hoc local branch outside the managed pair lifecycle, including in a
+repository that has never run `wt init`, use:
+
+```bash
+git_branch_D_track_hash old-branch-name
+```
+
+This standalone Python command immediately deletes the one explicitly named
+local branch, after writing its full tip and local branch configuration to a
+backtracking JSON record and creating a local recovery ref. It refuses managed
+catalog entries, branches owned by any registered worktree (including a missing
+checkout), and branches reserved by an unfinished Git operation. It does not
+register the repository or change Git remotes. Bash completion supplies local
+branch names. The output includes the full SHA, record path, and recovery ref.
+To inspect and recreate a deleted branch from the printed recovery ref:
+
+```bash
+git show <recovery-ref>
+git branch <original-branch-name> <recovery-ref>
+```
+
+`wt restore` remains for retired-pair records; standalone deletion records are
+inspected directly, and branch configuration is available in their JSON.
 
 Backtracking records remain under `~/Sve/git_backtracking_info/` or the configured
 location. The existing `MY_GIT_BACKTRACKING_INFO_LOCAL` and

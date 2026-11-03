@@ -64,6 +64,11 @@ retirement. Preview before `--apply`. Preserve backtracking records and recovery
 refs; never substitute extension pruning or raw branch deletion for standard
 cleanup. Use `wt doctor` to inspect existing layouts before adopting them.
 
+For requested deletion of an unpaired ad-hoc local branch,
+`git_branch_D_track_hash <branch>` works without `wt init` and preserves a
+backtracking record and recovery ref. It refuses managed catalog entries and
+branches associated with any worktree or unfinished Git operation.
+
 ## Persistent scratch and temporary files
 
 Follow the [scratch policy in README.md](README.md#persistent-scratch-and-temporary-files).
