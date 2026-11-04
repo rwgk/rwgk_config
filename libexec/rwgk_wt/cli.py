@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import github, lifecycle, stacks
 from .core import (
+    NotGitRepository,
     Repo,
     WTError,
     branch_name,
@@ -46,9 +47,13 @@ def parser():
     for command, service, noun in (("pr", "GitHub", "PR"), ("mr", "GitLab", "MR")):
         request = commands.add_parser(
             command,
-            help=f"open/resume a {service} {noun} worktree, or print its URL without a selector",
+            help=f"open/resume a {service} {noun} worktree, or print its URL; outside Git, find an existing one",
         )
-        request.add_argument("selector", nargs="?", help="request number or URL")
+        request.add_argument(
+            "selector",
+            nargs="?",
+            help="request number or URL; use REPO:NUMBER to select a repository",
+        )
     pull = commands.add_parser(
         "pull",
         help="update the current independent PR/MR worktree safely",
@@ -83,8 +88,13 @@ def parser():
         ),
     )
     for name in ("go", "path"):
-        command = commands.add_parser(name, help="resolve an existing owning worktree")
-        command.add_argument("selector", help="branch, slug, or PR/MR number or alias")
+        command = commands.add_parser(
+            name, help="resolve an existing owning worktree, including from outside Git"
+        )
+        command.add_argument(
+            "selector",
+            help="branch, slug, PR/MR number or alias; optionally REPO:SELECTOR",
+        )
     name = commands.add_parser(
         "name", help="map a branch to its canonical directory name"
     )
@@ -701,18 +711,33 @@ def main(argv=None):
             if args.command == "codex" and args.list:
                 options.append("--list")
             return logbook_main(options)
-        repo = Repo(initialized=args.command != "init")
-        if args.command in ("pr", "mr"):
-            github.require_request_command(repo, args.command, args.selector)
-        readonly = _readonly(args)
-        import contextlib
+        global_lookup = False
+        selector = getattr(args, "selector", None)
+        if args.command in ("go", "path", "pr", "mr") and selector is not None:
+            from . import navigation
 
-        with contextlib.nullcontext() if readonly else repo.locked():
-            if not readonly and args.command != "init":
-                from .push_guard import install
+            global_lookup = navigation.split_selector(selector)[0] is not None
+            if not global_lookup:
+                try:
+                    repo = Repo()
+                except NotGitRepository:
+                    global_lookup = True
+            if global_lookup:
+                repo, value, path = navigation.resolve(selector, args.command)
+        else:
+            repo = Repo(initialized=args.command != "init")
+        if not global_lookup:
+            if args.command in ("pr", "mr"):
+                github.require_request_command(repo, args.command, args.selector)
+            readonly = _readonly(args)
+            import contextlib
 
-                install(repo)
-            value, path = _dispatch(repo, args)
+            with contextlib.nullcontext() if readonly else repo.locked():
+                if not readonly and args.command != "init":
+                    from .push_guard import install
+
+                    install(repo)
+                value, path = _dispatch(repo, args)
         if print_path:
             if path is None:
                 raise WTError("This invocation does not produce a navigation path.")

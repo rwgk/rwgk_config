@@ -52,10 +52,19 @@ see `README.md` for the command reference. Keep primary worktrees on configured
 trunk. Each development or review branch owns one stable worktree under
 `$W/trees/<repo-key>/`; new branch names use `rwgk/<slug>`. Navigate with `wt go`
 or `wt stack go`, without switching branches in an existing worktree.
-`wt go`, `wt path`, `wt clean`, and `wt drop` accept bare PR/MR numbers;
-all-digit selectors always identify a request number for the repository's forge.
+Within a repository, `wt go`, `wt path`, `wt clean`, and `wt drop` accept bare
+PR/MR numbers; all-digit selectors identify a request number for its forge.
 Without a selector, `wt pr` / `wt mr` prints the current worktree's saved URL,
 including in stacks, without navigation or a forge request.
+
+Outside Git, `wt go`, `wt path`, `wt pr`, and `wt mr` resolve only existing
+managed worktrees under `$W/trees/`. Bare `go` / `path` numbers search both
+forges; `pr`, `mr`, and explicit `prNUMBER` / `mrNUMBER` filter by forge. Multiple
+matches require an explicit repository key, such as `wt go project:42`; qualified
+selectors work from anywhere, including another Git checkout. Unqualified
+commands inside Git retain the current repository scope and its normal errors.
+Global navigation verifies saved associations and ownership without fetching,
+creating, or updating a pair. Create missing worktrees from the target repository.
 
 All stacks publish to verified upstream, unconditionally. New independent PRs use
 the registered repository's publication destination. Update an associated

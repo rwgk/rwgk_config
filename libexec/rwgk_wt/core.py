@@ -33,6 +33,22 @@ class WTError(Exception):
         return format_file_list(self.heading, self.details)
 
 
+class NotGitRepository(WTError):
+    """Git found no repository in the invoking directory or its parents."""
+
+
+def _has_git_marker(cwd):
+    for parent in (cwd, *cwd.parents):
+        marker = parent / ".git"
+        if marker.is_dir():
+            # Empty sentinel directories are not repositories to Git either.
+            if any(marker.iterdir()):
+                return True
+        elif os.path.lexists(marker):
+            return True
+    return False
+
+
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,9 +163,19 @@ def run_command(argv, *, cwd=None, check=True, input=None):
 class Repo:
     def __init__(self, cwd=None, *, initialized=True):
         cwd = Path(cwd or os.getcwd()).resolve()
-        self.root = Path(
-            run_command(["git", "rev-parse", "--show-toplevel"], cwd=cwd).stdout.strip()
-        ).resolve()
+        try:
+            self.root = Path(
+                run_command(
+                    ["git", "rev-parse", "--show-toplevel"], cwd=cwd
+                ).stdout.strip()
+            ).resolve()
+        except WTError as error:
+            # An invalid .git file/directory must keep its normal diagnostic.
+            if "not a git repository (or any" in str(error) and not _has_git_marker(
+                cwd
+            ):
+                raise NotGitRepository(str(error)) from error
+            raise
         self.common = Path(
             self.git("rev-parse", "--path-format=absolute", "--git-common-dir")
         ).resolve()

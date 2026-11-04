@@ -261,7 +261,8 @@ wt path rwgk/fix-stream          # print owning worktree path
 wt name rwgk/fix-stream          # print centrally mapped directory name
 ```
 
-`wt go`, `wt path`, `wt clean`, and `wt drop` accept bare PR/MR numbers:
+Within a repository, `wt go`, `wt path`, `wt clean`, and `wt drop` accept bare
+PR/MR numbers:
 `wt go 3182` selects the same pair as `wt go pr3182` in a GitHub repository;
 `wt path 607` is equivalent to `wt path mr607` in a GitLab repository. These
 shortcuts select existing managed pairs. All-digit selectors always identify
@@ -274,6 +275,39 @@ bare numbers for these selectors. `wt drop` also completes unpaired local branch
 names, and `wt name` completes exact local branch names. Suggestions use local
 repository data, without GitHub/GitLab requests, and respect selector and option
 argument positions. Open a new shell to load updated completion definitions.
+
+### Navigate from anywhere
+
+Outside a Git repository, `wt go`, `wt path`, `wt pr`, and `wt mr` search existing
+managed worktrees under `$W/trees/<repo-key>/`:
+
+```bash
+cd ~
+wt go 42                        # existing PR or MR, whichever forge owns it
+wt go mr42                      # existing GitLab MR
+wt pr 42                        # existing GitHub PR
+wt mr 42                        # existing GitLab MR
+wt path mr42                    # print the physical worktree path
+wt go project:42                # select a repository key explicitly
+wt go project:fix-stream         # a qualified branch slug works too
+```
+
+One verified match selects its owning worktree: `wt path` prints the path, while
+the other commands navigate through the shell wrapper. Multiple matches list
+repository keys, request URLs, and paths, with qualified commands to select the
+intended one. No match reports that no existing worktree was found; create the
+pair from the target repository's primary checkout first. `wt go` and `wt path`
+also accept branch names and shortened `rwgk/` slugs. Explicit `prNUMBER` and
+`mrNUMBER` selectors filter by forge, and `wt pr` searches GitHub while `wt mr`
+searches GitLab.
+
+Unqualified commands inside Git remain scoped to the current repository, even
+when no local pair matches. An unregistered or malformed repository keeps its
+normal diagnostic. A `<repo-key>:<selector>` explicitly selects a repository
+from anywhere, including another Git checkout. This global lookup verifies
+saved associations and worktree ownership locally; it needs no network request
+or global registry and does not create or update a pair. Without a selector,
+`wt pr` / `wt mr` still prints the current worktree's saved URL.
 
 ### PR reviews
 
