@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 
 from . import github
 from .core import WTError
@@ -104,15 +103,21 @@ def _local_unchanged(repo, branch, oid):
 
 
 def _push_error(result, *, provider="github"):
-    detail = (result.stderr or result.stdout).strip()
-    detail = re.sub(r"(https?://)[^/\s@]+@", r"\1[redacted]@", detail)
+    detail = github._push_diagnostics(result)
     lower = detail.lower()
-    if any(word in lower for word in ("stale info", "fetch first", "non-fast-forward")):
-        raise WTError(
+    if "wt push guard:" in lower and "pre-push hook" in lower:
+        message = (
+            "A local pre-push hook rejected the PR push. "
+            "Resolve the hook's error before retrying."
+        )
+    elif any(
+        word in lower for word in ("stale info", "fetch first", "non-fast-forward")
+    ):
+        message = (
             "The PR branch changed during push. Run 'wt pull' or 'wt pull --rebase' "
             "to inspect and reconcile it before retrying. No lease was refreshed."
         )
-    if any(
+    elif any(
         word in lower
         for word in ("permission", "denied", "403", "write access", "not allowed")
     ):
@@ -124,15 +129,13 @@ def _push_error(result, *, provider="github"):
             else "GitHub refused the PR push. Check write access and the contributor's "
             "'Allow edits from maintainers' setting. "
         )
-        raise WTError(
-            guidance
-            + "No alternate branch was created."
-            + (f"\n{detail}" if detail else "")
+        message = guidance + "No alternate branch was created."
+    else:
+        message = (
+            f"The PR push failed (exit {result.returncode}). "
+            "Inspect the Git and hook diagnostics before retrying. No lease was refreshed."
         )
-    raise WTError(
-        "The PR push failed; inspect authentication and the source branch before retrying. "
-        "No lease was refreshed." + (f"\n{detail}" if detail else "")
-    )
+    raise WTError(message + (f"\n{detail}" if detail else ""))
 
 
 def push(repo):

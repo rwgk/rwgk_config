@@ -346,6 +346,8 @@ remote branch. Permission failures, a changed or missing source, and concurrent
 updates stop with guidance; there is no automatic force push or fallback to origin.
 The result includes the destination, full commit hash, and PR URL. Ordinary
 uncommitted files are not included in a push.
+Existing pre-push hooks still run and may require a clean worktree. Failed
+pushes report both Git and hook output, including local hook rejections.
 
 Use `wt pull` instead of `git pull` in an independent PR worktree. It reports
 the PR and full resulting commit hash, follows rewritten PR history with recovery

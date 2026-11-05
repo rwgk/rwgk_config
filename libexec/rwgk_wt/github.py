@@ -364,6 +364,16 @@ def _push_result(repo, *args, destination, updates, c_locale=False):
     )
 
 
+def _push_diagnostics(result):
+    """Keep hook stdout as well as Git stderr, with URL credentials redacted."""
+    detail = "\n".join(
+        stream.strip()
+        for stream in (result.stdout, result.stderr)
+        if stream and stream.strip()
+    )
+    return re.sub(r"(https?://)[^/\s@]+@", r"\1[redacted]@", detail)
+
+
 def _ancestor(repo, old, new):
     result = _git_result(repo, "merge-base", "--is-ancestor", old, new)
     if result.returncode not in (0, 1):
@@ -1229,8 +1239,10 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
             repo, *command, destination=push_url, updates=push_updates
         )
     if pushed.returncode:
+        detail = _push_diagnostics(pushed)
         raise WTError(
-            "Publication push failed. Fixed leases were not refreshed; inspect remote refs/authentication before retrying."
+            "Publication push failed. Fixed leases were not refreshed."
+            + (f"\n{detail}" if detail else "")
         )
     for entry in entries:
         if _remote_tip(repo, push_url, entry["ref"]) != entry["oid"]:

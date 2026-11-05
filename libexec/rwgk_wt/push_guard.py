@@ -400,5 +400,10 @@ def main(argv=None):
                 file=sys.stderr,
             )
             return 1
+        if result.returncode:
+            print(
+                f"wt push guard: original pre-push hook failed (exit {result.returncode}).",
+                file=sys.stderr,
+            )
         return result.returncode if result.returncode >= 0 else 128 - result.returncode
     return 0

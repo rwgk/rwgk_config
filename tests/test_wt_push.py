@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 import test_wt_github as fixtures
-from rwgk_wt import github, pr_push
+from rwgk_wt import github, pr_push, push_guard
 from rwgk_wt.core import WTError
 
 git = fixtures.git
@@ -362,6 +362,41 @@ class PushTests(unittest.TestCase):
             pr_push.push(repo)
         self.assertEqual(git(self.remotes["contributor"], "rev-parse", "topic"), old)
         self.assertEqual(repo.branches[repo.current_branch()]["sync_base"]["oid"], old)
+
+    def test_rejecting_local_hook_preserves_stdout_diagnostics_and_checkpoint(self):
+        repo = self.pair()
+        old = repo.oid("HEAD")
+        self.commit(repo)
+        (repo.root / "base").write_text("Uncommitted documentation edits\n")
+        hook = repo.common / "hooks" / "pre-push"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(
+            "#!/bin/sh\n"
+            'if test -n "$(git status --porcelain)"; then\n'
+            "    printf '%s\\n' 'Commit or stash uncommitted changes before pushing.'\n"
+            "    git status --short\n"
+            "    exit 19\n"
+            "fi\n"
+        )
+        hook.chmod(0o755)
+        push_guard.install(repo)
+        before_config = (repo.common / "config").read_bytes()
+        before_status = git(repo.root, "status", "--porcelain=v1")
+        before_metadata = copy.deepcopy(repo.branches[repo.current_branch()])
+
+        with self.assertRaises(WTError) as stopped:
+            pr_push.push(repo)
+
+        message = str(stopped.exception)
+        self.assertIn("Commit or stash uncommitted changes before pushing.", message)
+        self.assertIn("M base", message)
+        self.assertIn("original pre-push hook failed (exit 19)", message)
+        self.assertIn("failed to push some refs", message)
+        self.assertEqual(len(self.pushes()), 1)
+        self.assertEqual(git(self.remotes["contributor"], "rev-parse", "topic"), old)
+        self.assertEqual(repo.branches[repo.current_branch()], before_metadata)
+        self.assertEqual((repo.common / "config").read_bytes(), before_config)
+        self.assertEqual(git(repo.root, "status", "--porcelain=v1"), before_status)
 
     def test_push_checks_api_after_transfer_before_advancing_checkpoint(self):
         repo = self.pair()

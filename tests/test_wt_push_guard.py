@@ -102,13 +102,14 @@ class PushGuardTests(unittest.TestCase):
     def permit(self, *, ref="refs/heads/contributor/change", old=None, new=None):
         return [{"ref": ref, "old": old or self.initial, "new": new or self.head}]
 
-    def original_hook(self, *, exit_code=0, executable=True):
+    def original_hook(self, *, exit_code=0, executable=True, stdout=""):
         self.hook.parent.mkdir(parents=True, exist_ok=True)
         self.hook.write_text(
             f"#!{sys.executable}\n"
             "import json,sys\nfrom pathlib import Path\n"
             f"Path({str(self.root / 'hook-stdin')!r}).write_bytes(sys.stdin.buffer.read())\n"
             f"Path({str(self.root / 'hook-args')!r}).write_text(json.dumps(sys.argv[1:]))\n"
+            f"sys.stdout.write({stdout!r})\n"
             f"raise SystemExit({exit_code})\n"
         )
         self.hook.chmod(0o755 if executable else 0o644)
@@ -224,6 +225,27 @@ class PushGuardTests(unittest.TestCase):
         self.assertNotIn("Raw git push is blocked", result.stderr)
         self.assertTrue((self.root / "hook-stdin").exists())
         self.assertIsNone(self.tip(f"refs/heads/{self.branch}"))
+
+    def test_failed_original_hook_reports_exit_and_preserves_stdout(self):
+        diagnostic = "Local checks rejected the dirty checkout.\n"
+        original = self.original_hook(exit_code=19, stdout=diagnostic)
+        self.install()
+        result = subprocess.run(
+            [str(self.hook), str(self.receiver), str(self.receiver)],
+            cwd=self.review,
+            input=f"{self.head} {self.head} refs/heads/contributor/change {self.initial}\n",
+            env=dict(os.environ, RWGK_WT_ALLOW_RAW_PUSH="1"),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 19)
+        self.assertEqual(result.stdout, diagnostic)
+        self.assertIn("original pre-push hook failed (exit 19)", result.stderr)
+        self.assertEqual(
+            self.hook.with_name("pre-push.rwgk-original").read_bytes(), original
+        )
+        self.assertEqual(self.tip("refs/heads/contributor/change"), self.initial)
 
     def test_missing_original_hook_stops_install_and_recovery_push(self):
         self.original_hook()
