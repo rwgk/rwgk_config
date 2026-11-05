@@ -1978,6 +1978,7 @@ conda_rm() {
 pixiinsthere() (
     set -x
     curl -fsSL https://pixi.sh/install.sh | PIXI_HOME="$(pwd)/.pixi" PIXI_NO_PATH_UPDATE=1 sh
+    # Hint: pixi self-update --version 0.82.1
 )
 
 pixipath() {
