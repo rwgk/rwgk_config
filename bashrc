@@ -978,6 +978,11 @@ _wt_complete() {
     flags="$flags --help --json"
     case "$first" in
     codex | nickname) ;;
+    stack)
+        if [[ -n "$subcommand" && "$subcommand" != view ]]; then
+            flags="$flags --print-path"
+        fi
+        ;;
     *) flags="$flags --print-path" ;;
     esac
     if [[ "$COMP_CWORD" -eq 1 ]]; then
@@ -996,7 +1001,7 @@ for nickname in json.load(sys.stdin)["nicknames"]:
         fi
     elif [[ "$first" == stack ]]; then
         if ((positional == 0)); then
-            words='init add pull rebase go'
+            words='view init add pull rebase go'
         elif [[ "$subcommand" == go && "$positional" -eq 1 ]]; then
             words='up down top bottom'
         elif [[ "$subcommand" != add || "$positional" -gt 1 ]]; then

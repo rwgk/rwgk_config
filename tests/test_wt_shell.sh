@@ -42,6 +42,21 @@ for request in pr mr; do
 done
 WT_TEST_RESULT="$test_root/destination with spaces"
 
+# Stack overviews print in place without asking the engine for a navigation path.
+for action in '' view; do
+    cd "$test_root/from"
+    if [[ -n "$action" ]]; then
+        wt stack "$action" >"$test_root/output"
+        expected=$'stack\n'"$action"
+    else
+        wt stack >"$test_root/output"
+        expected=stack
+    fi
+    [[ "$PWD" == "$test_root/from" ]] || fail 'stack overview changed directories'
+    [[ "$(cat "$WT_TEST_ARGUMENTS")" == "$expected" ]] || fail 'stack overview requested a navigation path'
+    [[ "$(cat "$test_root/output")" == "$WT_TEST_RESULT" ]] || fail 'stack overview output was hidden'
+done
+
 cd "$test_root/from"
 wt new example
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'new did not enter its worktree'
@@ -251,5 +266,12 @@ complete_wt wt stack go do
 [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == down ]] || fail 'stack direction completion failed'
 complete_wt wt stack go down ''
 [[ " ${COMPREPLY[*]} " != *' down '* ]] || fail 'consumed stack direction received another direction'
+complete_wt wt stack vi
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == view ]] || fail 'stack overview completion was missing'
+for argument in 'stack --' 'stack view --'; do
+    read -r -a arguments <<<"$argument"
+    complete_wt wt "${arguments[@]}"
+    [[ " ${COMPREPLY[*]} " == *' --json '* && " ${COMPREPLY[*]} " != *' --print-path '* ]] || fail 'stack overview offered invalid navigation options'
+done
 printf 'PASS: wt selector and option completion\n'
 printf 'PASS: wt shell navigation\n'

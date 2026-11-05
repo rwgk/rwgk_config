@@ -118,6 +118,33 @@ def get_stack(repo, branch=None):
     return matches[0] if matches else None
 
 
+def view(repo):
+    """Describe the current stack using only the saved local catalog."""
+    require_github(repo)
+    branch = repo.current_branch()
+    if branch is None:
+        raise WTError("Cannot identify a local stack from detached HEAD.")
+    stack = get_stack(repo, branch)
+    if stack is None:
+        raise WTError(f"Current branch {branch!r} is not in a local stack.")
+    return {
+        "repository": repo.config["upstream_repo"],
+        "id": stack.get("id"),
+        "number": stack.get("number"),
+        "trunk": stack["trunk"]["branch"],
+        "current_branch": branch,
+        "branches": [
+            {
+                "branch": row["branch"],
+                "is_current": row["branch"] == branch,
+                "pr": row.get("pullRequest"),
+                "path": repo.branches.get(row["branch"], {}).get("path"),
+            }
+            for row in stack["branches"]
+        ],
+    }
+
+
 @contextlib.contextmanager
 def catalog_lock(repo):
     """Hold extension locks, allowing nested lifecycle helpers on the same Repo."""

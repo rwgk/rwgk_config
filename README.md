@@ -478,6 +478,15 @@ Other lifecycle operations wait for an interrupted PR rebase or restack to finis
 
 ### Stacked PRs
 
+Run `wt stack` or `wt stack view` to see the current stack's number (or local ID
+before publication), trunk, and layers from bottom to top. The overview marks
+your current layer and includes saved PR links. `wt stack --json` and
+`wt stack view --json` provide the same information as structured data.
+
+The overview reads the local catalog without network requests or changes to Git
+or stack metadata. Saved PR facts may be stale; use `wt stack pull` when you
+intend to inspect and adopt GitHub's current stack state.
+
 ```bash
 wt new stream-core
 # edit, test, commit the first layer
@@ -485,6 +494,7 @@ wt stack init
 wt stack add stream-tests       # create and enter the next owning worktree
 # edit, test, commit
 wt publish --stack              # publish all layers to upstream
+wt stack                        # show the local stack and current position
 wt stack go down                # enter previous layer's worktree
 # amend first layer
 wt stack rebase                 # local restack in each layer's own worktree

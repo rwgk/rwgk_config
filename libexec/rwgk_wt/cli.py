@@ -137,9 +137,11 @@ def parser():
     )
     trunk.add_argument("action", nargs="?", choices=("update",))
     stack = commands.add_parser(
-        "stack", help="manage dependencies without switching owning worktrees"
+        "stack", help="show the local stack overview or manage its worktrees"
     )
-    actions = stack.add_subparsers(dest="action", required=True)
+    actions = stack.add_subparsers(dest="action")
+    stack.set_defaults(action="view")
+    actions.add_parser("view", help="show the current stack from saved local metadata")
     actions.add_parser("init", help="adopt the current managed branch into a stack")
     add = actions.add_parser(
         "add", help="create and register the next layer in its own worktree"
@@ -213,7 +215,7 @@ def _readonly(args):
         or args.command == "trunk"
         and args.action is None
         or args.command == "stack"
-        and args.action == "go"
+        and args.action in ("go", "view")
     )
 
 
@@ -297,6 +299,8 @@ def _dispatch(repo, args):
             return repo.trunk_update(), None
         return {"path": str(repo.primary), "branch": repo.config["trunk"]}, repo.primary
     if command == "stack":
+        if args.action == "view":
+            return stacks.view(repo), None
         if args.action == "init":
             return stacks.initialize(repo), None
         if args.action == "add":
@@ -583,7 +587,24 @@ def _housekeeping_lines(repo, value):
 
 
 def _display(args, value, repo=None):
-    if args.command in ("pr", "mr") and args.selector is None:
+    if args.command == "stack" and args.action == "view":
+        if value["number"] is not None:
+            title = f"Stack #{value['number']} (local)"
+        else:
+            title = "Local stack" + (f" {value['id']}" if value["id"] else "")
+        print(f"{title}: {value['repository']}")
+        print(f"Trunk: {value['trunk']}")
+        print("Layers, bottom to top (* current):")
+        for index, row in enumerate(value["branches"], start=1):
+            pr = row.get("pr") or {}
+            label = f"pr{pr['number']}" if pr.get("number") else "unpublished"
+            if pr.get("merged"):
+                label += " MERGED"
+            marker = "*" if row["is_current"] else " "
+            print(f"{marker} {index}. {label}  {row['branch']}")
+            if pr.get("url"):
+                print(f"     {pr['url']}")
+    elif args.command in ("pr", "mr") and args.selector is None:
         print(value["url"])
     elif args.command == "list":
         print(

@@ -66,6 +66,11 @@ commands inside Git retain the current repository scope and its normal errors.
 Global navigation verifies saved associations and ownership without fetching,
 creating, or updating a pair. Create missing worktrees from the target repository.
 
+Use `wt stack` or `wt stack view` for a local overview of the current stack,
+including its identity, trunk, ordered layers, saved PR links, and current
+position. `--json` emits structured data. This reads saved metadata without
+network requests or writes; use `wt stack pull` for deliberate GitHub adoption.
+
 All stacks publish to verified upstream, unconditionally. New independent PRs use
 the registered repository's publication destination. Update an associated
 independent PR with `wt push`, including an authorized contribution to another
