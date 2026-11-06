@@ -302,19 +302,30 @@ class Repo:
         return owners[0] if owners else None
 
     def ensure_idle(self, path=None):
-        if self.state.get("pr_rebase") and not getattr(
-            self, "_wt_pr_rebase_active", False
+        from . import operation_scope
+
+        path = Path(path or self.root).resolve()
+        if (
+            self.state.get("pr_rebase")
+            and not getattr(self, "_wt_pr_rebase_active", False)
+            and operation_scope.blocks(self, "pr_rebase", path)
         ):
+            owner = operation_scope.recovery_location(self, "pr_rebase")
+            location = f" in {owner}" if owner else ""
             raise WTError(
-                "A PR pull rebase is pending; finish it with 'wt pull --continue' "
-                "or abort it with 'wt pull --abort'."
+                f"A PR pull rebase is pending{location}; finish it with "
+                "'wt pull --continue' or abort it with 'wt pull --abort'."
             )
-        if self.state.get("submodule_rebase") and not getattr(
-            self, "_wt_submodule_rebase_active", False
+        if (
+            self.state.get("submodule_rebase")
+            and not getattr(self, "_wt_submodule_rebase_active", False)
+            and operation_scope.blocks(self, "submodule_rebase", path)
         ):
+            owner = operation_scope.recovery_location(self, "submodule_rebase")
+            location = f" in {owner}" if owner else ""
             raise WTError(
-                "A restack has pending submodule work; finish or abort it with "
-                "'wt stack rebase' before another lifecycle operation."
+                f"A restack has pending submodule work{location}; finish or abort "
+                "it with 'wt stack rebase' before another lifecycle operation."
             )
         for name in (
             "gh-stack-rebase-state",
@@ -322,9 +333,10 @@ class Repo:
             "gh-stack-adopt-state",
             "gh-stack-migration",
         ):
-            if (self.common / name).exists():
+            if (self.common / name).exists() and operation_scope.native_blocks(
+                self, name, path
+            ):
                 raise WTError(f"Finish or abort the pending operation: {name}.")
-        path = path or self.root
         for name in (
             "rebase-merge",
             "rebase-apply",

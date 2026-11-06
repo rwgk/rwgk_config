@@ -295,6 +295,10 @@ def rebase(repo, flags=()):
             "Use --accept-base-change only with a fresh rebase that includes trunk."
         )
     require_extension(repo)
+    if getattr(repo, "state", {}).get("submodule_rebase"):
+        from .operation_scope import require_restack_owner
+
+        require_restack_owner(repo)
     active = getattr(repo, "_wt_submodule_rebase_active", False)
     repo._wt_submodule_rebase_active = True
     try:
@@ -358,10 +362,13 @@ def _rebase(repo, flags=()):
             else [],
         )
         if captured:
+            from .operation_scope import stack_scope
+
             repo.state["submodule_rebase"] = {
                 "phase": "rebasing",
                 "captured": captured,
                 "primary_before": primary_before,
+                "scope": stack_scope(repo, stack),
             }
             repo.save()
     if recovery and captured:

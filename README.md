@@ -476,7 +476,12 @@ This retention is local; cleanup does not push submodule refs.
 
 Interrupted initialization leaves a pending journal. Retry the same creation or
 update command; unexpected local changes stop recovery for inspection.
-Other lifecycle operations wait for an interrupted PR rebase or restack to finish.
+Independent `wt pull` and `wt push` can continue in another worktree while a PR
+rebase or restack is paused, when its saved scope proves the worktrees are
+unrelated. The affected worktrees remain protected, shared metadata writes stay
+serialized, and another operation cannot overwrite a pending recovery slot.
+Unknown operation formats remain blocking. Recovery errors identify the owning
+worktree when it is known.
 
 ### Stacked PRs
 

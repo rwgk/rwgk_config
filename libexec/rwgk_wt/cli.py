@@ -754,6 +754,7 @@ def main(argv=None):
             import contextlib
 
             with contextlib.nullcontext() if readonly else repo.locked():
+                repo._wt_independent_sync = args.command in ("pull", "push")
                 if not readonly and args.command != "init":
                     from .push_guard import install
 
