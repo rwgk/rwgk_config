@@ -1035,7 +1035,7 @@ def _verify_native_stack(repo, selected, entries, prs):
 
 def publish(repo, stack=False, title=None, body_file=None, ready=False):
     """Publish committed tips atomically, then create/link PRs without hidden pushes."""
-    from . import lifecycle, stacks
+    from . import lifecycle, signing, stacks
 
     if stack:
         stacks.require_github(repo)
@@ -1132,6 +1132,20 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
         if pr and pr["author"].lower() != viewer.lower():
             raise WTError(
                 f"PR #{pr['number']} belongs to another author; use an explicit review publication workflow"
+            )
+        if signing.required(repo, base_repo, pr["author"] if pr else viewer):
+            parent_oid = (
+                entries[-1]["oid"]
+                if entries
+                else signing.fetch_base_oid(repo, base_repo, base)
+            )
+            signing.ensure_unsigned(
+                repo,
+                branch=branch,
+                base_oid=parent_oid,
+                head_oid=oid,
+                pr=pr,
+                stack=stack,
             )
         observed = f"refs/rwgk/publication/{hashlib.sha256((head_repo.lower() + ':' + branch).encode()).hexdigest()}/observed"
         force = False

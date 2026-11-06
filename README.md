@@ -226,6 +226,33 @@ Options also include `--backtracking PATH`. Configuration records `key`,
 `archive_remote`, `trees_root`, and `backtracking`. Use `wt init --help` for the
 current interface; inspect existing state before changing repository settings.
 
+### Commit signing and CUDA Python CI approval
+
+The central Git template disables automatic commit signing. Preview and install
+it with `~/rwgk_config/install_gitconfig_in_homedir.sh` and `--apply`, respectively.
+Use `git commit -S` to sign ordinary authored commits explicitly. Normal rebases
+may produce unsigned replacements; no special signature-preservation step is
+needed.
+
+For PRs authored by `rwgk` targeting **`NVIDIA/cuda-python`**, `wt push` and
+`wt publish` require at least one unsigned commit in each PR's own commit range.
+Stack publication checks every active layer against its effective parent before
+any publication or archive push. An unsigned ancestor in trunk or a lower layer
+does not count. This keeps copy-pr-bot mirror updates subject to explicit
+`/ok to test <full-SHA>` approval. The private repository, other authors' PRs, and
+other repositories are excluded.
+
+An existing unsigned commit is enough. Otherwise, deliberately add an empty one:
+
+```bash
+git -c commit.gpgsign=false commit --allow-empty --only \
+    -m "ci: require manual copy-pr-bot approval"
+```
+
+This leaves staged changes staged. If adding it to a lower stack layer, restack
+its descendants with `wt stack rebase --upstack --no-trunk` before publishing.
+The publication check reports a missing unsigned commit without changing history.
+
 ### Independent development
 
 ```bash

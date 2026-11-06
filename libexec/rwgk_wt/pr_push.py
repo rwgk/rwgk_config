@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from . import github
+from . import github, signing
 from .core import WTError
 
 
@@ -197,6 +197,14 @@ def push(repo):
             raise WTError("Local HEAD is behind the PR. Run 'wt pull', then 'wt push'.")
         raise WTError(
             "Local HEAD and the PR diverged. Run 'wt pull --rebase', then 'wt push'."
+        )
+    if signing.required(repo, pr["base_repo"], pr["author"]):
+        signing.ensure_unsigned(
+            repo,
+            branch=branch,
+            base_oid=signing.fetch_base_oid(repo, pr["base_repo"], pr["base_ref"]),
+            head_oid=oid,
+            pr=pr,
         )
     _local_unchanged(repo, branch, oid)
     if not unchanged:
