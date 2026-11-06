@@ -4,18 +4,18 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: install_gitconfig_in_homedir.sh [--dry-run]
+Usage: install_gitconfig_in_homedir.sh [--apply]
 
-Install the host-adjusted Git configuration from ~/rwgk_config.
-With --dry-run, show the proposed diff without changing ~/.gitconfig.
+Preview the host-adjusted Git configuration from ~/rwgk_config.
+Use --apply to install it in ~/.gitconfig.
 An unchanged configuration is reported and left untouched in either mode.
 EOF
 }
 
-dry_run=false
+apply=false
 for arg in "$@"; do
     case "$arg" in
-    --dry-run) dry_run=true ;;
+    --apply) apply=true ;;
     -h | --help)
         usage
         exit 0
@@ -64,7 +64,7 @@ if [[ -f "$DEST" ]] && cmp -s "$DEST" "$candidate"; then
     exit 0
 fi
 
-if $dry_run; then
+if ! $apply; then
     if [[ ! -e "$DEST" ]]; then
         echo "No ~/.gitconfig exists; would create it from $SOURCE."
     else
@@ -74,6 +74,7 @@ if $dry_run; then
             exit "$diff_status"
         fi
     fi
+    echo "Use --apply to install these changes."
     exit 0
 fi
 

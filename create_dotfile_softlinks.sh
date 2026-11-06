@@ -9,4 +9,4 @@ create_one="$script_dir/create_one_dotfile_softlink.sh"
 "$create_one" .inputrc rwgk_config/inputrc
 "$create_one" .vimrc rwgk_config/vimrc
 
-"$script_dir/install_gitconfig_in_homedir.sh"
+"$script_dir/install_gitconfig_in_homedir.sh" --apply
