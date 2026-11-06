@@ -546,7 +546,7 @@ class Repo:
         defaults_path = Path(
             os.environ.get(
                 "RWGK_WT_DEFAULTS",
-                str(Path.home() / "rwgk_config_nvidia/git_stuff/wt-defaults.json"),
+                str(Path.home() / "rwgk_config_nvidia/wt-defaults.json"),
             )
         )
         defaults = {}

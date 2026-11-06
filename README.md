@@ -202,7 +202,7 @@ Registration saves configuration in the common Git directory and does not move
 existing worktrees, switch branches, rename branches, or publish anything.
 `doctor` reports existing inconsistencies for deliberate adoption later.
 
-NVIDIA defaults come from `~/rwgk_config_nvidia/git_stuff/wt-defaults.json`:
+NVIDIA defaults come from `~/rwgk_config_nvidia/wt-defaults.json`:
 
 | Repository | Key | Trunk | Independent PR publication |
 |---|---|---|---|
