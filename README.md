@@ -780,6 +780,35 @@ checkout.
 operation issues. Existing layouts are intentionally not migrated automatically.
 Ask for a situation-specific adoption plan instead of mass-renaming live work.
 
+#### Interrupted safety backups
+
+A `Review lifecycle journal: ...` warning can identify an interrupted safety
+backup rather than an unfinished stack adoption. A tool timeout can stop a
+`stack-pull` backup after saving recovery refs but before submodule preservation
+or record finalization. Adoption starts only after that backup completes. Give
+agent tool calls a generous timeout for stack operations, allowing for submodule
+history preservation and network steps.
+
+A successful retry can leave an older backup journal at `status: planned`.
+Before an agent reconciles that older record:
+
+- Verify that a later completed backup covers the same labeled snapshot OIDs
+  and all relevant submodule history.
+- Verify the recovery refs and their objects. Matching superproject refs or the
+  absence of a pending Git operation alone is insufficient.
+- Retain both records and all recovery refs. Under the repository lock
+  (`Repo.locked()`), close the old backup with a reconciliation reason, timestamp,
+  and `superseded_by` record ID, preserving its original progress metadata. Use
+  atomic writes for both its operation journal under the common Git directory's
+  `rwgk-wt/operations/` and its recorded backtracking copy.
+
+This closes backup bookkeeping; it does not claim the original adoption ran.
+Do not apply this reconciliation to retirement/cleanup records or uncertain
+preservation coverage; use the normal recovery path or investigate further.
+There is no general repair command for these case-specific decisions.
+
+#### Stack checks
+
 The stack adoption/checking programs remain internal tools for detailed recovery:
 
 ```bash
