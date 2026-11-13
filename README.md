@@ -716,6 +716,53 @@ Checked-out branches, trunk, missing managed worktrees,
 and branches needed by surviving stack layers are protected. `wt restore` can
 recreate the retired branch in its own managed worktree.
 
+#### Retire a remote-only branch
+
+For an obsolete GitHub branch whose local work is already retired, select the
+remote explicitly. No local branch or worktree needs to exist:
+
+```bash
+wt drop --remote upstream rwgk/old-experiment       # preview
+wt drop --remote upstream rwgk/old-experiment --expect <full-SHA> --apply
+# An interrupted remote retirement keeps its original endpoint and SHA:
+wt drop --resume <record-id> --apply
+```
+
+The preview prints a ready-to-run apply command with the observed tip. `--expect`
+is required for application; a changed branch stops the deletion instead of
+refreshing that expectation. Remote mode treats branch names literally,
+including bare numbers and names such as `pr123`; it does not resolve local
+selectors. It cannot be combined with `--local-only`, `--archive-local`, or
+`--discard-builds`, and it leaves the shell in its current directory.
+
+The operation records the verified remote alias, repository, push URL, full
+`refs/heads/...` name, tip SHA, and whether deletion occurred or the branch was
+already absent. It creates a local recovery ref and uses the usual selective
+immutable archive **tags** on origin when history is not otherwise covered.
+It does not create archive branches or change local branches, worktrees, or
+Git branch tracking.
+
+Matching backtracking records are linked by repository context, exact local
+branch name, and exact tip. A completed local retirement is identified as such;
+legacy text logs are labeled pre-deletion evidence and never presented as proof
+that deletion completed. Historical records remain unchanged. Preview shows
+those links, and the new journal keeps the local identities separate from the
+remote identity. No private cleanup manifest is required.
+
+Default and protected branches, active PR head/base branches, and branches still
+used by managed publication or stack state are refused. The live destination
+and expected tip are rechecked before deletion, which uses an exact-SHA lease.
+This remote-only mode currently supports GitHub: the canonical repository's
+`rwgk/` namespace or your own related fork. Legacy names such as `review/...`,
+bare numbers, and `pr123` are accepted on your fork. Normal local and PR/MR
+cleanup retain their existing behavior. On resume, use the saved record without
+a new selector, remote, or expected SHA. `wt restore` remains for retired local
+pairs; inspect this remote record's recovery ref before choosing an authorized
+recovery. Allow a generous agent-tool timeout for remote checks and archival;
+after an interruption, resume the saved record instead of refreshing its plan.
+If cached remote-tracking refs remain afterward, refresh them with
+`git fetch --prune REMOTE`; the journal records the server-side deletion.
+
 For an ad-hoc local branch outside the managed pair lifecycle, including in a
 repository that has never run `wt init`, use:
 

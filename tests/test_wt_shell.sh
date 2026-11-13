@@ -105,6 +105,20 @@ wt clean example >"$test_root/output"
 wt clean example --apply
 [[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'cleanup did not leave the removed checkout'
 
+# Remote-only retirement never requests navigation, including when resumed.
+for invocation in \
+    'drop --remote origin review/topic' \
+    'drop --remote origin review/topic --expect aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --apply' \
+    'drop --resume remote-record --apply'; do
+    cd "$test_root/from"
+    read -r -a arguments <<<"$invocation"
+    wt "${arguments[@]}" >"$test_root/output"
+    [[ "$PWD" == "$test_root/from" ]] || fail 'remote retirement changed directories'
+    [[ "$(tail -1 "$WT_TEST_ARGUMENTS")" != --print-path ]] || fail 'remote retirement requested a navigation path'
+done
+wt drop --resume local-record --local-only --apply
+[[ "$PWD" == "$WT_TEST_RESULT" ]] || fail 'local retirement resume lost navigation'
+
 cd "$test_root/from"
 wt trunk update >"$test_root/output"
 [[ "$PWD" == "$test_root/from" ]] || fail 'trunk update navigated'
@@ -196,6 +210,12 @@ awk '/^_wt_complete\(\) \{/ { copy=1 } copy { print } copy && /^}$/ { exit }' \
 source "$test_root/wt-completion.sh"
 git branch legacy/topic
 git branch 123
+git remote add origin https://example.invalid/owner/project.git
+git remote add upstream https://example.invalid/upstream/project.git
+git update-ref refs/remotes/origin/review/topic HEAD
+git update-ref refs/remotes/origin/123 HEAD
+git update-ref refs/remotes/origin/pr123 HEAD
+git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/review/topic
 WT_TEST_RESULT='{
   "config": {"provider": "github", "upstream_repo": "Acme/project"},
   "branches": [
@@ -224,6 +244,18 @@ complete_wt wt go legacy/
 [[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'navigation offered an unmanaged branch'
 complete_wt wt drop 12
 [[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'numeric local branch was offered as a request number'
+complete_wt wt drop --remote ori
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == origin ]] || fail 'remote alias completion failed'
+complete_wt wt drop --remote origin review/
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == review/topic ]] || fail 'cached remote branch completion failed'
+complete_wt wt drop --remote=origin 12
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == 123 ]] || fail 'literal numeric remote branch completion failed'
+complete_wt wt drop --remote origin pr1
+[[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == pr123 ]] || fail 'literal remote branch completion used PR aliases'
+complete_wt wt drop --remote origin HEAD
+[[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'remote symbolic HEAD was offered as a branch'
+complete_wt wt drop --remote origin review/topic --
+[[ " ${COMPREPLY[*]} " == *' --expect '* && " ${COMPREPLY[*]} " != *' --print-path '* ]] || fail 'remote retirement options were incorrect'
 complete_wt wt name rwgk/topic
 [[ "${#COMPREPLY[@]}" -eq 1 && "${COMPREPLY[0]}" == rwgk/topic-name ]] || fail 'wt name completion was ambiguous with a tag'
 git branch 'rwgk/$(touch${IFS}completion-injected)'
@@ -249,7 +281,7 @@ complete_wt wt go 6
 complete_wt wt go pr6
 [[ "${#COMPREPLY[@]}" -eq 0 ]] || fail 'GitLab completion offered a GitHub alias'
 
-for argument in 'clean --resume' 'publish --title' 'publish --body-file' 'stack pull --stack'; do
+for argument in 'clean --resume' 'drop --remote origin --expect' 'publish --title' 'publish --body-file' 'stack pull --stack'; do
     read -r -a arguments <<<"$argument"
     rm -f -- "$WT_TEST_ARGUMENTS"
     complete_wt wt "${arguments[@]}" ''

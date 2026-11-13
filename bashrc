@@ -851,8 +851,12 @@ git_show_upstream_for_branch() {
 # Navigation happens in this shell; the engine emits one validated physical path.
 wt() {
     local navigate=0 argument worktree_dir status cleanup_primary=
+    local remote_drop=0 local_drop=0 resuming_drop=0
     for argument in "$@"; do
         case "$argument" in
+        --remote | --remote=*) remote_drop=1 ;;
+        --local-only) local_drop=1 ;;
+        --resume | --resume=*) resuming_drop=1 ;;
         -h | --help | --json | --print-path)
             command git-wt "$@"
             return $?
@@ -868,7 +872,14 @@ wt() {
         add | go) navigate=1 ;;
         esac
         ;;
-    clean | drop | housekeeping)
+    drop)
+        if ((!remote_drop && (!resuming_drop || local_drop))); then
+            for argument in "$@"; do
+                [[ "$argument" == --apply ]] && navigate=1
+            done
+        fi
+        ;;
+    clean | housekeeping)
         for argument in "$@"; do
             [[ "$argument" == --apply ]] && navigate=1
         done
@@ -930,11 +941,12 @@ wt() {
 _wt_complete() {
     local cur="${COMP_WORDS[COMP_CWORD]}" first="${COMP_WORDS[1]:-}"
     local words= flags= values= branch owner argument subcommand= i
-    local positional=0 need_value=0 resuming=0
+    local positional=0 need_value=0 resuming=0 remote= value_option=
     COMPREPLY=()
     case "$first" in
     init) values='--key --trunk --upstream --publish --archive --trees --backtracking --repo' ;;
-    clean | drop) values='--resume' ;;
+    clean) values='--resume' ;;
+    drop) values='--resume --remote --expect' ;;
     publish) values='--title --body-file' ;;
     codex) values='--cwd' ;;
     stack) values='--stack' ;;
@@ -942,14 +954,18 @@ _wt_complete() {
     for ((i = 2; i < COMP_CWORD; i++)); do
         argument="${COMP_WORDS[i]}"
         if ((need_value)); then
+            [[ "$value_option" == --remote ]] && remote="$argument"
             need_value=0
+            value_option=
             continue
         fi
         case "$argument" in
         --resume | --resume=*) resuming=1 ;;
+        --remote=*) remote="${argument#*=}" ;;
         esac
         if [[ " $values " == *" $argument "* ]]; then
             need_value=1
+            value_option="$argument"
         elif [[ "$argument" != -* ]]; then
             if [[ "$first" == stack && "$positional" -eq 0 ]]; then
                 subcommand="$argument"
@@ -957,15 +973,29 @@ _wt_complete() {
             ((positional += 1))
         fi
     done
-    # Option values use the shell's normal filename fallback, never selectors.
-    ((need_value)) && return 0
+    # Remote aliases come from local configuration; other values use filename fallback.
+    if ((need_value)); then
+        [[ "$value_option" == --remote ]] || return 0
+        while IFS= read -r branch; do
+            [[ "$branch" == "$cur"* ]] && COMPREPLY+=("$branch")
+        done < <(git remote 2>/dev/null)
+        return 0
+    fi
     case "$first" in
     init) flags="$values" ;;
     pull) flags='--rebase --reset-to-remote-head --continue --abort' ;;
     publish) flags='--stack --title --body-file --ready' ;;
     clean) flags='--apply --archive-local --discard-builds --resume' ;;
     housekeeping) flags='--apply --discard-builds' ;;
-    drop) flags='--local-only --apply --archive-local --discard-builds --resume' ;;
+    drop)
+        if [[ -n "$remote" ]]; then
+            flags='--apply --expect'
+        elif ((resuming)); then
+            flags='--local-only --apply'
+        else
+            flags='--local-only --remote --apply --archive-local --discard-builds --resume'
+        fi
+        ;;
     codex) flags='--list --cwd' ;;
     nickname) flags='--delete' ;;
     stack)
@@ -982,6 +1012,9 @@ _wt_complete() {
         if [[ -n "$subcommand" && "$subcommand" != view ]]; then
             flags="$flags --print-path"
         fi
+        ;;
+    drop)
+        [[ -n "$remote" ]] || ((resuming)) || flags="$flags --print-path"
         ;;
     *) flags="$flags --print-path" ;;
     esac
@@ -1016,6 +1049,12 @@ for nickname in json.load(sys.stdin)["nicknames"]:
     elif [[ "$first" == go || "$first" == path || "$first" == clean || "$first" == drop || "$first" == name ]]; then
         if ((positional || resuming)); then
             words="$flags"
+        elif [[ "$first" == drop && -n "$remote" ]]; then
+            while IFS= read -r branch; do
+                [[ "$branch" == "refs/remotes/$remote/"* ]] || continue
+                branch="${branch#"refs/remotes/$remote/"}"
+                [[ "$branch" == HEAD ]] || words+=$'\n'"$branch"
+            done < <(git for-each-ref --format='%(refname)' "refs/remotes/$remote/" 2>/dev/null)
         elif [[ "$first" == name ]]; then
             words=$(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null) || words=
         else

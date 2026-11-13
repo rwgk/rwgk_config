@@ -935,6 +935,10 @@ def _apply_retirement_locked(repo, record):
 def resume(repo, record_id):
     """Continue a journaled cleanup without replanning against changed remote tips."""
     record = _load_record(repo, record_id)
+    if record["kind"] == "remote-retire":
+        from .remote_retire import resume as resume_remote
+
+        return resume_remote(repo, record_id)
     if record["kind"] != "retire":
         raise WTError(
             "This record describes preservation before a rewrite, not cleanup"

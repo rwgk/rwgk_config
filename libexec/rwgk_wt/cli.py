@@ -17,6 +17,7 @@ from .core import (
     request_prefix,
     request_selector,
 )
+from .formatting import summarize_lines
 
 
 def parser():
@@ -180,7 +181,7 @@ def parser():
     for name in ("clean", "drop"):
         command = commands.add_parser(
             name,
-            help="preview retirement; drop also accepts an unpaired local branch",
+            help="preview retirement; drop accepts local or remote-only branches",
         )
         command.add_argument(
             "selector", nargs="?", help="branch, slug, or PR/MR number or alias"
@@ -197,9 +198,19 @@ def parser():
             metavar="RECORD",
             help="resume an interrupted retirement (requires --apply)",
         )
-        command.add_argument(
-            "--local-only", action="store_true", required=name == "drop"
-        )
+        if name == "drop":
+            mode = command.add_mutually_exclusive_group()
+            mode.add_argument("--local-only", action="store_true")
+            mode.add_argument(
+                "--remote", metavar="REMOTE", help="retire one exact remote branch only"
+            )
+            command.add_argument(
+                "--expect",
+                metavar="SHA",
+                help="expected remote tip; required with --remote and --apply",
+            )
+        else:
+            command.add_argument("--local-only", action="store_true")
     restore = commands.add_parser(
         "restore", help="recreate a pair from a backtracking record"
     )
@@ -341,8 +352,49 @@ def _dispatch(repo, args):
         if args.resume:
             if not args.apply:
                 raise WTError("Resuming retirement requires --apply.")
+            if args.selector or args.archive_local or args.discard_builds:
+                raise WTError(
+                    "Resume the saved retirement without new selectors or cleanup options."
+                )
+            record = lifecycle._load_record(repo, args.resume)
+            is_remote = record.get("kind") == "remote-retire"
+            if is_remote and command != "drop":
+                raise WTError(
+                    "Use 'wt drop --resume RECORD --apply' for remote retirement."
+                )
+            if command == "drop":
+                if args.remote is not None or args.expect is not None:
+                    raise WTError(
+                        "Resume uses the recorded remote and tip; do not supply --remote or --expect."
+                    )
+                if is_remote and args.local_only:
+                    raise WTError(
+                        "Remote retirement cannot be resumed with --local-only."
+                    )
+                if not is_remote and not args.local_only:
+                    raise WTError("Local retirement requires --local-only.")
             result = lifecycle.resume(repo, args.resume)
-            return result, repo.primary
+            return result, None if is_remote else repo.primary
+        if command == "drop" and args.remote:
+            from . import remote_retire
+
+            if not args.selector:
+                raise WTError("Remote retirement requires an exact branch name.")
+            if args.archive_local or args.discard_builds:
+                raise WTError(
+                    "Remote retirement does not accept --archive-local or --discard-builds."
+                )
+            return remote_retire.retire(
+                repo,
+                args.selector,
+                remote=args.remote,
+                expect=args.expect,
+                apply=args.apply,
+            ), None
+        if command == "drop" and (not args.local_only or args.expect is not None):
+            raise WTError(
+                "Choose --local-only or --remote REMOTE; --expect is only for remote retirement."
+            )
         if command == "clean" and args.local_only:
             raise WTError("Use 'wt drop --local-only' for explicit local retirement.")
         if args.selector:
@@ -450,16 +502,30 @@ def _cleanup_lines(repo, value):
     if not operations:
         lines.append("No branch/worktree pairs removed.")
     for record in operations:
-        suffix = " and its worktree" if record.get("path") else " (no worktree)"
-        lines.append(f"Removed local branch {record['branch']}{suffix}.")
+        if record.get("kind") == "remote-retire":
+            source = record["source"]
+            lines.append(
+                f"Remote retirement complete: {source['remote']} "
+                f"{source['repo']}:{source['ref']}."
+            )
+        else:
+            suffix = " and its worktree" if record.get("path") else " (no worktree)"
+            lines.append(f"Removed local branch {record['branch']}{suffix}.")
         path = record.get("backtracking_path") or (
             lifecycle._backtracking_dir(repo) / f"{record['id']}.json"
         )
         count = sum(bool(row.get("recovery_ref")) for row in record["snapshots"])
         noun = "ref" if count == 1 else "refs"
+        history_count = len(record.get("local_history", []))
+        history_noun = "link" if history_count == 1 else "links"
         lines.append(
             f"Backtracking: {Path(path).expanduser().resolve()} "
-            f"({count} recovery {noun})"
+            f"({count} recovery {noun}"
+            + (
+                f"; {history_count} historical local {history_noun})"
+                if record.get("kind") == "remote-retire"
+                else ")"
+            )
         )
         events = record.get("remote_actions", [])
         archives = record.get("archives", [])
@@ -513,6 +579,41 @@ def _cleanup_lines(repo, value):
             lines.append(f"{remote}: " + ("; ".join(descriptions) or "no changes"))
     for row in value.get("skipped", []):
         lines.append(f"Skipped {row['branch']}: {row['reason']}")
+    return lines
+
+
+def _remote_retirement_lines(value):
+    source = value["source"]
+    lines = [
+        f"Would retire remote branch: {source['remote']} {source['repo']}:{source['ref']}",
+        f"  HEAD {source['oid']}",
+        "  Corresponding local branch "
+        + (
+            "exists and will be kept."
+            if value.get("local_ref_exists")
+            else "is absent."
+        ),
+    ]
+    history = []
+    for evidence in value.get("local_history", []):
+        label = (
+            "Completed local retirement"
+            if evidence["evidence_kind"] == "completed-retirement"
+            else "Legacy pre-deletion evidence (completion not established)"
+        )
+        history.append(
+            f"  {label}: {evidence.get('record_id') or evidence['path']} "
+            f"({evidence['local_branch']} at {evidence['local_oid']})"
+        )
+    lines.extend(summarize_lines(history))
+    if not value.get("local_history"):
+        lines.append("  No matching historical local-deletion evidence found.")
+    for snapshot in value.get("archive_snapshots", []):
+        lines.append(
+            f"  Preserve with an immutable archive tag: {snapshot['oid']} "
+            f"on {value['archive_destination']['remote']}"
+        )
+    lines.append(f"Apply: {value['apply_command']}")
     return lines
 
 
@@ -631,6 +732,13 @@ def _display(args, value, repo=None):
             )
     elif args.command == "housekeeping":
         print("\n".join(_housekeeping_lines(repo, value)))
+    elif args.command == "drop" and value.get("kind") == "remote-retire":
+        lines = (
+            _cleanup_lines(repo, value)
+            if args.apply
+            else _remote_retirement_lines(value)
+        )
+        print("\n".join(lines))
     elif args.command in ("clean", "drop") and args.apply:
         print("\n".join(_cleanup_lines(repo, value)))
     elif args.command in ("clean", "drop") and "operations" in value:
@@ -704,6 +812,12 @@ def main(argv=None):
     try:
         if as_json and print_path:
             raise WTError("Choose either --json or --print-path.")
+        if (
+            print_path
+            and args.command == "drop"
+            and (args.remote or (args.resume and not args.local_only))
+        ):
+            raise WTError("Remote retirement does not produce a navigation path.")
         if args.command == "name":
             name = directory_name(args.branch)
             print(json.dumps({"directory": name}) if as_json else name)
