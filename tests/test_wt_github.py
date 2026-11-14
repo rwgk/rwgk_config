@@ -71,6 +71,7 @@ class GitHubTests(unittest.TestCase):
             {
                 "MY_GIT_BACKTRACKING_INFO_LOCAL": str(self.root / "backtracking"),
                 "MY_GIT_BACKTRACKING_INFO_REMOTE": "",
+                "AGENT_LOGBOOK_DIR": str(self.root / "logbook"),
             },
         )
         backtracking_env.start()
@@ -810,6 +811,90 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(
             repo.git("symbolic-ref", "--short", "HEAD", cwd=self.primary), "main"
         )
+
+    @mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": "publication-session", "AGENT_LOGBOOK_SESSION_ID": ""},
+    )
+    def test_publication_records_creation_once_with_owning_worktree(self):
+        repo = self.branch()
+        result = self.publish(repo)
+        self.publish(repo, title="Updated title")
+        records = list((self.root / "logbook" / "events").glob("*/*.json"))
+        self.assertEqual(len(records), 1)
+        event = json.loads(records[0].read_text())
+        self.assertEqual(event["session_id"], "publication-session")
+        self.assertEqual(event["cwd"], str(repo.root))
+        self.assertNotIn("note", event)
+        created = [link for link in event["links"] if link["relation"] == "created"]
+        self.assertEqual(
+            [link["display"] for link in created], [result["prs"][0]["url"]]
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "CODEX_THREAD_ID": "stack-publication-session",
+            "AGENT_LOGBOOK_SESSION_ID": "",
+        },
+    )
+    def test_stack_publication_records_each_new_layers_owning_worktree(self):
+        repo, selected = self.native_stack()
+        result = self.publish_stack(repo, selected)
+        records = [
+            json.loads(path.read_text())
+            for path in (self.root / "logbook" / "events").glob("*/*.json")
+        ]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(
+            {
+                (
+                    event["cwd"],
+                    next(
+                        link["display"]
+                        for link in event["links"]
+                        if link["relation"] == "created"
+                    ),
+                )
+                for event in records
+            },
+            {
+                (repo.branches[pr["head_ref"]]["path"], pr["url"])
+                for pr in result["prs"]
+            },
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": "publication-session", "AGENT_LOGBOOK_SESSION_ID": ""},
+    )
+    def test_publication_continues_when_logbook_write_fails(self):
+        stderr = io.StringIO()
+        with (
+            mock.patch(
+                "agent_logbook.store.append_event", side_effect=OSError("unavailable")
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = self.publish(self.branch())
+        self.assertEqual(len(result["prs"]), 1)
+        self.assertIn("warning: could not record created request", stderr.getvalue())
+        self.assertIn("unavailable", stderr.getvalue())
+
+    @mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": "publication-session", "AGENT_LOGBOOK_SESSION_ID": ""},
+    )
+    def test_creation_record_survives_later_alias_failure(self):
+        repo = self.branch()
+        with (
+            mock.patch.object(repo, "alias", side_effect=WTError("alias failed")),
+            self.assertRaisesRegex(WTError, "alias failed"),
+        ):
+            self.publish(repo)
+        records = list((self.root / "logbook" / "events").glob("*/*.json"))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(len(self.prs), 1)
 
     def test_existing_tracking_and_ready_status_are_preserved(self):
         repo = self.branch()

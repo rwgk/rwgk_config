@@ -65,10 +65,10 @@ class LogbookWorkflowTests(unittest.TestCase):
             }
             environment.pop("AGENT_LOGBOOK_SESSION_ID", None)
 
-            def run(name, *args, payload=None):
+            def run(name, *args, payload=None, cwd=None):
                 result = subprocess.run(
                     [sys.executable, str(ROOT / "bin" / name), *args],
-                    cwd=repo,
+                    cwd=cwd or repo,
                     env=environment,
                     input=json.dumps(payload) if payload else None,
                     text=True,
@@ -103,6 +103,13 @@ class LogbookWorkflowTests(unittest.TestCase):
 
             first = "00000000-0000-4000-8000-000000000001"
             register(first)
+            run(
+                "agent-logbook",
+                "record",
+                "https://github.com/unit/fixture/pull/123",
+                "--relation",
+                "reviewed",
+            )
             run(
                 "agent-logbook",
                 "record",
@@ -143,12 +150,39 @@ class LogbookWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(data["matches"][0]["session_id"], first)
             self.assertFalse(marker.exists())
+            result = run("codex-find", "pr123", "--list", cwd=area)
+            self.assertIn(first, result.stdout)
+            self.assertIn("Relations: Reviewed", result.stdout)
+            self.assertNotIn("Created", result.stdout)
+            self.assertFalse(marker.exists())
+            data = json.loads(run("codex-find", "123", "--json", cwd=area).stdout)
+            self.assertEqual(
+                [match["session_id"] for match in data["matches"]], [first]
+            )
+            self.assertFalse(marker.exists())
             second = "00000000-0000-4000-8000-000000000002"
             register(second)
             result = run("git-wt", "codex")
             self.assertIn(first, result.stdout)
             self.assertIn(second, result.stdout)
             self.assertIn("Investigate stream lifetime", result.stdout)
+            self.assertFalse(marker.exists())
+            result = run("codex-find", "123", "--list", cwd=area)
+            entries = result.stdout.split("-" * 100 + "\n")
+            self.assertEqual(len(entries), 2)
+            reviewed = next(entry for entry in entries if first in entry)
+            context_only = next(entry for entry in entries if second in entry)
+            self.assertIn("Relations: Reviewed", reviewed)
+            self.assertNotIn("Created", reviewed)
+            self.assertIn("Relations: Context only", context_only)
+            self.assertEqual(
+                [line for line in result.stdout.splitlines() if line.startswith("-")],
+                ["-" * 100],
+            )
+            data = json.loads(run("codex-find", "pr123", "--json", cwd=area).stdout)
+            self.assertEqual(
+                {match["session_id"] for match in data["matches"]}, {first, second}
+            )
             self.assertFalse(marker.exists())
 
 

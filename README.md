@@ -19,6 +19,9 @@ codex                        # start work; installed hooks register the session
 # later, from that worktree:
 wt codex
 wt codex --list               # show matches without launching Codex
+codex-find pr123              # global GitHub request-number lookup
+codex-find mr611              # global GitLab merge-request lookup
+codex-find 123                # search either forge by request number
 codex-find 'https://github.com/OWNER/REPO/pull/123'
 codex-find 'https://WORKSPACE.slack.com/archives/CHANNEL/pTIMESTAMP'
 codex-find path/to/artifact.txt
@@ -28,9 +31,21 @@ codex-find 'OWNER/REPO#123' --json
 ```
 
 A single exact resource match resumes automatically when its saved Codex history
-is available locally. Multiple matches list IDs, dates, hosts, relationship
-labels, topic hints, and commands to copy. Topic substring matches are labeled
-possible and never launch automatically. `--list` and `--json` always suppress
+is available locally and the request identity is unambiguous. Number lookups are
+global, even inside another repository, and use saved associations without
+requiring the worktree to still exist. If the number identifies requests in
+multiple repositories or GitLab instances, results show the matching URLs and
+remain a list; select one with a full URL or GitHub's `OWNER/REPO#123` form.
+GitHub issues and pull requests share the same recorded number namespace.
+
+Multiple matches list IDs, dates, hosts, topic hints, and commands to copy, with
+100-hyphen separators between entries. Each entry has a `Relations:` line for
+the matched resource, such as `Created`, `Reviewed`, or `Modified, Reviewed`.
+`Context only` means the session was associated with the workspace but has no
+recorded work relationship to the resource; `None` means no resource association
+matched. Relations never come from a session's work on unrelated resources.
+Topic substring matches are labeled possible and never launch automatically.
+`--list` and `--json` always suppress
 launching. No match reports an error instead of silently starting a new session.
 `wt codex` resumes in the current worktree; standalone lookup uses the session's
 recorded directory when it still exists. A missing directory suppresses automatic
@@ -111,6 +126,8 @@ Agents should register the main task and useful changes as they happen:
 ```bash
 agent-logbook record 'https://github.com/OWNER/REPO/issues/123' \
     --relation discussed --note 'Investigate stream lifetime failure'
+agent-logbook record 'https://github.com/OWNER/REPO/pull/456' \
+    --relation reviewed --note 'Review stream lifetime and error handling'
 agent-logbook record path/to/report.txt --relation created \
     --note 'Reproducer results and remaining questions'
 agent-logbook record --note 'Follow-up: validate the fix on another host'
@@ -121,6 +138,14 @@ it). Outside a session, supply `--session ID`. Registration includes current
 workspace context, so work outside the starting directory remains discoverable.
 The main agent should register meaningful work delegated to subagents under the
 resumable main session.
+
+Record `created` for actual PR/MR creation and `modified` for later changes.
+`wt publish` records each newly created PR/MR automatically when run inside a
+Codex session, including new stack layers. Record other creation paths explicitly
+when their tool hook does not capture them. Record `reviewed` when beginning a
+substantive review, including reviews without a posted GitHub/GitLab review, and
+associate each PR/MR actually reviewed in a stack. Opening a worktree or merely
+discussing a request does not establish authorship or review.
 
 Lifecycle hooks register workspace/PR context and a short prompt hint. Supported
 successful tool writes add file, PR/issue, NVBug, Slack, and GitLab associations.

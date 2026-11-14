@@ -64,6 +64,7 @@ class LogbookCliTests(unittest.TestCase):
         host="local.example",
         note="Fix stream lifetime",
         resource="https://github.com/org/project/pull/123",
+        relation="modified",
     ):
         transcript = self.history / "sessions" / "2026" / f"rollout-{session_id}.jsonl"
         if available:
@@ -79,7 +80,7 @@ class LogbookCliTests(unittest.TestCase):
                 "cwd": str(self.cwd),
                 "transcript_path": str(transcript),
                 "note": note,
-                "links": [{**resources.normalize(resource), "relation": "modified"}],
+                "links": [{**resources.normalize(resource), "relation": relation}],
             },
             directory=self.logbook,
         )
@@ -133,6 +134,167 @@ class LogbookCliTests(unittest.TestCase):
         result = json.loads(stdout)
         self.assertTrue(result["matches"][0]["available_locally"])
         self.assertEqual(result["matches"][0]["resume_command"][0], "codex")
+
+    def test_pr_and_bare_number_find_exact_recorded_request_and_resume(self):
+        self.record()
+        self.record(
+            "unrelated",
+            resource="https://github.com/org/project/pull/1234",
+            note="Compare pr123",
+        )
+        for selector in ("pr123", "PR00123", "123"):
+            with (
+                self.subTest(selector=selector),
+                patch.object(cli.subprocess, "run") as launch,
+            ):
+                launch.return_value.returncode = 0
+                status, stdout, stderr = self.invoke(["find", selector])
+                self.assertEqual(status, 0, stderr)
+                self.assertIn("Resuming thread-one", stdout)
+                launch.assert_called_once_with(
+                    ["codex", "resume", "thread-one", "-C", str(self.cwd)], check=False
+                )
+
+    def test_mr_number_finds_gitlab_links_and_filters_github(self):
+        self.record("github-thread")
+        url = "https://gitlab.example/group/subgroup/project/-/merge_requests/123"
+        self.record("gitlab-thread", resource=url, relation="reviewed")
+        with patch.object(cli.subprocess, "run") as launch:
+            launch.return_value.returncode = 0
+            status, stdout, stderr = self.invoke(["find", "mr123"])
+            self.assertEqual(status, 0, stderr)
+            self.assertIn("Resuming gitlab-thread", stdout)
+            launch.assert_called_once_with(
+                ["codex", "resume", "gitlab-thread", "-C", str(self.cwd)], check=False
+            )
+        status, stdout, stderr = self.invoke(["find", "123", "--json"])
+        self.assertEqual(status, 0, stderr)
+        result = json.loads(stdout)
+        self.assertTrue(result["ambiguous_request"])
+        self.assertEqual(
+            {row["provider"] for row in result["request_identities"]},
+            {"github", "gitlab"},
+        )
+
+    def test_shorthand_ambiguity_between_repositories_never_resumes_one_spanning_session(
+        self,
+    ):
+        self.record(relation="created")
+        self.record(
+            resource="https://github.com/other/project/pull/123", relation="reviewed"
+        )
+        with patch.object(cli.subprocess, "run") as launch:
+            status, stdout, stderr = self.invoke(["find", "pr123"])
+        self.assertEqual(status, 0, stderr)
+        launch.assert_not_called()
+        self.assertIn("multiple requests", stdout)
+        self.assertIn("https://github.com/org/project/issues/123", stdout)
+        self.assertIn("https://github.com/other/project/issues/123", stdout)
+        self.assertIn("Relations: Created, Reviewed", stdout)
+        self.assertIn(
+            "Request: https://github.com/org/project/issues/123 (Created)", stdout
+        )
+        self.assertIn(
+            "Request: https://github.com/other/project/issues/123 (Reviewed)", stdout
+        )
+        with patch.object(cli.subprocess, "run") as launch:
+            launch.return_value.returncode = 0
+            self.assertEqual(self.invoke(["find", "org/project#123"])[0], 0)
+            launch.assert_called_once()
+
+    def test_mr_subpage_links_share_one_request_identity_and_base_url_disambiguates(
+        self,
+    ):
+        url = "https://gitlab.example/group/project/-/merge_requests/123"
+        self.record(resource=url + "/diffs#note_4", relation="reviewed")
+        status, stdout, stderr = self.invoke(["find", "mr123", "--json"])
+        self.assertEqual(status, 0, stderr)
+        result = json.loads(stdout)
+        self.assertFalse(result["ambiguous_request"])
+        self.assertEqual(len(result["request_identities"]), 1)
+        self.assertEqual(result["request_identities"][0]["display"], url)
+        status, stdout, stderr = self.invoke(["find", url, "--list"])
+        self.assertEqual(status, 0, stderr)
+        self.assertIn("  Relations: Reviewed", stdout)
+        self.assertNotIn("possible", stdout)
+
+    def test_request_shorthand_does_not_depend_on_surviving_worktree(self):
+        self.record()
+        self.cwd.rmdir()
+        with patch.object(
+            resources, "workspace", side_effect=AssertionError("No checkout lookup")
+        ):
+            status, stdout, stderr = self.invoke(
+                ["find", "pr123", "--cwd", str(self.root), "--json"]
+            )
+        self.assertEqual(status, 0, stderr)
+        result = json.loads(stdout)
+        self.assertEqual(result["matches"][0]["session_id"], "thread-one")
+        self.assertEqual(result["matches"][0]["resume_command"][-1], str(self.root))
+
+    def test_request_shorthand_only_uses_hints_as_possible_and_respects_number_boundary(
+        self,
+    ):
+        self.record(
+            resource="https://github.com/org/project/pull/1234", note="Review pr1234"
+        )
+        for selector in ("pr123", "123"):
+            with self.subTest(selector=selector):
+                self.assertEqual(self.invoke(["find", selector, "--json"])[0], 1)
+        self.record(
+            "hint-thread",
+            resource="https://github.com/org/project/pull/999",
+            note="Review pr123",
+        )
+        with patch.object(cli.subprocess, "run") as launch:
+            status, stdout, stderr = self.invoke(["find", "pr123"])
+        self.assertEqual(status, 0, stderr)
+        launch.assert_not_called()
+        self.assertIn("hint-thread", stdout)
+        self.assertIn("possible", stdout)
+        self.assertIn("Relations: None", stdout)
+        self.assertNotIn("Relations: Modified", stdout)
+        self.assertEqual(stdout.splitlines()[-2], "-" * 100)
+
+    def test_relations_only_describe_matched_resource_and_hide_workspace_when_semantic(
+        self,
+    ):
+        self.record(relation="created")
+        self.record(relation="workspace")
+        self.record(
+            resource="https://github.com/other/project/pull/999", relation="reviewed"
+        )
+        status, stdout, stderr = self.invoke(["find", "pr123", "--list"])
+        self.assertEqual(status, 0, stderr)
+        self.assertIn("  Relations: Created\n", stdout)
+        self.assertNotIn("Reviewed", stdout)
+        self.assertNotIn("Context only", stdout)
+        header = stdout.splitlines()[0]
+        self.assertNotIn("created", header)
+        self.assertNotIn("workspace", header)
+
+    def test_workspace_only_relation_is_labeled_context_only(self):
+        self.record(relation="workspace")
+        status, stdout, stderr = self.invoke(["find", "pr123", "--list"])
+        self.assertEqual(status, 0, stderr)
+        self.assertIn("Relations: Context only", stdout)
+
+    def test_match_separators_are_exactly_100_hyphens_and_absent_from_json(self):
+        self.record(relation="created")
+        status, stdout, stderr = self.invoke(["find", "pr123", "--list"])
+        self.assertEqual(status, 0, stderr)
+        self.assertNotIn("-" * 100, stdout)
+        self.record("thread-two", relation="reviewed")
+        status, stdout, stderr = self.invoke(["find", "pr123", "--list"])
+        self.assertEqual(status, 0, stderr)
+        lines = stdout.splitlines()
+        self.assertEqual(lines.count("-" * 100), 1)
+        self.assertNotEqual(lines[0], "-" * 100)
+        self.assertNotEqual(lines[-1], "-" * 100)
+        status, stdout, stderr = self.invoke(["find", "pr123", "--json"])
+        self.assertEqual(status, 0, stderr)
+        self.assertNotIn("-" * 100, stdout)
+        self.assertEqual(len(json.loads(stdout)["matches"]), 2)
 
     def test_remote_record_cannot_use_arbitrary_locally_existing_path(self):
         outside = self.root / "rollout-thread-one.jsonl"

@@ -1035,7 +1035,7 @@ def _verify_native_stack(repo, selected, entries, prs):
 
 def publish(repo, stack=False, title=None, body_file=None, ready=False):
     """Publish committed tips atomically, then create/link PRs without hidden pushes."""
-    from . import lifecycle, signing, stacks
+    from . import lifecycle, logbook, signing, stacks
 
     if stack:
         stacks.require_github(repo)
@@ -1274,6 +1274,10 @@ def publish(repo, stack=False, title=None, body_file=None, ready=False):
     prs = []
     for entry in entries:
         pr = _update_pr(repo, entry, base_repo, head_repo, title, body, ready)
+        if entry["pr"] is None:
+            logbook.record_created_request(
+                pr["url"], repo.branches[entry["branch"]]["path"]
+            )
         repo.branches[entry["branch"]]["pr"] = pr
         repo.save()
         repo.alias(entry["branch"], pr)

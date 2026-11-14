@@ -149,6 +149,7 @@ class GitLabFixture(unittest.TestCase):
             {
                 "MY_GIT_BACKTRACKING_INFO_LOCAL": str(self.root / "backtracking"),
                 "MY_GIT_BACKTRACKING_INFO_REMOTE": "",
+                "AGENT_LOGBOOK_DIR": str(self.root / "logbook"),
             },
         )
         patch.start()
@@ -809,6 +810,13 @@ class GitLabTests(GitLabFixture):
         self.assertFalse(self.api_calls)
         self.assertEqual(len(self.repo.worktrees()), 1)
 
+    @mock.patch.dict(
+        os.environ,
+        {
+            "CODEX_THREAD_ID": "gitlab-publication-session",
+            "AGENT_LOGBOOK_SESSION_ID": "",
+        },
+    )
     def test_owned_publish_creates_draft_mr_in_source_fork_and_updates_ready(self):
         repo = self.owned_branch()
         before = self.tracking(repo)
@@ -838,6 +846,15 @@ class GitLabTests(GitLabFixture):
         self.assertEqual(self.tracking(repo), before)
         self.assertFalse(any(method == "POST" for method, _, _ in self.api_calls))
         self.assert_checkouts()
+        records = list((self.root / "logbook" / "events").glob("*/*.json"))
+        self.assertEqual(len(records), 1)
+        event = json.loads(records[0].read_text())
+        self.assertEqual(event["session_id"], "gitlab-publication-session")
+        self.assertEqual(event["cwd"], str(repo.root))
+        created = [link for link in event["links"] if link["relation"] == "created"]
+        self.assertEqual(
+            [link["display"] for link in created], [result["prs"][0]["url"]]
+        )
 
     def test_stack_commands_fail_clearly_before_api_or_git_mutation(self):
         repo = self.owned_branch()

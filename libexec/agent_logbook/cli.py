@@ -153,7 +153,9 @@ def _local_location(session):
 
 
 def _matching(sessions, query, cwd):
-    canonical = resources.normalize(query, cwd=cwd)
+    request = resources.request_selector(query)
+    canonical = None if request else resources.normalize(query, cwd=cwd)
+    canonical_request = resources.request_identity(canonical) if canonical else None
     exact = []
     possible = []
     needle = query.casefold()
@@ -168,6 +170,15 @@ def _matching(sessions, query, cwd):
     for session in sessions:
         links = []
         for link in session.get("links", []):
+            if request:
+                identity = resources.request_identity(link)
+                if (
+                    identity
+                    and identity["number"] == request["number"]
+                    and request["provider"] in (None, identity["provider"])
+                ):
+                    links.append(link)
+                continue
             matches_file = False
             if link.get("kind") == "file":
                 display = link.get("display", "")
@@ -177,7 +188,15 @@ def _matching(sessions, query, cwd):
                     or absolute
                     and str(Path(display).expanduser().resolve()) == absolute
                 )
-            if link.get("key") == canonical["key"] or matches_file:
+            linked_request = (
+                resources.request_identity(link) if canonical_request else None
+            )
+            if (
+                link.get("key") == canonical["key"]
+                or matches_file
+                or linked_request
+                and linked_request["key"] == canonical_request["key"]
+            ):
                 links.append(link)
         if session["session_id"] == query or links:
             exact.append({**session, "match": "exact", "matched_links": links})
@@ -186,9 +205,32 @@ def _matching(sessions, query, cwd):
         hints.extend(session.get("notes", []))
         hints.extend(link.get("display", "") for link in session.get("links", []))
         hints.extend(link.get("key", "") for link in session.get("links", []))
-        if any(needle in str(hint).casefold() for hint in hints):
+        if any(
+            re.search(
+                r"(?<![0-9])" + re.escape(needle) + r"(?![0-9])", str(hint).casefold()
+            )
+            if request
+            else needle in str(hint).casefold()
+            for hint in hints
+        ):
             possible.append({**session, "match": "possible", "matched_links": []})
     return exact if exact else possible
+
+
+def _matched_requests(links):
+    identities = {}
+    for link in links:
+        identity = resources.request_identity(link)
+        if identity:
+            identities.setdefault(identity["key"], identity)
+    return list(identities.values())
+
+
+def _relations(links):
+    relations = {link.get("relation", "") for link in links} - {"", "workspace"}
+    if relations:
+        return ", ".join(relation.title() for relation in sorted(relations))
+    return "Context only" if links else "None"
 
 
 def _here(sessions, cwd):
@@ -344,8 +386,19 @@ def _find(args, directory=None):
             if args.command == "find"
             else _here(sessions, cwd)
         )
+    request_query = args.command == "find" and resources.request_selector(query)
+    request_identities = (
+        _matched_requests(
+            [link for session in matches for link in session["matched_links"]]
+        )
+        if request_query
+        else []
+    )
+    ambiguous_request = len(request_identities) > 1
     saved_names = nicknames.load(directory)
     for session in matches:
+        if request_query:
+            session["matched_requests"] = _matched_requests(session["matched_links"])
         session["nicknames"] = [
             name
             for name, target in saved_names.items()
@@ -368,7 +421,13 @@ def _find(args, directory=None):
             else "history_unavailable"
         )
     if args.json:
-        print(json.dumps({"query": query, "matches": matches}, indent=2))
+        result = {"query": query, "matches": matches}
+        if request_query:
+            result.update(
+                request_identities=request_identities,
+                ambiguous_request=ambiguous_request,
+            )
+        print(json.dumps(result, indent=2))
         return 0 if matches else 1
     if not matches:
         print(
@@ -380,6 +439,7 @@ def _find(args, directory=None):
         len(matches) == 1
         and matches[0]["match"] == "exact"
         and not args.list
+        and not ambiguous_request
         and matches[0]["resume_command"] is not None
     ):
         command = matches[0]["resume_command"]
@@ -390,15 +450,30 @@ def _find(args, directory=None):
         )
         print(f"Resuming {matches[0]['session_id']}{label}", flush=True)
         return subprocess.run(command, check=False).returncode
-    for session in matches:
-        relations = sorted(
-            {link.get("relation", "") for link in session["matched_links"]} - {""}
-        )
+    if ambiguous_request:
         print(
-            f"{session['session_id']}  {_line(session.get('updated_at', ''), 32)}  {session['match']}  {','.join(relations)}"
+            "This number matches multiple requests; choose a full URL or OWNER/REPO#NUMBER."
+        )
+    for index, session in enumerate(matches):
+        if index:
+            print("-" * 100)
+        print(
+            f"{session['session_id']}  {_line(session.get('updated_at', ''), 32)}  {session['match']}"
         )
         if session["nicknames"]:
             print(f"  nicknames: {', '.join(session['nicknames'])}")
+        print(f"  Relations: {_relations(session['matched_links'])}")
+        for identity in session.get("matched_requests", []):
+            suffix = ""
+            if ambiguous_request:
+                links = [
+                    link
+                    for link in session["matched_links"]
+                    if (linked_request := resources.request_identity(link))
+                    and linked_request["key"] == identity["key"]
+                ]
+                suffix = f" ({_relations(links)})"
+            print(f"  Request: {_line(identity['display'])}{suffix}")
         hint = session.get("note") or session.get("title") or session.get("cwd")
         if hint:
             print(f"  {_line(hint)}")
@@ -422,6 +497,7 @@ def _find(args, directory=None):
                 f"  Saved history is unavailable here; resume on a recorded host with: codex resume {shlex.quote(session['session_id'])}"
             )
     if any(session["match"] == "possible" for session in matches):
+        print("-" * 100)
         print(
             "Possible matches come from recorded hints; inspect them before resuming."
         )

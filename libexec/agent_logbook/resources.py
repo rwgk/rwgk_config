@@ -10,6 +10,53 @@ from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 from .context import workspace
 
 
+def request_selector(value):
+    """Recognize global request-number searches without consulting a checkout."""
+    match = re.fullmatch(r"(?:(pr|mr))?([0-9]+)", value, re.IGNORECASE)
+    if match is None:
+        return None
+    return {
+        "provider": {"pr": "github", "mr": "gitlab"}.get((match[1] or "").lower()),
+        "number": int(match[2]),
+    }
+
+
+def request_identity(link):
+    """Read a request's identity from an existing canonical resource link."""
+    key = link.get("key", "")
+    github = re.fullmatch(r"github:([^/\s]+)/([^#\s]+)#([0-9]+)", key)
+    if github:
+        return {
+            "key": key,
+            "provider": "github",
+            "number": int(github[3]),
+            "display": link.get("display") or key,
+        }
+    if not key.startswith("url:"):
+        return None
+    parsed = urlsplit(key[4:])
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    gitlab = re.match(r"^/(.+)/-/merge_requests/([0-9]+)(?:/|$)", parsed.path)
+    if gitlab is None:
+        return None
+    url = urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/{gitlab[1]}/-/merge_requests/{int(gitlab[2])}",
+            "",
+            "",
+        )
+    )
+    return {
+        "key": "url:" + url,
+        "provider": "gitlab",
+        "number": int(gitlab[2]),
+        "display": url,
+    }
+
+
 def normalize(value, cwd=None):
     value = str(value).strip()
     if not value or "\0" in value or "\n" in value:
