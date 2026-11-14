@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 from .core import WTError, request_prefix
+from .platform_support import fsync_directory
 
 
 def _git(repo, *args, cwd=None):
@@ -105,11 +106,7 @@ def _atomic_json(path, value):
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        fsync_directory(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

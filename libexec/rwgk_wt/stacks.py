@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import sys
 from pathlib import Path
@@ -148,6 +147,8 @@ def view(repo):
 @contextlib.contextmanager
 def catalog_lock(repo):
     """Hold extension locks, allowing nested lifecycle helpers on the same Repo."""
+    import fcntl
+
     depth = getattr(repo, "_wt_stack_lock_depth", 0)
     if depth:
         repo._wt_stack_lock_depth = depth + 1

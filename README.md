@@ -179,8 +179,9 @@ gh extension install github/gh-stack     # not installed
 
 The check is quiet on success and shared by the stack helpers. Local navigation,
 help, previews, and the read-only checker remain available for diagnosis without
-a compatible extension. Native Windows Python lacks the POSIX locking used by
-this engine.
+a compatible extension. The full `wt` engine requires POSIX; the standalone
+`git_branch_D_track_hash.py` helper also supports native Windows Python under
+Git Bash.
 
 `wt` is a Bash function that runs the `git-wt` engine and changes directory after
 successful navigation. Start a fresh shell after installing these changes. Both
@@ -777,6 +778,8 @@ catalog entries, branches owned by any registered worktree (including a missing
 checkout), and branches reserved by an unfinished Git operation. It does not
 register the repository or change Git remotes. Bash completion supplies local
 branch names. The output includes the full SHA, record path, and recovery ref.
+On Windows, it uses native file locking and keeps the same recovery records and
+refusal checks; `fcntl` is not required.
 To inspect and recreate a deleted branch from the printed recovery ref:
 
 ```bash

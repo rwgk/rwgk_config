@@ -8,13 +8,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libexec"))
-from rwgk_wt import lifecycle, local_branch
+from rwgk_wt import lifecycle, local_branch, platform_support
 from rwgk_wt.core import Repo, WTError
 
 WORKTREE_ROOT = os.environ.get("WT_TEST_WORKTREE_ROOT")
@@ -77,6 +78,63 @@ class LocalBranchDeletionTests(unittest.TestCase):
     def invoke(self, *args):
         return subprocess.run(
             [str(ROOT / "bin/git_branch_D_track_hash.py"), *args],
+            cwd=self.primary,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def invoke_without_fcntl(self, *args):
+        # Exercise native-Windows dependencies in a fresh process. Import
+        # subprocess before injecting msvcrt so Linux keeps its POSIX backend.
+        bootstrap = textwrap.dedent(
+            """
+            import builtins, os, runpy, subprocess, sys, types
+
+            original_import = builtins.__import__
+            def without_fcntl(name, *args, **kwargs):
+                if name == "fcntl":
+                    raise ModuleNotFoundError("No module named 'fcntl'")
+                return original_import(name, *args, **kwargs)
+            builtins.__import__ = without_fcntl
+
+            locked = set()
+            def locking(fd, mode, count):
+                assert count == 1 and os.lseek(fd, 0, os.SEEK_CUR) == 0
+                if mode == 1:
+                    assert fd not in locked
+                    locked.add(fd)
+                else:
+                    assert mode == 2 and fd in locked
+                    locked.remove(fd)
+            sys.modules["msvcrt"] = types.SimpleNamespace(
+                locking=locking, LK_NBLCK=1, LK_UNLCK=2)
+            sys.path.insert(0, sys.argv[1])
+            from rwgk_wt import platform_support
+            platform_support.IS_WINDOWS = True
+
+            original_open = os.open
+            def windows_open(path, *args, **kwargs):
+                if os.path.isdir(path):
+                    raise PermissionError("Windows cannot open a directory for fsync")
+                return original_open(path, *args, **kwargs)
+            os.open = windows_open
+            sys.argv = sys.argv[2:]
+            try:
+                runpy.run_path(sys.argv[0], run_name="__main__")
+            finally:
+                assert not locked, "Repository lock was not released"
+            """
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                bootstrap,
+                str(ROOT / "libexec"),
+                str(ROOT / "bin/git_branch_D_track_hash.py"),
+                *args,
+            ],
             cwd=self.primary,
             text=True,
             capture_output=True,
@@ -147,6 +205,53 @@ class LocalBranchDeletionTests(unittest.TestCase):
         self.assertIn(recovery, result.stdout)
         self.git("branch", self.branch, recovery)
         self.assert_branch()
+
+    def test_windows_without_fcntl_preserves_recovery_and_refusal_checks(self):
+        result = self.invoke_without_fcntl("main")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assert_branch(self.base, "main")
+        self.assertFalse(self.saved_records())
+
+        result = self.invoke_without_fcntl(self.branch)
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertFalse(
+            self.git("show-ref", "--verify", "refs/heads/" + self.branch, check=False)
+        )
+        record = json.loads(self.saved_records()[0].read_text())
+        self.assertEqual(record["status"], "complete")
+        self.assertEqual(record["local_oid"], self.tip)
+        self.assertEqual(
+            self.git("rev-parse", record["snapshots"][0]["recovery_ref"]), self.tip
+        )
+
+    def test_pending_restack_is_reported_without_fcntl(self):
+        repo = Repo(self.primary, initialized=False)
+        repo.config.update(key="fixture", primary=str(self.primary), trunk="main")
+        repo.state["submodule_rebase"] = {"phase": "aligning", "captured": []}
+        repo.save()
+        result = self.invoke_without_fcntl(self.branch)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("restack has pending submodule work", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assert_branch()
+        self.assertFalse(self.saved_records())
+
+    @unittest.skipIf(os.name == "nt", "POSIX interprocess lock check")
+    def test_contending_process_cannot_delete_branch(self):
+        lock_path = self.primary / ".git/rwgk-wt.lock"
+        with lock_path.open("a+b") as stream:
+            platform_support.lock_exclusive(stream)
+            try:
+                result = self.invoke(self.branch)
+            finally:
+                platform_support.unlock(stream)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another wt command is changing this repository", result.stderr)
+        self.assert_branch()
+        self.assertFalse(self.saved_records())
+        result = self.invoke(self.branch)
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
 
     def test_registered_ad_hoc_branch_does_not_change_catalog_and_managed_branch_is_refused(
         self,

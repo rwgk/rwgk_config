@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import contextvars
-import fcntl
 import hashlib
 import json
 import os
@@ -276,6 +275,8 @@ def _tracked_hook(path):
 
 def install(repo):
     """Wrap the active hook without replacing core.hooksPath or maintained files."""
+    import fcntl
+
     # Resolve the directory only: rev-parse of hooks/pre-push dereferences an
     # existing final symlink, which would overwrite its maintained target.
     directory = Path(

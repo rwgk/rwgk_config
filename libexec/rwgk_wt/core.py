@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .formatting import format_file_list
+from .platform_support import fsync_directory, lock_exclusive, unlock
 
 
 class WTError(Exception):
@@ -60,11 +60,7 @@ def atomic_json(path, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_directory(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -237,20 +233,23 @@ class Repo:
 
     @contextlib.contextmanager
     def locked(self):
-        with (self.common / "rwgk-wt.lock").open("a") as lock:
+        with (self.common / "rwgk-wt.lock").open("a+b") as lock:
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_exclusive(lock)
             except BlockingIOError as error:
                 raise WTError(
                     "Another wt command is changing this repository."
                 ) from error
-            # Reload after locking: constructors may have raced with a writer.
-            if self.state_path.exists():
-                self.state = json.loads(self.state_path.read_text())
-                self.config = self.state["config"]
-                self.branches = self.state["branches"]
-                self._infer_provider()
-            yield
+            try:
+                # Reload after locking: constructors may have raced with a writer.
+                if self.state_path.exists():
+                    self.state = json.loads(self.state_path.read_text())
+                    self.config = self.state["config"]
+                    self.branches = self.state["branches"]
+                    self._infer_provider()
+                yield
+            finally:
+                unlock(lock)
 
     def oid(self, ref):
         return self.git("rev-parse", "--verify", f"{ref}^{{commit}}")
