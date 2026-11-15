@@ -6,6 +6,12 @@ Ralf's personal configuration and commands.
 git clone https://github.com/rwgk/rwgk_config.git
 ```
 
+## Local CPython collection
+
+Use [`cpython_install.sh`](bin/cpython_install.sh) to build and select the local
+CPython collection. See [the collection guide](kb/cpython_collection.md) for its
+version policy, fresh-machine setup, refresh workflow, and agent testing guidance.
+
 ## Find and resume agent sessions
 
 `agent-logbook` records which Codex sessions worked on PRs, issues, Slack threads,
