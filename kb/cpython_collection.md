@@ -27,10 +27,9 @@ setting `LD_LIBRARY_PATH`.
 
 Existing installation directories are assumed healthy and left untouched.
 Refreshing skips existing `<version>_<variant>` prefixes and adds missing ones.
-Legacy directory names remain available through `list` and full-name activation;
-`path` selects the new naming scheme. Keep existing `TestVenv` environments and
-their base installations in place; refreshing the collection does not select a
-new interpreter for an existing project.
+Keep existing `TestVenv` environments and their base installations in place;
+refreshing the collection does not select a new interpreter for an existing
+project.
 If the installer finds its marker for an interrupted new installation, it
 stops instead of treating that prefix as complete. Inspect its persistent log
 and report the interrupted build; do not automatically overwrite the prefix.
@@ -40,7 +39,7 @@ and report the interrupted build; do not automatically overwrite the prefix.
 | Path | Purpose |
 | --- | --- |
 | `$W/forked/cpython` | Persistent source repository, with its primary checkout on `main` |
-| `$W/cpython_installs/<version>_<variant>` | New installations, such as `<version>_withgil` |
+| `$W/cpython_installs/<version>_<variant>` | Installations, such as `<version>_withgil` |
 | `$W/disposable_worktrees/cpython/<version>` | Detached release-tag source worktree used for building |
 | `$L`, when set | Persistent build and validation logs |
 | `$W/codex_scratch_space/logs/cpython-collection` | Log location when `L` is unset |
@@ -55,8 +54,8 @@ the primary CPython checkout.
 Each new installation records its release tag, source commit, compiler,
 configuration, build time, and log path in `build-info.txt` inside its own
 prefix. Build logs have names beginning `cpython_<version>_<variant>_`.
-Keep the collection root for installation directories: the former shared
-SHA summary is unnecessary because provenance travels with each installation.
+Keep the collection root for installation directories, with provenance inside
+each installation.
 
 ## Refresh the collection
 
@@ -166,9 +165,9 @@ python3 -VV
 source cpython_install.sh deactivate
 ```
 
-Use a name printed by `cpython_install.sh list`. Legacy installations may only
-provide `python3`; activation leaves their files untouched. Executing an ordinary
-child process cannot activate its parent shell.
+Use a name printed by `cpython_install.sh list`. Activation leaves installation
+files untouched. Executing an ordinary child process cannot activate its parent
+shell.
 
 ## Validation and choosing test versions
 

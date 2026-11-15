@@ -31,8 +31,7 @@ if "$installer" install 3.9.25 unknown >"$test_workspace/error" 2>&1; then
     exit 1
 fi
 
-mkdir "$W/cpython_installs/3.14.2_withgil" "$W/cpython_installs/3.14.10_withgil" \
-    "$W/cpython_installs/v3.14.99_legacy_default"
+mkdir "$W/cpython_installs/3.14.2_withgil" "$W/cpython_installs/3.14.10_withgil"
 [[ $("$installer" path 3.14) == "$W/cpython_installs/3.14.10_withgil/bin/python3" ]]
 [[ $("$installer" path 3.14.2) == "$W/cpython_installs/3.14.2_withgil/bin/python3" ]]
 printf 'failed build\n' >"$W/cpython_installs/3.14.10_withgil/.cpython-install-in-progress"
